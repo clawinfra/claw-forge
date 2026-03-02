@@ -24,13 +24,13 @@ export function ProgressBar({ passing, total, className = "" }: ProgressBarProps
 
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="flex justify-between text-xs font-medium text-slate-600">
+      <div className="flex justify-between text-xs font-medium text-slate-600 dark:text-slate-400">
         <span>Progress</span>
         <span>
           {passing}/{total} passing ({pct}%)
         </span>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+      <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${fillColour}`}
           style={{ width: `${pct}%` }}

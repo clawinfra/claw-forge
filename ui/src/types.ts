@@ -34,6 +34,10 @@ export interface Feature {
   created_at: string;
   started_at?: string;
   completed_at?: string;
+  /** Description (optional) */
+  description?: string;
+  /** Steps list (optional) */
+  steps?: string[];
 }
 
 // ── Provider / Pool ───────────────────────────────────────────────────────────
@@ -116,6 +120,8 @@ export interface KanbanColumn {
   statuses: FeatureStatus[];
   colorClass: string;
   headerClass: string;
+  darkColorClass: string;
+  darkHeaderClass: string;
 }
 
 export const KANBAN_COLUMNS: KanbanColumn[] = [
@@ -125,6 +131,8 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
     statuses: ["pending", "queued"],
     colorClass: "bg-slate-50 border-slate-200",
     headerClass: "bg-slate-100 text-slate-700",
+    darkColorClass: "dark:bg-slate-800/50 dark:border-slate-700",
+    darkHeaderClass: "dark:bg-slate-700 dark:text-slate-200",
   },
   {
     id: "in_progress",
@@ -132,6 +140,8 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
     statuses: ["running"],
     colorClass: "bg-blue-50 border-blue-200",
     headerClass: "bg-blue-100 text-blue-700",
+    darkColorClass: "dark:bg-blue-950/30 dark:border-blue-800",
+    darkHeaderClass: "dark:bg-blue-900/50 dark:text-blue-200",
   },
   {
     id: "completed",
@@ -139,6 +149,8 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
     statuses: ["completed"],
     colorClass: "bg-emerald-50 border-emerald-200",
     headerClass: "bg-emerald-100 text-emerald-700",
+    darkColorClass: "dark:bg-emerald-950/30 dark:border-emerald-800",
+    darkHeaderClass: "dark:bg-emerald-900/50 dark:text-emerald-200",
   },
   {
     id: "failed",
@@ -146,6 +158,8 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
     statuses: ["failed"],
     colorClass: "bg-red-50 border-red-200",
     headerClass: "bg-red-100 text-red-700",
+    darkColorClass: "dark:bg-red-950/30 dark:border-red-800",
+    darkHeaderClass: "dark:bg-red-900/50 dark:text-red-200",
   },
   {
     id: "blocked",
@@ -153,5 +167,36 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
     statuses: ["blocked"],
     colorClass: "bg-amber-50 border-amber-200",
     headerClass: "bg-amber-100 text-amber-700",
+    darkColorClass: "dark:bg-amber-950/30 dark:border-amber-800",
+    darkHeaderClass: "dark:bg-amber-900/50 dark:text-amber-200",
   },
 ];
+
+// ── Activity Log ──────────────────────────────────────────────────────────────
+
+export interface ActivityLogEntry {
+  id: number;
+  timestamp: Date;
+  type: WsEvent["type"];
+  message: string;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+export interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+}
+
+// ── Filter state ──────────────────────────────────────────────────────────────
+
+export interface FilterState {
+  search: string;
+  category: string;
+  statuses: Set<FeatureStatus>;
+}
+
+// ── App view mode ─────────────────────────────────────────────────────────────
+
+export type ViewMode = "kanban" | "graph";

@@ -45,7 +45,7 @@ function ProviderDot({ provider }: ProviderDotProps) {
     <div className="relative">
       <button
         type="button"
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/20 transition-colors"
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
         onClick={() => setShowTip((v) => !v)}
         title={provider.name}
       >
@@ -54,39 +54,39 @@ function ProviderDot({ provider }: ProviderDotProps) {
             provider.health === "degraded" ? "animate-pulse" : ""
           }`}
         />
-        <span className="text-xs font-medium text-slate-700 truncate max-w-[80px]">
+        <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-[80px]">
           {provider.name}
         </span>
       </button>
 
       {showTip && (
-        <div className="absolute top-full left-0 mt-1 z-50 w-56 rounded-lg border border-slate-200 bg-white shadow-lg p-3 text-xs space-y-1">
-          <div className="font-semibold text-slate-800 mb-1">{provider.name}</div>
+        <div className="absolute top-full left-0 mt-1 z-50 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 text-xs space-y-1">
+          <div className="font-semibold text-slate-800 dark:text-slate-100 mb-1">{provider.name}</div>
           <div className="flex justify-between">
-            <span className="text-slate-500">Type</span>
-            <span className="font-mono">{provider.type}</span>
+            <span className="text-slate-500 dark:text-slate-400">Type</span>
+            <span className="font-mono text-slate-700 dark:text-slate-300">{provider.type}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500">RPM</span>
-            <span>
+            <span className="text-slate-500 dark:text-slate-400">RPM</span>
+            <span className="text-slate-700 dark:text-slate-300">
               {provider.rpm}/{provider.max_rpm}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500">Latency</span>
-            <span>{Math.round(provider.avg_latency_ms)}ms</span>
+            <span className="text-slate-500 dark:text-slate-400">Latency</span>
+            <span className="text-slate-700 dark:text-slate-300">{Math.round(provider.avg_latency_ms)}ms</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500">Circuit</span>
-            <span>{circuitLabel(provider.circuit_state)}</span>
+            <span className="text-slate-500 dark:text-slate-400">Circuit</span>
+            <span className="text-slate-700 dark:text-slate-300">{circuitLabel(provider.circuit_state)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500">Cost</span>
-            <span>${provider.total_cost_usd.toFixed(3)}</span>
+            <span className="text-slate-500 dark:text-slate-400">Cost</span>
+            <span className="text-slate-700 dark:text-slate-300">${provider.total_cost_usd.toFixed(3)}</span>
           </div>
           <button
             type="button"
-            className="absolute top-2 right-2 text-slate-400 hover:text-slate-600"
+            className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             onClick={() => setShowTip(false)}
           >
             ✕
@@ -112,7 +112,7 @@ export function ProviderPoolStatus({
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="h-6 w-20 rounded-md bg-slate-200 animate-pulse"
+            className="h-6 w-20 rounded-md bg-slate-200 dark:bg-slate-700 animate-pulse"
           />
         ))}
       </div>
@@ -121,7 +121,7 @@ export function ProviderPoolStatus({
 
   if (providers.length === 0) {
     return (
-      <span className="text-xs text-slate-400 italic">No providers</span>
+      <span className="text-xs text-slate-400 dark:text-slate-500 italic">No providers</span>
     );
   }
 
