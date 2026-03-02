@@ -90,6 +90,7 @@ strict = true
 [tool.coverage.run]
 source = ["claw_forge"]
 branch = true
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 fail_under = 90
