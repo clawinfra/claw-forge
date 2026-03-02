@@ -5,19 +5,17 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from claw_forge.spec.parser import (
     FeatureItem,
     ProjectSpec,
-    TechStack,
     _assign_dependencies,
-    _parse_key_value_el,
 )
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
-TEMPLATE_XML = (Path(__file__).parent.parent.parent / "claw_forge" / "spec" / "app_spec.template.xml").read_text()
+TEMPLATE_XML = (
+    Path(__file__).parent.parent.parent / "claw_forge" / "spec" / "app_spec.template.xml"
+).read_text()
 
 MINIMAL_XML = textwrap.dedent("""\
     <project_specification>

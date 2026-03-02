@@ -32,7 +32,8 @@ class InitializerPlugin(BasePlugin):
         return (
             "You are a project analyzer. Examine the project structure, identify the "
             "language, framework, build system, and key files. Generate a comprehensive "
-            "session manifest that will help other agents understand and work with this project.\n\n"
+            "session manifest that will help other agents understand and work with this "
+            "project.\n\n"
             "Output a JSON manifest with: project_name, language, framework, description, "
             "key_files (with roles), build_commands, test_commands, and any special notes."
         )

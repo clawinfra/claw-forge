@@ -41,7 +41,7 @@ class ProjectSpec:
     raw_xml: str  # preserved for reference
 
     @classmethod
-    def from_file(cls, path: Path) -> "ProjectSpec":
+    def from_file(cls, path: Path) -> ProjectSpec:
         """Parse app_spec.txt (XML or plain text) into ProjectSpec."""
         content = path.read_text(encoding="utf-8")
         if "<project_specification" in content:
@@ -50,7 +50,7 @@ class ProjectSpec:
             return cls._parse_plain_text(content)
 
     @classmethod
-    def _parse_xml(cls, content: str) -> "ProjectSpec":
+    def _parse_xml(cls, content: str) -> ProjectSpec:
         """Parse AutoForge-style XML spec."""
         # Strip XML comments before parsing
         content_no_comments = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
@@ -172,7 +172,7 @@ class ProjectSpec:
         )
 
     @classmethod
-    def _parse_plain_text(cls, content: str) -> "ProjectSpec":
+    def _parse_plain_text(cls, content: str) -> ProjectSpec:
         """Parse claw-forge plain text spec (numbered features format)."""
         lines = content.splitlines()
         name = ""
