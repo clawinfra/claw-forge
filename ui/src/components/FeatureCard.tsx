@@ -18,6 +18,10 @@ import { AgentMascot } from "./AgentMascot";
 interface FeatureCardProps {
   feature: Feature;
   onClick?: () => void;
+  /** IDs of features implicated by the last regression failure */
+  implicatedFeatureIds?: number[];
+  /** Direct boolean flag — true when this feature is implicated in a regression */
+  implicatedInRegression?: boolean;
 }
 
 const STATUS_BADGE: Record<Feature["status"], string> = {
@@ -55,8 +59,20 @@ function shortId(id: string): string {
   return id.length > 8 ? `…${id.slice(-6)}` : id;
 }
 
-export function FeatureCard({ feature, onClick }: FeatureCardProps) {
+export function FeatureCard({
+  feature,
+  onClick,
+  implicatedFeatureIds = [],
+  implicatedInRegression = false,
+}: FeatureCardProps) {
   const depCount = feature.depends_on.length;
+  const featureNumId = Number(feature.id);
+  const isImplicated =
+    implicatedInRegression ||
+    (implicatedFeatureIds.length > 0 && implicatedFeatureIds.includes(featureNumId));
+  const isFixingRegression = (
+    feature as Feature & { is_fixing_regression?: boolean }
+  ).is_fixing_regression;
 
   return (
     <div
@@ -67,6 +83,7 @@ export function FeatureCard({ feature, onClick }: FeatureCardProps) {
         ${STATUS_BORDER[feature.status]}
         ${feature.status === "failed" ? "border-r-red-200 dark:border-r-red-900" : ""}
         ${feature.status === "running" ? "border-r-blue-200 dark:border-r-blue-900" : ""}
+        ${isFixingRegression ? "animate-pulse border-yellow-400 dark:border-yellow-400" : ""}
       `}
     >
       {/* Header: ID + status */}
@@ -80,6 +97,14 @@ export function FeatureCard({ feature, onClick }: FeatureCardProps) {
           {feature.status}
         </span>
       </div>
+
+      {/* Regression badge */}
+      {isImplicated && (
+        <span
+          className="inline-block ml-1 h-2.5 w-2.5 rounded-full bg-red-500 shrink-0"
+          title="Regression detected — click for details"
+        />
+      )}
 
       {/* Feature name */}
       <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100 leading-snug line-clamp-2">

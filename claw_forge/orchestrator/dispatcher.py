@@ -4,6 +4,7 @@ Supports:
 - YOLO mode: skip human input, max concurrency (CPU count), aggressive retry
 - Pause/resume: drain mode — finish in-flight agents, don't start new ones
 - Human input: tasks that move to ``needs_human`` are skipped until answered
+- ParallelReviewer: background regression tests triggered after N features
 """
 
 from __future__ import annotations
@@ -12,9 +13,13 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from claw_forge.state.scheduler import Scheduler, TaskNode
+
+if TYPE_CHECKING:
+    from claw_forge.orchestrator.reviewer import ParallelReviewer
+    from claw_forge.state.service import AgentStateService
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,7 @@ class Dispatcher:
         self._semaphore = asyncio.Semaphore(self._config.max_concurrency)
         self._scheduler = Scheduler()
         self._paused: bool = False
+        self._reviewer: ParallelReviewer | None = None
 
         if self._config.yolo:
             logger.warning(_YOLO_WARNING)
@@ -148,6 +154,31 @@ class Dispatcher:
         """Clear the paused flag and allow new waves to start."""
         logger.info("Dispatcher resumed — normal operation")
         self._paused = False
+
+    # ── Regression reviewer ──────────────────────────────────────────────────
+
+    async def start_reviewer(
+        self,
+        project_dir: str,
+        state_service: AgentStateService,
+        interval_features: int = 3,
+    ) -> None:
+        """Create and start a :class:`ParallelReviewer`."""
+        from claw_forge.orchestrator.reviewer import ParallelReviewer
+
+        self._reviewer = ParallelReviewer(
+            project_dir=project_dir,
+            state_service=state_service,
+            interval_features=interval_features,
+        )
+        state_service._reviewer = self._reviewer
+        await self._reviewer.start()
+
+    async def stop_reviewer(self) -> None:
+        """Stop the background reviewer if running."""
+        if self._reviewer is not None:
+            await self._reviewer.stop()
+            self._reviewer = None
 
     # ── Task management ──────────────────────────────────────────────────────
 
@@ -206,6 +237,9 @@ class Dispatcher:
                     task_result = future.result()
                     result.completed[task_id] = task_result or {}
                     self._scheduler.mark_completed(task_id)
+                    # Notify reviewer of feature completion
+                    if self._reviewer is not None:
+                        self._reviewer.notify_feature_completed()
 
         return result
 

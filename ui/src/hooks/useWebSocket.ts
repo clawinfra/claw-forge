@@ -9,6 +9,7 @@ import type {
   ActivityLogEntry,
   Feature,
   ProviderStatus,
+
   Toast,
   WsEvent,
 } from "../types";
@@ -34,6 +35,12 @@ function eventToMessage(event: WsEvent): string {
       return `Cost update: $${event.total_cost.toFixed(3)} total (+$${event.session_cost.toFixed(3)})`;
     case "pool_update":
       return `Pool update: ${event.providers.length} providers`;
+    case "regression_started":
+      return `🔄 Regression run #${event.run_number} started`;
+    case "regression_result":
+      return event.passed
+        ? `✅ Regression #${event.run_number}: ${event.total} passing (${event.duration_ms}ms)`
+        : `❌ Regression #${event.run_number}: ${event.failed} failed — ${event.failed_tests.join(", ")}`;
   }
 }
 

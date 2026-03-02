@@ -105,12 +105,31 @@ export interface CostUpdateEvent {
   session_cost: number;
 }
 
+export interface RegressionStartedEvent {
+  type: "regression_started";
+  run_number: number;
+}
+
+export interface RegressionResultEvent {
+  type: "regression_result";
+  passed: boolean;
+  total: number;
+  failed: number;
+  failed_tests: string[];
+  duration_ms: number;
+  run_number: number;
+  implicated_feature_ids: number[];
+  output: string;
+}
+
 export type WsEvent =
   | FeatureUpdateEvent
   | PoolUpdateEvent
   | AgentStartedEvent
   | AgentCompletedEvent
-  | CostUpdateEvent;
+  | CostUpdateEvent
+  | RegressionStartedEvent
+  | RegressionResultEvent;
 
 // ── Kanban columns ────────────────────────────────────────────────────────────
 

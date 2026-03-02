@@ -31,6 +31,7 @@ import {
   Inbox,
 } from "lucide-react";
 import { FeatureCard } from "./components/FeatureCard";
+import { RegressionHealthBar } from "./components/RegressionHealthBar";
 import { ProgressBar } from "./components/ProgressBar";
 import { ProviderPoolStatus } from "./components/ProviderPoolStatus";
 import { FilterBar } from "./components/FilterBar";
@@ -159,6 +160,11 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     statuses: new Set(),
   });
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Regression implicated feature IDs
+  const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<number[]>(
+    [],
+  );
 
   // Activity log panel
   const [logOpen, setLogOpen] = useState(false);
@@ -324,6 +330,11 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
         </div>
       </header>
 
+      {/* ── Regression health bar ────────────────────────────────────── */}
+      <RegressionHealthBar
+        onImplicatedUpdate={setImplicatedFeatureIds}
+      />
+
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
       <FilterBar
         filters={filters}
@@ -377,6 +388,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                               key={feature.id}
                               feature={feature}
                               onClick={() => setSelectedFeatureId(feature.id)}
+                              implicatedFeatureIds={implicatedFeatureIds}
                             />
                           ))}
                       {!featuresLoading && cards.length === 0 && (

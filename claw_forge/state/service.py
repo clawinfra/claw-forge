@@ -151,6 +151,8 @@ class AgentStateService:
         self._ws_clients: list[WebSocket] = []
         # Kanban UI real-time broadcast manager
         self.ws_manager: ConnectionManager = ConnectionManager()
+        # Regression reviewer reference (set by dispatcher)
+        self._reviewer: Any | None = None
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -426,6 +428,23 @@ class AgentStateService:
                     }
                     for t in tasks
                 ]
+
+        # ── Regression status endpoint ────────────────────────────────────
+
+        @app.get("/regression/status")
+        async def regression_status() -> dict[str, Any]:
+            """Return the last regression result and run count.
+
+            Used by the Kanban health bar to poll for regression state.
+            """
+            reviewer = self._reviewer
+            if reviewer is None or reviewer.run_count == 0:
+                return {"run_count": 0, "last_result": None}
+            last = reviewer.last_result
+            return {
+                "run_count": reviewer.run_count,
+                "last_result": last.to_dict() if last else None,
+            }
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]

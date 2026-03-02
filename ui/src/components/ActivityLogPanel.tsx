@@ -17,6 +17,8 @@ const EVENT_BADGE: Record<WsEvent["type"], { bg: string; label: string }> = {
   feature_update: { bg: "bg-purple-500", label: "FEATURE" },
   cost_update: { bg: "bg-amber-500", label: "COST" },
   pool_update: { bg: "bg-slate-400", label: "POOL" },
+  regression_started: { bg: "bg-yellow-500", label: "REGRESSION" },
+  regression_result: { bg: "bg-orange-500", label: "REGRESSION" },
 };
 
 function formatTimestamp(d: Date): string {
