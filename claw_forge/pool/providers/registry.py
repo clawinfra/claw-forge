@@ -15,6 +15,9 @@ _PROVIDER_CLASSES: dict[ProviderType, str] = {
     ProviderType.AZURE: "claw_forge.pool.providers.azure.AzureProvider",
     ProviderType.VERTEX: "claw_forge.pool.providers.vertex.VertexProvider",
     ProviderType.OPENAI_COMPAT: "claw_forge.pool.providers.openai_compat.OpenAICompatProvider",
+    ProviderType.ANTHROPIC_COMPAT: "claw_forge.pool.providers.anthropic_compat.AnthropicCompatProvider",
+    # anthropic_oauth auto-reads the Claude CLI token and delegates to AnthropicProvider
+    ProviderType.ANTHROPIC_OAUTH: "claw_forge.pool.providers.anthropic.AnthropicProvider",
 }
 
 
@@ -28,10 +31,30 @@ def _import_class(dotted_path: str) -> type[BaseProvider]:
 
 
 def create_provider(config: ProviderConfig) -> BaseProvider:
-    """Create a provider instance from config."""
-    dotted = _PROVIDER_CLASSES.get(config.provider_type)
+    """Create a provider instance from config.
+
+    For ``anthropic_oauth`` provider type, the Claude CLI OAuth token is
+    auto-read from disk and injected into ``config.oauth_token`` before
+    the :class:`~claw_forge.pool.providers.anthropic.AnthropicProvider` is
+    instantiated.  A ``ValueError`` is raised if no token can be found.
+    """
+    ptype = config.provider_type
+    if ptype == ProviderType.ANTHROPIC_OAUTH:
+        import dataclasses
+
+        import claw_forge.pool.providers.oauth as _oauth_mod
+
+        token = _oauth_mod.read_claude_oauth_token()
+        if not token:
+            raise ValueError(
+                f"anthropic_oauth provider '{config.name}': no Claude OAuth token found. "
+                "Run `claude login` first, or set oauth_token explicitly."
+            )
+        config = dataclasses.replace(config, oauth_token=token)
+
+    dotted = _PROVIDER_CLASSES.get(ptype)
     if not dotted:
-        raise ValueError(f"Unknown provider type: {config.provider_type}")
+        raise ValueError(f"Unknown provider type: {ptype}")
     cls = _import_class(dotted)
     return cls(config)
 

@@ -1,4 +1,29 @@
-"""Direct Anthropic API provider."""
+"""Anthropic-compatible provider for proxies exposing the Anthropic API format.
+
+Use this when you have a proxy at a custom ``base_url`` that accepts the same
+``x-api-key`` header and ``/v1/messages`` endpoint as ``api.anthropic.com``.
+
+Supports:
+- Custom ``base_url`` (required)
+- Custom ``api_key`` (optional — set to ``null`` for internal no-auth proxies)
+- Optional ``model_map`` for renaming models at the proxy level
+- Same rate-limit / error classification as :class:`AnthropicProvider`
+
+Config example::
+
+    providers:
+      my-proxy:
+        type: anthropic_compat
+        api_key: sk-my-proxy-key
+        base_url: https://proxy.example.com/v1
+        model_map:
+          claude-sonnet-4-6: my-claude-sonnet   # optional rename
+
+      internal-gateway:
+        type: anthropic_compat
+        api_key: null                            # no auth for internal proxy
+        base_url: http://internal-gateway:8080/v1
+"""
 
 from __future__ import annotations
 
@@ -16,69 +41,42 @@ from claw_forge.pool.providers.base import (
 )
 
 
-class AnthropicProvider(BaseProvider):
-    """Provider for direct Anthropic API access.
+class AnthropicCompatProvider(BaseProvider):
+    """Provider for Anthropic-format API proxies.
 
-    Supports three auth modes (in order of precedence):
-    1. ``oauth_token`` — Bearer token from ``claude login``
-    2. ``oauth_token_file`` — Path to file containing the token (auto-refreshed on 401)
-    3. ``api_key`` — Classic ``x-api-key`` header
+    Identical wire format to :class:`AnthropicProvider` (``x-api-key`` header,
+    ``/v1/messages`` endpoint, ``anthropic-version`` header) but targets an
+    arbitrary ``base_url`` instead of ``https://api.anthropic.com``.
+
+    Key differences from :class:`OpenAICompatProvider`:
+    - Uses ``x-api-key`` header (not ``Authorization: Bearer``)
+    - Hits ``/v1/messages`` (not ``/v1/chat/completions``)
+    - Sends ``anthropic-version: 2023-06-01`` header
+    - Parses Anthropic-style response (``content`` blocks, ``usage.input_tokens``)
+    - Supports ``api_key: null`` for no-auth internal proxies
     """
 
     API_VERSION = "2023-06-01"
 
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
-        if not config.api_key and not config.oauth_token and not config.oauth_token_file:
+        if not config.base_url:
             raise ValueError(
-                f"Anthropic provider '{config.name}' requires api_key, oauth_token, "
-                "or oauth_token_file"
+                f"AnthropicCompat provider '{config.name}' requires base_url"
             )
-        self._base_url = config.base_url or "https://api.anthropic.com"
-        self._client = self._build_client(config)
-
-    def _build_client(self, config: ProviderConfig) -> httpx.AsyncClient:
-        """Build the HTTP client with appropriate auth headers."""
         headers: dict[str, str] = {
             "anthropic-version": self.API_VERSION,
             "content-type": "application/json",
         }
-        # OAuth token takes priority over api_key
-        token = config.oauth_token or self._read_token_file(config.oauth_token_file)
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        elif config.api_key:
+        if config.api_key:
             headers["x-api-key"] = config.api_key
-        return httpx.AsyncClient(
-            base_url=self._base_url,
+        # Else: no auth header — internal proxies that skip auth entirely
+
+        self._client = httpx.AsyncClient(
+            base_url=config.base_url.rstrip("/"),
             headers=headers,
             timeout=httpx.Timeout(300.0, connect=10.0),
         )
-
-    @staticmethod
-    def _read_token_file(path: str | None) -> str | None:
-        """Read a token from a file path, returning None on any error."""
-        if not path:
-            return None
-        try:
-            from pathlib import Path
-
-            text = Path(path).read_text().strip()
-            return text or None
-        except Exception:
-            return None
-
-    async def _refresh_client_from_file(self) -> None:
-        """Re-read oauth_token_file and rebuild client (called on 401)."""
-        if self._config.oauth_token_file:
-            new_token = self._read_token_file(self._config.oauth_token_file)
-            if new_token:
-                await self._client.aclose()
-                # Temporarily set oauth_token to the new value for client build
-                old_token = self._config.oauth_token
-                object.__setattr__(self._config, "oauth_token", new_token)
-                self._client = self._build_client(self._config)
-                object.__setattr__(self._config, "oauth_token", old_token)
 
     async def execute(
         self,
@@ -116,11 +114,10 @@ class AnthropicProvider(BaseProvider):
                 retry_after=float(retry_after) if retry_after else None,
             )
         if resp.status_code == 401:
-            # For oauth_token_file, try refreshing the token once
-            if self._config.oauth_token_file:
-                await self._refresh_client_from_file()
-                raise ProviderError("OAuth token expired — refreshed, retry", retryable=True, status_code=401)
-            raise AuthenticationError("Invalid API key or OAuth token")
+            raise AuthenticationError("Invalid API key")
+        if resp.status_code == 529:
+            # Anthropic overload
+            raise RateLimitError("API overloaded (529)")
         if resp.status_code >= 500:
             raise ProviderError(f"Server error {resp.status_code}", retryable=True)
         if resp.status_code >= 400:
@@ -132,7 +129,9 @@ class AnthropicProvider(BaseProvider):
 
         data = resp.json()
         content_blocks = data.get("content", [])
-        text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
+        text = "".join(
+            b.get("text", "") for b in content_blocks if b.get("type") == "text"
+        )
         usage = data.get("usage", {})
 
         return ProviderResponse(

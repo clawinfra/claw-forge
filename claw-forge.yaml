@@ -10,7 +10,36 @@ pool:
   backoff_max: 30.0
 
 providers:
-  # Direct Anthropic — multiple keys for rotation
+  # ── Claude CLI OAuth (from `claude login`) — zero-config ──────────────────
+  claude-oauth:
+    type: anthropic_oauth
+    priority: 1
+    # Token is auto-read from ~/.claude/.credentials.json (or standard paths).
+    # Run `claude login` once and claw-forge picks it up automatically.
+
+  # ── Explicit OAuth token (env var) ────────────────────────────────────────
+  claude-oauth-explicit:
+    type: anthropic
+    oauth_token: ${CLAUDE_OAUTH_TOKEN}
+    priority: 2
+
+  # ── Anthropic-format proxy (x-api-key + /v1/messages) ────────────────────
+  anthropic-proxy-1:
+    type: anthropic_compat
+    api_key: ${PROXY_1_KEY}
+    base_url: https://proxy1.example.com/v1
+    priority: 2
+    model_map:
+      claude-sonnet-4-20250514: claude-sonnet-4-5-20250929  # proxy uses older name
+
+  # ── No-auth internal proxy (e.g. k8s sidecar) ────────────────────────────
+  internal-gateway:
+    type: anthropic_compat
+    api_key: null                         # no auth needed for internal proxy
+    base_url: http://internal-gateway:8080/v1
+    priority: 3
+
+  # ── Direct Anthropic — multiple keys for rotation ─────────────────────────
   anthropic-primary:
     type: anthropic
     api_key: ${ANTHROPIC_API_KEY_1}

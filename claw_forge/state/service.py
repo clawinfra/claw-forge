@@ -20,6 +20,95 @@ from claw_forge.state.models import Base, Event, Session, Task
 logger = logging.getLogger(__name__)
 
 
+class ConnectionManager:
+    """Manages active WebSocket connections and broadcasts structured events.
+
+    All broadcast methods are fire-and-forget with graceful handling of
+    disconnected clients — stale connections are pruned automatically.
+
+    Event types emitted::
+
+        {"type": "feature_update",  "feature": {...}}
+        {"type": "pool_update",     "providers": [...]}
+        {"type": "agent_started",   "session_id": "...", "feature_id": 42}
+        {"type": "agent_completed", "session_id": "...", "feature_id": 42, "passed": True}
+        {"type": "cost_update",     "total_cost": 1.23, "session_cost": 0.05}
+    """
+
+    def __init__(self) -> None:
+        self._connections: list[WebSocket] = []
+
+    @property
+    def active_count(self) -> int:
+        """Number of currently connected WebSocket clients."""
+        return len(self._connections)
+
+    async def connect(self, websocket: WebSocket) -> None:
+        """Accept and register a new WebSocket connection."""
+        await websocket.accept()
+        self._connections.append(websocket)
+        logger.debug("WS client connected; total=%d", self.active_count)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        """Remove a WebSocket connection (safe to call even if not present)."""
+        try:
+            self._connections.remove(websocket)
+        except ValueError:
+            pass
+        logger.debug("WS client disconnected; total=%d", self.active_count)
+
+    async def broadcast(self, payload: dict[str, Any]) -> None:
+        """Send *payload* as JSON to all connected clients.
+
+        Connections that raise any error are removed from the pool.
+        """
+        dead: list[WebSocket] = []
+        for ws in list(self._connections):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+    # ── Typed broadcast helpers ──────────────────────────────────────────────
+
+    async def broadcast_feature_update(self, feature: dict[str, Any]) -> None:
+        """Broadcast a feature state change to all connected Kanban UIs."""
+        await self.broadcast({"type": "feature_update", "feature": feature})
+
+    async def broadcast_pool_update(self, providers: list[dict[str, Any]]) -> None:
+        """Broadcast provider pool health to all connected Kanban UIs."""
+        await self.broadcast({"type": "pool_update", "providers": providers})
+
+    async def broadcast_agent_started(self, session_id: str, feature_id: int | str) -> None:
+        """Broadcast that an agent session has started working on a feature."""
+        await self.broadcast(
+            {"type": "agent_started", "session_id": session_id, "feature_id": feature_id}
+        )
+
+    async def broadcast_agent_completed(
+        self, session_id: str, feature_id: int | str, *, passed: bool
+    ) -> None:
+        """Broadcast that an agent session has finished a feature."""
+        await self.broadcast(
+            {
+                "type": "agent_completed",
+                "session_id": session_id,
+                "feature_id": feature_id,
+                "passed": passed,
+            }
+        )
+
+    async def broadcast_cost_update(
+        self, total_cost: float, session_cost: float
+    ) -> None:
+        """Broadcast an updated cost snapshot."""
+        await self.broadcast(
+            {"type": "cost_update", "total_cost": total_cost, "session_cost": session_cost}
+        )
+
+
 class CreateSessionRequest(BaseModel):
     project_path: str
     manifest: dict[str, Any] | None = None
@@ -49,6 +138,8 @@ class AgentStateService:
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
         self._ws_clients: list[WebSocket] = []
+        # Kanban UI real-time broadcast manager
+        self.ws_manager: ConnectionManager = ConnectionManager()
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -169,8 +260,34 @@ class AgentStateService:
 
             return EventSourceResponse(event_generator())
 
+        @app.websocket("/ws")
+        async def websocket_global(websocket: WebSocket) -> None:
+            """Global WebSocket endpoint for the Kanban UI.
+
+            Clients connect to ``ws://localhost:8888/ws`` and receive all
+            broadcast events (feature_update, pool_update, agent_started,
+            agent_completed, cost_update).
+
+            The server responds to ``{"ping": true}`` with ``{"pong": true}``
+            to allow keep-alive checks from the UI.
+            """
+            await self.ws_manager.connect(websocket)
+            try:
+                while True:
+                    try:
+                        data = await websocket.receive_json()
+                        if isinstance(data, dict) and data.get("ping"):
+                            await websocket.send_json({"pong": True})
+                    except WebSocketDisconnect:
+                        break
+                    except Exception:
+                        break
+            finally:
+                self.ws_manager.disconnect(websocket)
+
         @app.websocket("/ws/{session_id}")
-        async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
+        async def websocket_session(websocket: WebSocket, session_id: str) -> None:
+            """Per-session WebSocket for legacy session-scoped consumers."""
             await websocket.accept()
             self._ws_clients.append(websocket)
             try:
@@ -179,7 +296,8 @@ class AgentStateService:
                     # Echo or handle commands
                     await websocket.send_json({"ack": data})
             except WebSocketDisconnect:
-                self._ws_clients.remove(websocket)
+                if websocket in self._ws_clients:
+                    self._ws_clients.remove(websocket)
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]
@@ -197,9 +315,21 @@ class AgentStateService:
         # Notify SSE listeners
         for q in self._event_queues:
             await q.put(event_data)
-        # Notify WebSocket clients
+        # Notify legacy per-session WebSocket clients
         for ws in list(self._ws_clients):
             try:
                 await ws.send_json(event_data)
             except Exception:
-                self._ws_clients.remove(ws)
+                if ws in self._ws_clients:
+                    self._ws_clients.remove(ws)
+        # Notify global Kanban UI WebSocket clients
+        # Map task events to kanban-friendly feature_update events
+        if event_type in ("task.created", "task.updated"):
+            feature_payload: dict[str, Any] = {
+                "session_id": session_id,
+                "task_id": task_id,
+                **payload,
+            }
+            await self.ws_manager.broadcast_feature_update(feature_payload)
+        else:
+            await self.ws_manager.broadcast(event_data)

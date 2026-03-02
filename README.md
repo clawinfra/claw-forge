@@ -88,12 +88,63 @@ The pool automatically:
 
 | Provider | Type | Auth |
 |----------|------|------|
-| Anthropic Direct | `anthropic` | API key |
+| Anthropic Direct | `anthropic` | API key or OAuth token |
+| Claude CLI OAuth | `anthropic_oauth` | Auto-read from `claude login` |
+| Anthropic-format proxy | `anthropic_compat` | `x-api-key` (or none for internal) |
 | AWS Bedrock | `bedrock` | IAM/boto3 |
 | Azure AI Foundry | `azure` | API key |
 | Google Vertex AI | `vertex` | Service account |
 | Groq | `openai_compat` | API key |
 | Any OpenAI-compatible | `openai_compat` | API key (optional) |
+
+### Zero-config Claude OAuth
+
+If you've already run `claude login`, add this to `claw-forge.yaml` — no API key needed:
+
+```yaml
+providers:
+  claude-oauth:
+    type: anthropic_oauth
+    priority: 1
+    # Token auto-read from ~/.claude/.credentials.json
+```
+
+### Anthropic-Compatible Proxies
+
+For proxies that expose the Anthropic wire format at a custom URL:
+
+```yaml
+providers:
+  my-proxy:
+    type: anthropic_compat
+    api_key: ${PROXY_KEY}
+    base_url: https://proxy.example.com/v1
+    priority: 2
+    model_map:
+      claude-sonnet-4-20250514: proxy-internal-sonnet  # optional rename
+
+  # No-auth internal proxy (k8s sidecar, etc.)
+  internal-gw:
+    type: anthropic_compat
+    api_key: null
+    base_url: http://internal-gateway:8080/v1
+    priority: 3
+```
+
+## Kanban UI
+
+Monitor feature progress in real time with the built-in React/Vite board:
+
+```bash
+cd ui
+npm install
+npm run dev   # opens http://localhost:5173/?session=<uuid>
+```
+
+The board connects to `ws://localhost:8888/ws` for live updates pushed by the
+state service (`ConnectionManager`).  Columns: **Pending | In Progress | Passing
+| Failed | Blocked**.  Header shows provider pool health dots, overall progress
+bar, active agent count, and total cost.
 
 ## Plugin System
 

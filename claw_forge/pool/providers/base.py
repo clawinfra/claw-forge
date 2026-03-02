@@ -16,6 +16,8 @@ class ProviderType(str, Enum):
     AZURE = "azure"
     VERTEX = "vertex"
     OPENAI_COMPAT = "openai_compat"
+    ANTHROPIC_COMPAT = "anthropic_compat"
+    ANTHROPIC_OAUTH = "anthropic_oauth"
 
 
 @dataclass
@@ -40,6 +42,9 @@ class ProviderConfig:
     endpoint: str | None = None
     model_deployment: str | None = None
     model_map: dict[str, str] = field(default_factory=dict)
+    # OAuth token support (Claude CLI `claude login`)
+    oauth_token: str | None = None
+    oauth_token_file: str | None = None
 
 
 @dataclass
