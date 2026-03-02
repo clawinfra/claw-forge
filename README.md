@@ -513,6 +513,71 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 
 ---
 
+## Commands
+
+### CLI Commands
+
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `claw-forge init` | Parse spec, build feature DAG, scaffold `.claude/` | `--spec`, `--project`, `--concurrency` |
+| `claw-forge run` | Start agent pool, dispatch features in parallel | `--concurrency`, `--model`, `--yolo` |
+| `claw-forge add` | Add features to existing project (single or brownfield spec) | `--spec`, `--branch/--no-branch` |
+| `claw-forge fix` | TDD bug-fix: write failing test → fix → regression suite | `--report`, `--branch/--no-branch` |
+| `claw-forge status` | Project progress, phase bars, active agents, next action | `--config` |
+| `claw-forge analyze` | Scan codebase → `brownfield_manifest.json` (stack, tests, conventions) | `--project` |
+| `claw-forge ui` | Launch real-time Kanban board (React + WebSocket) | `--port`, `--session`, `--no-open` |
+| `claw-forge pool-status` | Provider health table (status, RPM, latency, cost) | `--config` |
+| `claw-forge pause` | Drain mode — finish in-flight agents, start no new ones | — |
+| `claw-forge resume` | Resume a paused project | — |
+| `claw-forge input` | Answer human-input questions from blocked agents | — |
+| `claw-forge state` | Start the state service REST API (port 8420) | `--port`, `--host` |
+
+### Slash Commands (Claude Code)
+
+| Command | When to use | What it produces |
+|---------|-------------|-----------------|
+| `/create-spec` | Starting a new project or adding features | `app_spec.txt` or `additions_spec.xml` |
+| `/expand-project` | Adding features mid-sprint | New tasks in state DB |
+| `/check-code` | Pre-PR quality gate | Ruff + mypy + pytest report |
+| `/checkpoint` | Saving progress at a known-good state | Git commit + JSON snapshot + CHECKPOINT.md |
+| `/review-pr` | Code review before merge | Structured verdict (APPROVE / REQUEST CHANGES) |
+| `/pool-status` | Diagnosing slow agents or cost spikes | Provider health + recommendations |
+| `/create-bug-report` | Structured bug reporting before fix | `bug_report.md` → auto-runs `claw-forge fix` |
+| `/claw-forge-status` | Re-entry after leaving a session | Full project status card |
+
+> 📚 Full details: [`docs/commands.md`](docs/commands.md) · End-to-end workflows: [`docs/workflows.md`](docs/workflows.md)
+
+---
+
+## Quick Workflow Cheatsheet
+
+**New project:**
+```
+claw-forge init → /create-spec → claw-forge run
+```
+
+**Add features to existing app:**
+```
+claw-forge analyze → /create-spec → claw-forge add → claw-forge run
+```
+
+**Fix a bug:**
+```
+/create-bug-report → claw-forge fix
+```
+
+**Check health:**
+```
+claw-forge status → /pool-status → /check-code
+```
+
+**Save progress:**
+```
+/checkpoint → /review-pr → git push
+```
+
+---
+
 ## Workflow Features
 
 | Feature | Command / Flag |
@@ -550,7 +615,7 @@ Live updates pushed over WebSocket: feature status changes, agent events, provid
 
 ## Claude Commands
 
-Seven slash commands in `.claude/commands/` for use inside Claude Code. These are automatically scaffolded into your project directory by `claw-forge init`:
+Seven slash commands in `.claude/commands/` for use inside Claude Code. Automatically scaffolded by `claw-forge init`. See [`docs/commands.md`](docs/commands.md) for full reference with real-world examples, and [`docs/workflows.md`](docs/workflows.md) for end-to-end walkthroughs.
 
 | Command | Purpose | Key flags | When to use |
 |---|---|---|---|

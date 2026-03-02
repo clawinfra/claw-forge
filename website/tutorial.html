@@ -81,6 +81,8 @@
         <li><a href="#expand">Add more features</a></li>
         <li><a href="#yolo">YOLO mode</a></li>
         <li><a href="#pause">Pause &amp; resume</a></li>
+        <li><a href="#workflows">Workflows</a></li>
+        <li><a href="#decision-tree">Which command do I use?</a></li>
       </ol>
     </div>
 
@@ -666,6 +668,177 @@ Your answer: SENDGRID_API_KEY
 
     </div><!-- /steps -->
 
+    <!-- Workflows -->
+    <div style="margin-top:48px" id="workflows">
+      <h2 class="section-anchor">Workflows</h2>
+      <p>Choose the workflow that matches your situation. Each one chains commands in the right order.</p>
+
+      <div class="tab-wrap">
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab(this,'wf-greenfield')">🆕 New Project</button>
+          <button class="tab-btn" onclick="switchTab(this,'wf-brownfield')">🏗️ Add Features</button>
+          <button class="tab-btn" onclick="switchTab(this,'wf-bugfix')">🐛 Bug Fix</button>
+          <button class="tab-btn" onclick="switchTab(this,'wf-parallel')">⚡ Parallel Sprint</button>
+          <button class="tab-btn" onclick="switchTab(this,'wf-recovery')">🔄 Recovery</button>
+        </div>
+
+        <div id="wf-greenfield" class="tab-content active">
+          <h4>Greenfield — Build a new app from scratch</h4>
+          <pre><code>claw-forge init → /create-spec → claw-forge run → /check-code → /checkpoint → /review-pr</code></pre>
+          <p><strong>Example:</strong> Building "TaskFlow API" (FastAPI + SQLite)</p>
+          <pre><code class="language-bash"># 1. Scaffold project
+mkdir taskflow-api && cd taskflow-api && git init
+claw-forge init
+
+# 2. Create spec interactively (in Claude Code)
+#    Type: /create-spec
+#    Claude asks about features, tech stack, DB schema
+#    Writes: app_spec.txt + claw-forge.yaml
+
+# 3. Initialize with spec
+claw-forge init --spec app_spec.txt --concurrency 5
+
+# 4. Run agents (opens 5 parallel coding agents)
+claw-forge state &
+claw-forge run --concurrency 5
+
+# 5. Verify (in Claude Code)
+#    /check-code    → ruff + mypy + pytest
+#    /checkpoint    → git commit + state snapshot
+#    /review-pr     → structured code review</code></pre>
+          <div class="callout tip">
+            <strong>Result:</strong> 59 features, ~30 min, ~$3.12, ~3,400 lines of tested code.
+          </div>
+        </div>
+
+        <div id="wf-brownfield" class="tab-content">
+          <h4>Brownfield — Add features to existing code</h4>
+          <pre><code>claw-forge analyze → /create-spec → claw-forge add → claw-forge run</code></pre>
+          <p><strong>Example:</strong> Adding Stripe payments to an existing FastAPI app</p>
+          <pre><code class="language-bash"># 1. Analyze existing codebase (creates brownfield_manifest.json)
+claw-forge analyze
+
+# 2. Create brownfield spec (in Claude Code)
+#    Type: /create-spec
+#    Claude auto-detects brownfield mode from manifest
+#    Asks: what to add, constraints, integration points
+#    Writes: additions_spec.xml
+
+# 3. Add features
+claw-forge add --spec additions_spec.xml
+
+# 4. Run agents
+claw-forge run --concurrency 3
+
+# 5. Verify
+#    /check-code (71 tests: 59 original + 12 new, all passing)</code></pre>
+          <div class="callout tip">
+            <strong>Key:</strong> The manifest teaches agents your naming conventions, async patterns, and test style — so new code matches existing code.
+          </div>
+        </div>
+
+        <div id="wf-bugfix" class="tab-content">
+          <h4>Bug Fix — TDD regression fix</h4>
+          <pre><code>/create-bug-report → claw-forge fix → /check-code → /review-pr</code></pre>
+          <p><strong>Example:</strong> Fixing "password reset fails for uppercase emails"</p>
+          <pre><code class="language-bash"># 1. Create bug report (in Claude Code)
+#    Type: /create-bug-report
+#    Claude guides you through 6 phases:
+#      symptoms → reproduction → expected vs actual → scope → write report → fix
+#    Writes: bug_report.md
+
+# 2. Run fix (or let /create-bug-report trigger it)
+claw-forge fix --report bug_report.md
+
+# Agent does:
+#   Phase 1 (RED):    Write test_password_reset_uppercase_email → FAILS ✓
+#   Phase 2 (GREEN):  Fix auth/service.py → .lower() on email lookup → PASSES ✓
+#   Phase 3 (REFACTOR): Run full suite → 72 passed, 0 failed ✓
+
+# 3. Verify and push
+#    /check-code → /review-pr → git push</code></pre>
+          <div class="callout tip">
+            <strong>Result:</strong> Mandatory regression test means the bug can never silently re-appear.
+          </div>
+        </div>
+
+        <div id="wf-parallel" class="tab-content">
+          <h4>Parallel Sprint — Multi-agent feature development</h4>
+          <pre><code>claw-forge run --concurrency 5 → claw-forge status → /pool-status → /checkpoint</code></pre>
+          <p><strong>Example:</strong> Building 50 features with 5 concurrent agents</p>
+          <pre><code class="language-bash"># Three terminals:
+claw-forge state &              # Terminal 1: state service
+claw-forge run --concurrency 5  # Terminal 2: agents
+claw-forge ui                   # Terminal 3: Kanban board
+
+# Monitor mid-sprint:
+claw-forge status               # Phase progress, blocked features, cost
+#    /pool-status               # Provider health, RPM, circuit breakers
+
+# Handle blocked features:
+claw-forge input saas-platform  # Answer agent questions interactively
+
+# Save progress at milestones:
+#    /checkpoint                # Git commit + state snapshot</code></pre>
+          <div class="callout tip">
+            <strong>Tip:</strong> Start with <code>--concurrency 3</code> to verify your spec, then scale up.
+          </div>
+        </div>
+
+        <div id="wf-recovery" class="tab-content">
+          <h4>Recovery — Resuming after interruption</h4>
+          <pre><code>claw-forge status → claw-forge run → /expand-project</code></pre>
+          <p><strong>Example:</strong> Laptop shut down mid-sprint (28/50 features done)</p>
+          <pre><code class="language-bash"># 1. Check what happened
+claw-forge status
+# Shows: 28 passing, 5 interrupted, 17 pending
+
+# 2. Resume — interrupted features reset to pending automatically
+claw-forge state &
+claw-forge run --concurrency 5
+# "Resuming session: 28/50 passing, 22 remaining"
+
+# 3. Optionally add more features mid-run (in Claude Code)
+#    Type: /expand-project
+#    Claude lists current features, asks what to add, POSTs atomically</code></pre>
+          <div class="callout tip">
+            <strong>Key:</strong> State persists to disk. Power loss, Ctrl+C, network drops — just <code>claw-forge run</code> again.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decision Tree -->
+    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px;margin-top:32px" id="decision-tree">
+      <h3 style="margin-top:0">Which command do I use?</h3>
+      <pre style="font-size:13px;line-height:1.6;overflow-x:auto">
+Start here
+  │
+  ├── Building something new?
+  │     └── claw-forge init → /create-spec → claw-forge run
+  │
+  ├── Adding features to existing code?
+  │     └── claw-forge analyze → /create-spec → claw-forge add → claw-forge run
+  │
+  ├── Fixing a bug?
+  │     └── /create-bug-report → claw-forge fix
+  │
+  ├── Checking project health?
+  │     ├── Code quality     → /check-code
+  │     ├── Feature progress → claw-forge status
+  │     └── Provider health  → /pool-status
+  │
+  ├── Saving progress?
+  │     └── /checkpoint → /review-pr → git push
+  │
+  ├── Resuming after a break?
+  │     └── claw-forge status → claw-forge run
+  │
+  └── Adding features mid-run?
+        └── /expand-project
+      </pre>
+    </div>
+
     <!-- Next steps -->
     <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px;margin-top:48px">
       <h3 style="margin-top:0">What's next?</h3>
@@ -674,6 +847,8 @@ Your answer: SENDGRID_API_KEY
           <strong>📖 Reference</strong>
           <ul style="font-size:14px;margin-top:8px;line-height:2">
             <li><a href="features.html">Full feature list</a></li>
+            <li><a href="https://github.com/clawinfra/claw-forge/blob/main/docs/commands.md" target="_blank">Commands reference</a> — every flag and option</li>
+            <li><a href="https://github.com/clawinfra/claw-forge/blob/main/docs/workflows.md" target="_blank">Workflow walkthroughs</a> — 5 end-to-end guides</li>
             <li><a href="https://github.com/clawinfra/claw-forge/blob/main/docs/sdk-api-guide.md" target="_blank">Claude Agent SDK API guide</a></li>
             <li><a href="https://github.com/clawinfra/claw-forge/blob/main/ARCHITECTURE.md" target="_blank">Architecture deep-dive</a></li>
             <li><a href="https://github.com/clawinfra/claw-forge/blob/main/claw-forge.yaml" target="_blank">Full config reference</a></li>
