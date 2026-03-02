@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import claude_agent_sdk
 from claude_agent_sdk import McpServerConfig, PermissionMode, query
-from claude_agent_sdk.types import ThinkingConfig
+from claude_agent_sdk.types import SdkPluginConfig, ThinkingConfig
 
 from claw_forge.pool.providers.base import ProviderConfig
 
@@ -38,6 +38,8 @@ async def run_agent(
     effort: Literal["low", "medium", "high", "max"] | None = None,
     include_partial_messages: bool = False,
     use_sdk_mcp: bool = True,
+    lsp_plugins: list[SdkPluginConfig] | None = None,
+    auto_detect_lsp: bool = True,
 ) -> AsyncIterator[claude_agent_sdk.Message]:
     """
     Run a Claude agent via claude-agent-sdk query().
@@ -72,6 +74,10 @@ async def run_agent(
             token-by-token output.
         use_sdk_mcp: If True and project_dir is given, use in-process SDK MCP server
             (zero cold-start) instead of the subprocess MCP. Defaults to True.
+        lsp_plugins: Explicit list of LSP SdkPluginConfig entries. When provided,
+            used as-is (auto-detection is skipped).
+        auto_detect_lsp: If True and lsp_plugins is not provided, scan cwd for source
+            files and auto-inject matching LSP skill plugins. Defaults to True.
     """
     env: dict[str, str] = {}
 
@@ -109,6 +115,16 @@ async def run_agent(
     if hooks is None:
         hooks = get_default_hooks()
 
+    # Resolve LSP plugins
+    resolved_lsp_plugins: list[SdkPluginConfig]
+    if lsp_plugins is not None:
+        resolved_lsp_plugins = lsp_plugins
+    elif auto_detect_lsp and cwd is not None:
+        from claw_forge.lsp import detect_lsp_plugins
+        resolved_lsp_plugins = detect_lsp_plugins(cwd)
+    else:
+        resolved_lsp_plugins = []
+
     options = claude_agent_sdk.ClaudeAgentOptions(
         model=model,
         max_turns=max_turns,
@@ -129,6 +145,7 @@ async def run_agent(
         max_budget_usd=max_budget_usd,
         effort=effort,
         include_partial_messages=include_partial_messages,
+        plugins=resolved_lsp_plugins,
     )
 
     async for message in query(prompt=prompt, options=options):
