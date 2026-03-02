@@ -11,12 +11,12 @@ import unittest.mock
 sys.modules.setdefault("claude_agent_sdk", unittest.mock.MagicMock())
 sys.modules.setdefault("claude_agent_sdk.types", unittest.mock.MagicMock())
 
-import pytest
-from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
 
-from claw_forge.commands.registry import COMMANDS, COMMAND_IDS, COMMAND_SHELLS
-from claw_forge.state.service import AgentStateService
+from claw_forge.commands.registry import COMMAND_IDS, COMMAND_SHELLS, COMMANDS  # noqa: E402
+from claw_forge.state.service import AgentStateService  # noqa: E402
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ def test_command_registry_ids():
     """Command IDs should be unique and match the id set."""
     ids = [cmd["id"] for cmd in COMMANDS]
     assert len(ids) == len(set(ids)), "Duplicate command IDs found"
-    assert COMMAND_IDS == set(ids)
+    assert set(ids) == COMMAND_IDS
 
 
 def test_command_registry_categories():
@@ -77,7 +77,7 @@ def test_command_registry_expected_ids():
         "pool-status",
         "create-bug-report",
     }
-    assert COMMAND_IDS == expected
+    assert expected == COMMAND_IDS
 
 
 def test_command_shells_coverage():
@@ -285,7 +285,7 @@ async def test_command_done_event_has_exit_code(tmp_path):
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         resp = await ac.post("/commands/execute", json={"command": "pool-status"})
-        exec_id = resp.json()["execution_id"]
+        resp.json()["execution_id"]
         await asyncio.sleep(1.0)
 
     done = next((e for e in received if e.get("type") == "command_done"), None)
@@ -325,32 +325,37 @@ def test_execution_drawer_file_exists():
 def test_command_palette_exports_component():
     """CommandPalette.tsx must export CommandPalette function."""
     path = _ui_src("CommandPalette.tsx")
-    content = open(path).read()
+    with open(path) as f:
+        content = f.read()
     assert "export function CommandPalette" in content
 
 
 def test_commands_panel_exports_component():
     """CommandsPanel.tsx must export CommandsPanel function."""
     path = _ui_src("CommandsPanel.tsx")
-    content = open(path).read()
+    with open(path) as f:
+        content = f.read()
     assert "export function CommandsPanel" in content
 
 
 def test_execution_drawer_exports_component():
     """ExecutionDrawer.tsx must export ExecutionDrawer function."""
     path = _ui_src("ExecutionDrawer.tsx")
-    content = open(path).read()
+    with open(path) as f:
+        content = f.read()
     assert "export function ExecutionDrawer" in content
 
 
 def test_command_palette_has_keyboard_shortcuts():
     """CommandPalette.tsx must handle ArrowDown, ArrowUp, Enter, Escape."""
-    content = open(_ui_src("CommandPalette.tsx")).read()
+    with open(_ui_src("CommandPalette.tsx")) as f:
+        content = f.read()
     for key in ("ArrowDown", "ArrowUp", "Enter", "Escape"):
         assert key in content, f"CommandPalette missing keyboard handler for {key!r}"
 
 
 def test_commands_panel_has_run_button():
     """CommandsPanel.tsx must have a Run button."""
-    content = open(_ui_src("CommandsPanel.tsx")).read()
+    with open(_ui_src("CommandsPanel.tsx")) as f:
+        content = f.read()
     assert "Run" in content

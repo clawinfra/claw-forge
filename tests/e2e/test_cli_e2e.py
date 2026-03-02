@@ -6,13 +6,11 @@ All tests are self-contained and clean up after themselves.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from claw_forge.cli import app
@@ -101,7 +99,6 @@ class TestInitCommand:
             # Exit code may be 0 or non-zero depending on AI calls failing;
             # the scaffold part (CLAUDE.md) should always run
             claude_md = Path(tmp) / "CLAUDE.md"
-            commands_dir = Path(tmp) / ".claude" / "commands"
             # At minimum the scaffold should produce CLAUDE.md
             assert claude_md.exists(), (
                 f"CLAUDE.md not found in {tmp}. CLI output:\n{result.output}"

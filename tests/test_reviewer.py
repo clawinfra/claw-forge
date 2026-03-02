@@ -18,7 +18,6 @@ from claw_forge.orchestrator.reviewer import (
 )
 from claw_forge.state.service import AgentStateService
 
-
 # ── detect_test_command tests ────────────────────────────────────────────
 
 

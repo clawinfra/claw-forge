@@ -17,7 +17,6 @@ from starlette.testclient import TestClient
 
 from claw_forge.state.service import AgentStateService, ConnectionManager
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: in-process app with in-memory SQLite
 # ---------------------------------------------------------------------------

@@ -19,8 +19,7 @@ import pytest
 
 from claw_forge.pool.health import CircuitState
 from claw_forge.pool.manager import ProviderPoolExhausted, ProviderPoolManager
-from claw_forge.pool.providers.base import ProviderConfig, ProviderError, ProviderType
-
+from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 
 # ---------------------------------------------------------------------------
 # Load .env from project root (proxy-6 credentials)
@@ -336,6 +335,7 @@ class TestProviderSlashModelFormat:
     def test_unknown_provider_hint_raises(self) -> None:
         """provider_hint to unknown name raises ProviderNotFoundError."""
         import asyncio
+
         from claw_forge.pool.manager import ProviderNotFoundError
 
         pool = ProviderPoolManager(configs=[], max_retries=1)

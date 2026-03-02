@@ -8,13 +8,12 @@ import unittest.mock
 sys.modules["claude_agent_sdk"] = unittest.mock.MagicMock()
 sys.modules["claude_agent_sdk.types"] = unittest.mock.MagicMock()
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
-import pytest
+import pytest  # noqa: E402
 
-from claw_forge.pool.model_resolver import ResolvedModel, resolve_model
-
+from claw_forge.pool.model_resolver import ResolvedModel, resolve_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Basic resolution tests
@@ -210,8 +209,6 @@ class TestProviderHintInPool:
     ) -> object:
         """Build a minimal ProviderPoolManager with mocked internals."""
         from claw_forge.pool.manager import ProviderPoolManager
-        from claw_forge.pool.health import CircuitBreaker, CircuitState
-        from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 
         pm = object.__new__(ProviderPoolManager)
         pm._providers = providers

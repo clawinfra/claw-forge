@@ -4,21 +4,16 @@ from __future__ import annotations
 
 import sys
 import types
-import unittest.mock as mock
 
 # Mock claude_agent_sdk if not installed
 if "claude_agent_sdk" not in sys.modules:
     sys.modules["claude_agent_sdk"] = types.ModuleType("claude_agent_sdk")
 
-import asyncio
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
 
 from claw_forge.pool.health import CircuitBreaker
 from claw_forge.pool.manager import ProviderPoolManager
@@ -31,7 +26,6 @@ from claw_forge.pool.providers.base import (
 from claw_forge.pool.router import Router, RoutingStrategy
 from claw_forge.pool.tracker import UsageTracker
 from claw_forge.state.service import AgentStateService
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
