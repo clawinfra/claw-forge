@@ -115,7 +115,9 @@ class TestRunAgent:
         assert kwargs["options"].allowed_tools == tools
 
     @pytest.mark.asyncio
-    async def test_empty_allowed_tools_when_none(self):
+    async def test_default_tools_when_none(self):
+        """When allowed_tools=None, the agent_type default tools are used."""
+        from claw_forge.agent.tools import get_tools_for_agent
         with patch("claw_forge.agent.runner.query") as mock_query:
             mock_query.return_value = _async_gen()
 
@@ -123,7 +125,8 @@ class TestRunAgent:
                 pass
 
         _, kwargs = mock_query.call_args
-        assert kwargs["options"].allowed_tools == []
+        # Default agent_type is "coding", so we expect the coding tool list
+        assert kwargs["options"].allowed_tools == get_tools_for_agent("coding")
 
     @pytest.mark.asyncio
     async def test_mcp_servers_passed_through(self):
