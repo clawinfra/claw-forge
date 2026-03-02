@@ -23,7 +23,7 @@ class InitializerPlugin(BasePlugin):
         return (
             "You are a project analyzer. Examine the project structure, identify the "
             "language, framework, build system, and key files. Generate a comprehensive "
-            "session manifest that will help other agents understand and work with this project.\n\n"
+            "session manifest that will help other agents understand and work with this project.\n\n"  # noqa: E501
             "Output a JSON manifest with: project_name, language, framework, description, "
             "key_files (with roles), build_commands, test_commands, and any special notes."
         )
@@ -44,7 +44,7 @@ class InitializerPlugin(BasePlugin):
         analysis = self._analyze_project(project)
         return PluginResult(
             success=True,
-            output=f"Project analyzed: {analysis.get('language', 'unknown')} / {analysis.get('framework', 'unknown')}",
+            output=f"Project analyzed: {analysis.get('language', 'unknown')} / {analysis.get('framework', 'unknown')}",  # noqa: E501
             metadata=analysis,
         )
 

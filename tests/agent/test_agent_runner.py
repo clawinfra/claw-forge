@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 import claude_agent_sdk
+import pytest
 
 from claw_forge.agent.runner import collect_result, run_agent
 from claw_forge.pool.providers.base import ProviderConfig, ProviderType
-
 
 # ---------------------------------------------------------------------------
 # Helpers

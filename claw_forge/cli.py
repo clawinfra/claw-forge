@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import typer
@@ -16,7 +14,6 @@ from rich.table import Table
 
 from claw_forge import __version__
 from claw_forge.pool.providers.registry import load_configs_from_yaml
-from claw_forge.pool.router import RoutingStrategy
 
 app = typer.Typer(name="claw-forge", help="Multi-provider autonomous coding agent harness")
 console = Console()
@@ -24,12 +21,40 @@ console = Console()
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def _expand_env_vars(obj: object) -> object:
+    """Recursively expand ${VAR} placeholders using os.environ."""
+    import re
+    if isinstance(obj, str):
+        def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
+            key = m.group(1)
+            val = os.environ.get(key, "")
+            if not val:
+                console.print(f"[yellow]⚠ Env var ${{{key}}} is not set[/yellow]")
+            return val
+        return re.sub(r"\$\{([^}]+)\}", _replace, obj)
+    if isinstance(obj, dict):
+        return {k: _expand_env_vars(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_env_vars(i) for i in obj]
+    return obj
+
+
 def _load_config(config_path: str) -> dict:
+    """Load YAML config and expand ${ENV_VAR} placeholders from environment."""
     path = Path(config_path)
     if not path.exists():
         console.print(f"[red]Config not found: {path}[/red]")
-        raise typer.Exit(1)
-    return yaml.safe_load(path.read_text())
+        raise typer.Exit(1) from None
+    # Auto-load .env file if present alongside the config
+    env_file = path.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip())
+    raw = yaml.safe_load(path.read_text())
+    return _expand_env_vars(raw)  # type: ignore[return-value]
 
 
 def _state_url(port: int = 8420) -> str:
@@ -44,10 +69,10 @@ def _http_get(url: str) -> dict | list:
         return resp.json()
     except httpx.ConnectError:
         console.print(f"[red]State service not reachable at {url}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except httpx.HTTPStatusError as exc:
         console.print(f"[red]HTTP {exc.response.status_code}: {exc.response.text}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _http_post(url: str, json: dict | None = None) -> dict:
@@ -58,10 +83,10 @@ def _http_post(url: str, json: dict | None = None) -> dict:
         return resp.json()
     except httpx.ConnectError:
         console.print(f"[red]State service not reachable at {url}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except httpx.HTTPStatusError as exc:
         console.print(f"[red]HTTP {exc.response.status_code}: {exc.response.text}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -80,7 +105,7 @@ def run(
     task: str = typer.Option("coding", "--task", "-t"),
     model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m"),
     concurrency: int = typer.Option(5, "--concurrency", "-n", help="Max parallel agents"),
-    yolo: bool = typer.Option(False, "--yolo", help="Skip human input, max concurrency, aggressive retry"),
+    yolo: bool = typer.Option(False, "--yolo", help="Skip human input, max concurrency, aggressive retry"),  # noqa: E501
 ) -> None:
     """Run an agent task on a project."""
     cfg = _load_config(config)
@@ -93,7 +118,7 @@ def run(
     if yolo:
         cpu_count = max(1, os.cpu_count() or 4)
         console.print(
-            f"[bold yellow]⚠️  YOLO MODE: Human approval skipped, max concurrency ({cpu_count}), aggressive retry[/bold yellow]"
+            f"[bold yellow]⚠️  YOLO MODE: Human approval skipped, max concurrency ({cpu_count}), aggressive retry[/bold yellow]"  # noqa: E501
         )
 
     console.print("[yellow]Agent loop not yet integrated — scaffold only[/yellow]")
@@ -132,6 +157,7 @@ def state(
 ) -> None:
     """Start the AgentStateService REST API."""
     import uvicorn
+
     from claw_forge.state.service import AgentStateService
 
     svc = AgentStateService()
@@ -141,11 +167,11 @@ def state(
 @app.command()
 def init(
     project: str = typer.Option(".", "--project", "-p"),
-    spec: Optional[str] = typer.Option(None, "--spec", "-s", help="Path to app_spec.txt"),
+    spec: str | None = typer.Option(None, "--spec", "-s", help="Path to app_spec.txt"),
 ) -> None:
     """Initialize a project — analyze and generate manifest."""
-    from claw_forge.plugins.initializer import InitializerPlugin
     from claw_forge.plugins.base import PluginContext
+    from claw_forge.plugins.initializer import InitializerPlugin
 
     plugin = InitializerPlugin()
     ctx = PluginContext(project_path=project, session_id="init", task_id="init")
@@ -175,7 +201,7 @@ def pause(
         console.print(f"Resume with: [bold]claw-forge resume {project}[/bold]")
     else:
         console.print(f"[red]Unexpected response: {result}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -192,7 +218,7 @@ def resume(
         console.print("Dispatcher is now accepting new tasks.")
     else:
         console.print(f"[red]Unexpected response: {result}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command(name="input")
@@ -213,7 +239,7 @@ def human_input(
         console.print(f"[green]✅ No pending human-input questions for {project!r}[/green]")
         return
 
-    console.print(f"[bold yellow]🙋 {len(pending)} pending question(s) for {project!r}:[/bold yellow]\n")
+    console.print(f"[bold yellow]🙋 {len(pending)} pending question(s) for {project!r}:[/bold yellow]\n")  # noqa: E501
 
     for item in pending:
         task_id = item["task_id"]
@@ -229,6 +255,78 @@ def human_input(
         console.print(f"[green]✅ Answer submitted — task {task_id} moved to pending[/green]\n")
 
     console.print(f"[green]All questions answered. Project {project!r} can now continue.[/green]")
+
+
+@app.command()
+def ui(
+    port: int = typer.Option(
+        int(os.environ.get("CLAW_FORGE_UI_PORT", "5173")),
+        "--port",
+        "-p",
+        help="Port for the Kanban UI dev server",
+    ),
+    state_port: int = typer.Option(  # noqa: E501
+        8888, "--state-port", help="Port the state service is running on"
+    ),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser automatically"),
+    session: str = typer.Option("", "--session", "-s", help="Session UUID to open on the board"),
+) -> None:
+    """Launch the Kanban UI (React dev server).
+
+    Requires Node.js and the UI dependencies installed:
+
+        cd ui && npm install
+
+    Starts the Vite dev server and optionally opens the board in your browser.
+    The UI connects to the state service at localhost:<state-port>.
+    """
+    import shutil
+    import subprocess
+
+    ui_dir = Path(__file__).parent.parent / "ui"
+    if not ui_dir.exists():
+        console.print("[red]ui/ directory not found. Is claw-forge installed from source?[/red]")
+        raise typer.Exit(1) from None
+
+    if not shutil.which("node"):
+        console.print("[red]Node.js not found. Install it from https://nodejs.org/[/red]")
+        raise typer.Exit(1) from None
+
+    node_modules = ui_dir / "node_modules"
+    if not node_modules.exists():
+        console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
+        subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
+
+    url = f"http://localhost:{port}"
+    if session:
+        url += f"/?session={session}"
+
+    console.print("[bold green]🔥 Starting claw-forge Kanban UI[/bold green]")
+    console.print(f"   UI:           [cyan]{url}[/cyan]")
+    console.print(f"   State API:    [cyan]http://localhost:{state_port}[/cyan]")
+    console.print("   Press [bold]Ctrl+C[/bold] to stop\n")
+
+    env = os.environ.copy()
+    env["VITE_API_PORT"] = str(state_port)
+    env["VITE_WS_PORT"] = str(state_port)
+
+    if open_browser:
+        import threading
+        import time
+        import webbrowser
+
+        def _open_after_delay() -> None:
+            time.sleep(2)  # wait for Vite to start
+            webbrowser.open(url)
+
+        threading.Thread(target=_open_after_delay, daemon=True).start()
+
+    subprocess.run(  # noqa: S603, S607
+        ["npm", "run", "dev", "--", "--port", str(port), "--host"],
+        cwd=ui_dir,
+        env=env,
+        check=False,
+    )
 
 
 if __name__ == "__main__":

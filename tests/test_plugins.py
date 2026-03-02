@@ -1,15 +1,16 @@
 """Tests for plugin system."""
 
-import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from claw_forge.plugins.base import PluginContext, PluginResult
-from claw_forge.plugins.initializer import InitializerPlugin
+import pytest
+
+from claw_forge.plugins.base import PluginContext
 from claw_forge.plugins.coding import CodingPlugin
-from claw_forge.plugins.testing import TestingPlugin
+from claw_forge.plugins.initializer import InitializerPlugin
 from claw_forge.plugins.reviewer import ReviewerPlugin
+from claw_forge.plugins.testing import TestingPlugin
 
 
 class TestPlugins:

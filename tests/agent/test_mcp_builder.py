@@ -4,11 +4,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import pytest
 import yaml
 
 from claw_forge.agent.mcp_builder import load_skills_as_mcp, skill_to_mcp
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,7 +1,5 @@
 """Tests for usage tracker."""
 
-import time
-from unittest.mock import patch
 
 from claw_forge.pool.tracker import UsageTracker
 

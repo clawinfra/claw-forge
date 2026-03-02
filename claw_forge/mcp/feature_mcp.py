@@ -17,13 +17,25 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, JSON, create_engine, select, update
-from sqlalchemy.orm import DeclarativeBase, Session as DBSession, relationship
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    select,
+)
+from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import Session as DBSession
 
 # ── DB Models ────────────────────────────────────────────────────────────────
 
@@ -55,11 +67,11 @@ class Feature(FeatureBase):
     )
     claimed_by = Column(String(128), nullable=True)  # agent session ID
     fail_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     dependencies = relationship(
@@ -240,7 +252,7 @@ def feature_claim_and_get(agent_id: str = "") -> dict[str, Any] | None:
             if _deps_satisfied(session, feature):
                 feature.status = "in_progress"
                 feature.claimed_by = agent_id or "unknown"
-                feature.updated_at = datetime.now(timezone.utc)
+                feature.updated_at = datetime.now(UTC)
                 session.commit()
                 session.refresh(feature)
                 return feature.to_dict()
@@ -256,7 +268,7 @@ def feature_mark_in_progress(feature_id: str) -> dict[str, Any] | None:
         if feature is None:
             return None
         feature.status = "in_progress"
-        feature.updated_at = datetime.now(timezone.utc)
+        feature.updated_at = datetime.now(UTC)
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -273,7 +285,7 @@ def feature_mark_passing(feature_id: str) -> dict[str, Any] | None:
         feature.status = "passing"
         feature.claimed_by = None
         feature.fail_reason = None
-        feature.updated_at = datetime.now(timezone.utc)
+        feature.updated_at = datetime.now(UTC)
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -290,7 +302,7 @@ def feature_mark_failing(feature_id: str, reason: str = "") -> dict[str, Any] | 
         feature.status = "failing"
         feature.fail_reason = reason
         feature.claimed_by = None
-        feature.updated_at = datetime.now(timezone.utc)
+        feature.updated_at = datetime.now(UTC)
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -306,7 +318,7 @@ def feature_clear_in_progress(feature_id: str) -> dict[str, Any] | None:
             return None
         feature.status = "pending"
         feature.claimed_by = None
-        feature.updated_at = datetime.now(timezone.utc)
+        feature.updated_at = datetime.now(UTC)
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -322,7 +334,7 @@ def feature_skip(feature_id: str) -> dict[str, Any] | None:
             return None
         feature.status = "skipped"
         feature.claimed_by = None
-        feature.updated_at = datetime.now(timezone.utc)
+        feature.updated_at = datetime.now(UTC)
         session.commit()
         session.refresh(feature)
         return feature.to_dict()

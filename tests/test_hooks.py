@@ -2,7 +2,7 @@
 
 import pytest
 
-from claw_forge.orchestrator.hooks import PreToolUseHook, PreCompactHook, SecurityPolicy
+from claw_forge.orchestrator.hooks import PreCompactHook, PreToolUseHook, SecurityPolicy
 
 
 class TestPreToolUseHook:

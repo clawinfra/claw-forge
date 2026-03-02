@@ -19,7 +19,6 @@ import pytest
 from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 from claw_forge.pool.providers.oauth import get_oauth_token_optional
 
-
 # ---------------------------------------------------------------------------
 # get_oauth_token_optional
 # ---------------------------------------------------------------------------
@@ -144,9 +143,8 @@ class TestAnthropicOauthFallback:
         with patch(
             "claw_forge.pool.providers.oauth.read_claude_oauth_token",
             return_value=None,
-        ):
-            with pytest.raises(ValueError) as exc_info:
-                create_provider(cfg)
+        ), pytest.raises(ValueError) as exc_info:
+            create_provider(cfg)
 
         msg = str(exc_info.value)
         assert "anthropic_oauth" in msg
@@ -163,7 +161,7 @@ class TestAnthropicOauthFallback:
             api_key="sk-ant-should-be-ignored",
         )
 
-        with patch(
+        with patch(  # noqa: SIM117
             "claw_forge.pool.providers.oauth.read_claude_oauth_token",
             return_value="tok-oauth-wins",
         ):

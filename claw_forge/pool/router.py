@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from claw_forge.pool.tracker import UsageTracker
 
 
-class RoutingStrategy(str, Enum):
+class RoutingStrategy(StrEnum):
     PRIORITY = "priority"
     ROUND_ROBIN = "round_robin"
     WEIGHTED_RANDOM = "weighted_random"

@@ -10,8 +10,7 @@ import httpx
 import pytest
 
 from claw_forge.pool.providers.base import ProviderConfig, ProviderError, ProviderType
-from claw_forge.pool.providers.ollama import OllamaProvider, _DEFAULT_MODEL
-
+from claw_forge.pool.providers.ollama import _DEFAULT_MODEL, OllamaProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -252,8 +251,8 @@ class TestOllamaProviderErrors:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ProviderError) as exc_info:
+        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):  # noqa: SIM117
+            with pytest.raises(ProviderError) as exc_info:  # noqa: SIM117
                 await provider.execute(
                     model="unknown-model",
                     messages=[{"role": "user", "content": "hi"}],
@@ -276,8 +275,8 @@ class TestOllamaProviderErrors:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ProviderError) as exc_info:
+        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):  # noqa: SIM117
+            with pytest.raises(ProviderError) as exc_info:  # noqa: SIM117
                 await provider.execute(
                     model="llama3.2",
                     messages=[{"role": "user", "content": "hi"}],
@@ -298,8 +297,8 @@ class TestOllamaProviderErrors:
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ProviderError) as exc_info:
+        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):  # noqa: SIM117
+            with pytest.raises(ProviderError) as exc_info:  # noqa: SIM117
                 await provider.execute(
                     model="llama3.2",
                     messages=[{"role": "user", "content": "hi"}],
@@ -322,8 +321,8 @@ class TestOllamaProviderErrors:
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
-        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ProviderError) as exc_info:
+        with patch("claw_forge.pool.providers.ollama.httpx.AsyncClient", return_value=mock_client):  # noqa: SIM117
+            with pytest.raises(ProviderError) as exc_info:  # noqa: SIM117
                 await provider.execute(
                     model="llama3.2",
                     messages=[{"role": "user", "content": "hi"}],

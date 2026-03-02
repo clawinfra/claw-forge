@@ -9,7 +9,6 @@ from claude_agent_sdk.types import HookContext, HookInput, HookMatcher, SyncHook
 
 from .security import bash_security_hook
 
-
 # ── Pre-compact hook ──────────────────────────────────────────────────────────
 
 
@@ -65,7 +64,6 @@ async def post_tool_hook(
     Can be extended via closure to inject token-budget remaining, feature
     progress, or other metrics alongside the tool result.
     """
-    tool_name = input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
     return SyncHookJSONOutput(
         hookSpecificOutput={  # type: ignore[typeddict-item]
             "hookEventName": "PostToolUse",

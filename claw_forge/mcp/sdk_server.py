@@ -8,9 +8,8 @@ entirely in-process, with direct SQLAlchemy access instead of subprocess IPC.
 """
 from __future__ import annotations
 
-import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,6 @@ from claw_forge.mcp.feature_mcp import (
     FeatureDependency,
     _deps_satisfied,
 )
-
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -69,7 +67,7 @@ def _make_tools(project_dir: Path) -> list:
     @tool(
         "feature_get_by_id",
         "Get a feature by its ID",
-        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},
+        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
     async def feature_get_by_id(args: dict) -> dict:
         feature_id = args.get("feature_id", "")
@@ -105,7 +103,7 @@ def _make_tools(project_dir: Path) -> list:
                 if _deps_satisfied(session, feature):
                     feature.status = "in_progress"
                     feature.claimed_by = agent_id or "unknown"
-                    feature.updated_at = datetime.now(timezone.utc)
+                    feature.updated_at = datetime.now(UTC)
                     session.commit()
                     session.refresh(feature)
                     claimed = feature.to_dict()
@@ -116,7 +114,7 @@ def _make_tools(project_dir: Path) -> list:
     @tool(
         "feature_mark_passing",
         "Mark a feature as passing (completed successfully)",
-        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},
+        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
     async def feature_mark_passing(args: dict) -> dict:
         feature_id = args.get("feature_id", "")
@@ -127,7 +125,7 @@ def _make_tools(project_dir: Path) -> list:
                 feature.status = "passing"
                 feature.claimed_by = None
                 feature.fail_reason = None
-                feature.updated_at = datetime.now(timezone.utc)
+                feature.updated_at = datetime.now(UTC)
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -156,7 +154,7 @@ def _make_tools(project_dir: Path) -> list:
                 feature.status = "failing"
                 feature.fail_reason = reason
                 feature.claimed_by = None
-                feature.updated_at = datetime.now(timezone.utc)
+                feature.updated_at = datetime.now(UTC)
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -166,7 +164,7 @@ def _make_tools(project_dir: Path) -> list:
     @tool(
         "feature_mark_in_progress",
         "Mark a feature as in_progress",
-        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},
+        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
     async def feature_mark_in_progress(args: dict) -> dict:
         feature_id = args.get("feature_id", "")
@@ -175,7 +173,7 @@ def _make_tools(project_dir: Path) -> list:
             result = None
             if feature:
                 feature.status = "in_progress"
-                feature.updated_at = datetime.now(timezone.utc)
+                feature.updated_at = datetime.now(UTC)
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -185,7 +183,7 @@ def _make_tools(project_dir: Path) -> list:
     @tool(
         "feature_clear_in_progress",
         "Release a claim on a feature — resets it back to pending",
-        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},
+        {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
     async def feature_clear_in_progress(args: dict) -> dict:
         feature_id = args.get("feature_id", "")
@@ -195,7 +193,7 @@ def _make_tools(project_dir: Path) -> list:
             if feature:
                 feature.status = "pending"
                 feature.claimed_by = None
-                feature.updated_at = datetime.now(timezone.utc)
+                feature.updated_at = datetime.now(UTC)
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()

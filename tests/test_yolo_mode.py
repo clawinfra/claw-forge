@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from claw_forge.orchestrator.dispatcher import Dispatcher, DispatcherConfig
 from claw_forge.state.scheduler import TaskNode
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

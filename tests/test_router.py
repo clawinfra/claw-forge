@@ -1,7 +1,12 @@
 """Tests for routing strategy."""
 
 from claw_forge.pool.health import CircuitBreaker
-from claw_forge.pool.providers.base import BaseProvider, ProviderConfig, ProviderResponse, ProviderType
+from claw_forge.pool.providers.base import (
+    BaseProvider,
+    ProviderConfig,
+    ProviderResponse,
+    ProviderType,
+)
 from claw_forge.pool.router import Router, RoutingStrategy
 from claw_forge.pool.tracker import UsageTracker
 

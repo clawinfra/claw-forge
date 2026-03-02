@@ -1,13 +1,10 @@
 """Tests for claw_forge.agent.tools."""
 from __future__ import annotations
 
-import pytest
-
 from claw_forge.agent.tools import (
     BUILTIN_TOOLS,
     CODING_AGENT_TOOLS,
     INITIALIZER_AGENT_TOOLS,
-    MAX_TURNS,
     TESTING_AGENT_TOOLS,
     get_max_turns,
     get_tools_for_agent,

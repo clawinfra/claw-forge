@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class PreToolUseHook:
         for handler in self._custom_handlers:
             result = await handler({"tool": tool_name, "input": tool_input})
             if result and not result.get("allow", True):
-                return HookResult(allow=False, reason=result.get("reason", "Blocked by custom hook"))
+                return HookResult(allow=False, reason=result.get("reason", "Blocked by custom hook"))  # noqa: E501
 
         return HookResult(allow=True)
 

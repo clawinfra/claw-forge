@@ -1,14 +1,14 @@
-"""Tests for pause/resume (drain mode) behaviour."""
-
 from __future__ import annotations
 
-import asyncio
+"""Tests for pause/resume (drain mode) behaviour."""
 
-import pytest
 
-from claw_forge.orchestrator.dispatcher import Dispatcher
-from claw_forge.state.scheduler import TaskNode
+import asyncio  # noqa: E402
 
+import pytest  # noqa: E402
+
+from claw_forge.orchestrator.dispatcher import Dispatcher  # noqa: E402
+from claw_forge.state.scheduler import TaskNode  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,7 +99,7 @@ class TestPauseStopsDispatch:
             return result
 
         d._handler = pausing_handler
-        dispatch_result = await d.run()
+        await d.run()
 
         # 'a' completed, 'b' was skipped because paused between waves
         assert "a" in completed_ids
@@ -168,9 +168,10 @@ class TestResumeRestoresDispatch:
 class TestPauseResumeAPI:
     """Test the state service REST endpoints for pause/resume."""
 
-    async def _make_client(self) -> tuple["AsyncClient", "AgentStateService"]:
+    async def _make_client(self):  # type: ignore[return]
         """Create an in-memory service with DB pre-initialized."""
-        from httpx import AsyncClient, ASGITransport
+        from httpx import ASGITransport, AsyncClient
+
         from claw_forge.state.service import AgentStateService
 
         svc = AgentStateService("sqlite+aiosqlite:///:memory:")

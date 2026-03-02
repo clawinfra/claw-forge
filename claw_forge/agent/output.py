@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ── Output schemas ────────────────────────────────────────────────────────────
 
 FEATURE_SUMMARY_SCHEMA: dict[str, Any] = {

@@ -119,7 +119,7 @@ class AnthropicProvider(BaseProvider):
             # For oauth_token_file, try refreshing the token once
             if self._config.oauth_token_file:
                 await self._refresh_client_from_file()
-                raise ProviderError("OAuth token expired — refreshed, retry", retryable=True, status_code=401)
+                raise ProviderError("OAuth token expired — refreshed, retry", retryable=True, status_code=401)  # noqa: E501
             raise AuthenticationError("Invalid API key or OAuth token")
         if resp.status_code >= 500:
             raise ProviderError(f"Server error {resp.status_code}", retryable=True)

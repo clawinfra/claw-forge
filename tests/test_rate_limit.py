@@ -1,8 +1,6 @@
 """Tests for claw_forge.agent.rate_limit."""
 from __future__ import annotations
 
-import pytest
-
 from claw_forge.agent.rate_limit import (
     calculate_error_backoff,
     calculate_rate_limit_backoff,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from claw_forge.orchestrator.dispatcher import Dispatcher, DispatchResult
+from claw_forge.orchestrator.dispatcher import Dispatcher
 from claw_forge.state.scheduler import TaskNode
 
 

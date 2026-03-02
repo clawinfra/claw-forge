@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import claude_agent_sdk
+import pytest
 from claude_agent_sdk import ClaudeAgentOptions
 
 from claw_forge.agent.session import AgentSession
-
 
 # ---------------------------------------------------------------------------
 # Helpers

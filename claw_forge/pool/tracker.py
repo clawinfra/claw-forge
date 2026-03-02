@@ -46,7 +46,7 @@ class UsageTracker:
         stats.total_requests += 1
         stats.total_input_tokens += input_tokens
         stats.total_output_tokens += output_tokens
-        cost = (input_tokens * cost_input_per_mtok + output_tokens * cost_output_per_mtok) / 1_000_000
+        cost = (input_tokens * cost_input_per_mtok + output_tokens * cost_output_per_mtok) / 1_000_000  # noqa: E501
         stats.total_cost_usd += cost
         stats.latencies_ms.append(latency_ms)
         stats.request_timestamps.append(time.monotonic())

@@ -5,7 +5,6 @@ import pytest
 
 from claw_forge.agent.security import (
     DEFAULT_ALLOWLIST,
-    HARDCODED_BLOCKLIST,
     _extract_command_name,
     _is_allowed,
     _is_blocked,

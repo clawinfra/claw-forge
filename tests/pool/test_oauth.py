@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +15,6 @@ from claw_forge.pool.providers.oauth import (
     get_oauth_provider_config,
     read_claude_oauth_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -265,6 +264,5 @@ class TestRegistryAnthropicOauth:
         with patch(
             "claw_forge.pool.providers.oauth.read_claude_oauth_token",
             return_value=None,
-        ):
-            with pytest.raises(ValueError, match="no OAuth credentials"):
-                create_provider(cfg)
+        ), pytest.raises(ValueError, match="no OAuth credentials"):
+            create_provider(cfg)

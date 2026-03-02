@@ -15,7 +15,7 @@ _PROVIDER_CLASSES: dict[ProviderType, str] = {
     ProviderType.AZURE: "claw_forge.pool.providers.azure.AzureProvider",
     ProviderType.VERTEX: "claw_forge.pool.providers.vertex.VertexProvider",
     ProviderType.OPENAI_COMPAT: "claw_forge.pool.providers.openai_compat.OpenAICompatProvider",
-    ProviderType.ANTHROPIC_COMPAT: "claw_forge.pool.providers.anthropic_compat.AnthropicCompatProvider",
+    ProviderType.ANTHROPIC_COMPAT: "claw_forge.pool.providers.anthropic_compat.AnthropicCompatProvider",  # noqa: E501
     # anthropic_oauth auto-reads the Claude CLI token and delegates to AnthropicProvider
     ProviderType.ANTHROPIC_OAUTH: "claw_forge.pool.providers.anthropic.AnthropicProvider",
     # Local Ollama instance via OpenAI-compat endpoint

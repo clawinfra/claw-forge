@@ -1,9 +1,6 @@
 """Tests for smart_can_use_tool permission callback."""
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
@@ -13,7 +10,6 @@ from claw_forge.agent.permissions import (
     make_can_use_tool,
     smart_can_use_tool,
 )
-
 
 # ---------------------------------------------------------------------------
 # smart_can_use_tool — dangerous command blocking

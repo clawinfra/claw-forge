@@ -1,8 +1,6 @@
 """Tests for structured output schemas and thinking config."""
 from __future__ import annotations
 
-import pytest
-
 from claw_forge.agent.output import (
     ALL_SCHEMAS,
     CODE_REVIEW_SCHEMA,
@@ -15,7 +13,6 @@ from claw_forge.agent.thinking import (
     NO_THINKING,
     thinking_for_task,
 )
-
 
 # ---------------------------------------------------------------------------
 # Structured output schemas

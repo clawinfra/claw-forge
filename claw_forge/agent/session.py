@@ -12,7 +12,8 @@ Key capabilities vs bare query():
 """
 from __future__ import annotations
 
-from typing import AsyncIterator, Any
+from collections.abc import AsyncIterator
+from typing import Any
 
 import claude_agent_sdk
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
@@ -47,7 +48,7 @@ class AgentSession:
         # Stores user-message UUIDs for rewind support
         self._checkpoints: list[str] = []
 
-    async def __aenter__(self) -> "AgentSession":
+    async def __aenter__(self) -> AgentSession:
         self._client = ClaudeSDKClient(self.options)
         await self._client.connect()
         return self

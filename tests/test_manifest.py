@@ -1,8 +1,6 @@
 """Tests for session manifest."""
 
-import json
 import tempfile
-from pathlib import Path
 
 from claw_forge.state.manifest import FileContext, SessionManifest, SkillRef
 

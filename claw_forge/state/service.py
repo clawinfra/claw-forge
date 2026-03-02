@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sse_starlette.sse import EventSourceResponse
 
 from claw_forge.state.models import Base, Event, Session, Task
@@ -51,10 +52,8 @@ class ConnectionManager:
 
     def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket connection (safe to call even if not present)."""
-        try:
+        with suppress(ValueError):
             self._connections.remove(websocket)
-        except ValueError:
-            pass
         logger.debug("WS client disconnected; total=%d", self.active_count)
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
@@ -176,7 +175,7 @@ class AgentStateService:
                 db.add(session)
                 await db.commit()
                 await db.refresh(session)
-                await self._emit_event(session.id, None, "session.created", {"session_id": session.id})
+                await self._emit_event(session.id, None, "session.created", {"session_id": session.id})  # noqa: E501
                 return {"id": session.id, "status": session.status}
 
         @app.get("/sessions/{session_id}")
@@ -221,9 +220,9 @@ class AgentStateService:
                 if req.status:
                     task.status = req.status
                     if req.status == "running" and not task.started_at:
-                        task.started_at = datetime.now(timezone.utc)
+                        task.started_at = datetime.now(UTC)
                     elif req.status in ("completed", "failed"):
-                        task.completed_at = datetime.now(timezone.utc)
+                        task.completed_at = datetime.now(UTC)
                 if req.result is not None:
                     task.result_json = req.result
                 if req.error_message is not None:
@@ -323,7 +322,7 @@ class AgentStateService:
                     raise HTTPException(404, "Session not found")
                 session.project_paused = True
                 await db.commit()
-                await self._emit_event(session_id, None, "project.paused", {"session_id": session_id})
+                await self._emit_event(session_id, None, "project.paused", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": True}
 
         @app.post("/project/resume")
@@ -336,7 +335,7 @@ class AgentStateService:
                     raise HTTPException(404, "Session not found")
                 session.project_paused = False
                 await db.commit()
-                await self._emit_event(session_id, None, "project.resumed", {"session_id": session_id})
+                await self._emit_event(session_id, None, "project.resumed", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": False}
 
         @app.get("/project/paused")
@@ -388,7 +387,7 @@ class AgentStateService:
                 if not task:
                     raise HTTPException(404, "Task not found")
                 if task.status != "needs_human":
-                    raise HTTPException(400, f"Task is not in needs_human status (got: {task.status})")
+                    raise HTTPException(400, f"Task is not in needs_human status (got: {task.status})")  # noqa: E501
                 task.human_answer = req.answer
                 task.status = "pending"
                 await db.commit()
@@ -437,7 +436,7 @@ class AgentStateService:
         }
         # Persist
         async with self._session_factory() as db:
-            db.add(Event(session_id=session_id, task_id=task_id, event_type=event_type, payload=payload))
+            db.add(Event(session_id=session_id, task_id=task_id, event_type=event_type, payload=payload))  # noqa: E501
             await db.commit()
         # Notify SSE listeners
         for q in self._event_queues:

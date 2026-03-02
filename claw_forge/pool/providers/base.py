@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 
-class ProviderType(str, Enum):
+class ProviderType(StrEnum):
     """Supported provider backends."""
 
     ANTHROPIC = "anthropic"
@@ -153,7 +153,7 @@ class _Timer:
         self.start: float = 0.0
         self.elapsed_ms: float = 0.0
 
-    def __enter__(self) -> "_Timer":
+    def __enter__(self) -> _Timer:
         self.start = time.monotonic()
         return self
 

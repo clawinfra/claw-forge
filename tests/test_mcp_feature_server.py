@@ -1,17 +1,13 @@
 """Tests for claw_forge.mcp.feature_mcp — mock-based tests for MCP tool functions."""
 from __future__ import annotations
 
-import os
 import sys
 import uuid
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 # We test the underlying functions directly (not through MCP protocol)
 # by patching _get_engine to use an in-memory SQLite database.
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session as DBSession
 
@@ -198,7 +194,11 @@ class TestFeatureGetReady:
         assert len(ready) == 3
 
     def test_feature_with_unmet_dep_not_ready(self, engine):
-        from claw_forge.mcp.feature_mcp import feature_add_dependency, feature_create, feature_get_ready
+        from claw_forge.mcp.feature_mcp import (
+            feature_add_dependency,
+            feature_create,
+            feature_get_ready,
+        )
         dep = feature_create(name="Dep")
         dependent = feature_create(name="Dependent")
         feature_add_dependency(dependent["id"], dep["id"])
@@ -226,7 +226,11 @@ class TestFeatureGetBlocked:
 
 class TestFeatureAddDependency:
     def test_adds_dependency(self, engine):
-        from claw_forge.mcp.feature_mcp import feature_add_dependency, feature_create, feature_get_by_id
+        from claw_forge.mcp.feature_mcp import (
+            feature_add_dependency,
+            feature_create,
+            feature_get_by_id,
+        )
         a = feature_create(name="A")
         b = feature_create(name="B")
         result = feature_add_dependency(b["id"], a["id"])

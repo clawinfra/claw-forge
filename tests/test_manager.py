@@ -1,16 +1,17 @@
 """Tests for ProviderPoolManager."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import MagicMock
 
-from claw_forge.pool.manager import ProviderPoolManager, ProviderPoolExhausted
+import pytest
+
+from claw_forge.pool.manager import ProviderPoolExhausted, ProviderPoolManager
 from claw_forge.pool.providers.base import (
+    BaseProvider,
     ProviderConfig,
     ProviderError,
     ProviderResponse,
     ProviderType,
     RateLimitError,
-    BaseProvider,
 )
 
 
@@ -34,8 +35,8 @@ class MockProvider(BaseProvider):
 @pytest.fixture
 def configs():
     return [
-        ProviderConfig(name="primary", provider_type=ProviderType.ANTHROPIC, priority=1, api_key="k1"),
-        ProviderConfig(name="fallback", provider_type=ProviderType.ANTHROPIC, priority=2, api_key="k2"),
+        ProviderConfig(name="primary", provider_type=ProviderType.ANTHROPIC, priority=1, api_key="k1"),  # noqa: E501
+        ProviderConfig(name="fallback", provider_type=ProviderType.ANTHROPIC, priority=2, api_key="k2"),  # noqa: E501
     ]
 
 
@@ -108,7 +109,7 @@ class TestProviderPoolManager:
         mgr = ProviderPoolManager(configs)
         mgr._providers = [MockProvider(c) for c in configs]
         from claw_forge.pool.health import CircuitBreaker
-        mgr._circuits = {p.name: CircuitBreaker(p.name, failure_threshold=1) for p in mgr._providers}
+        mgr._circuits = {p.name: CircuitBreaker(p.name, failure_threshold=1) for p in mgr._providers}  # noqa: E501
         mgr._circuits["primary"].record_failure()
         assert not mgr._circuits["primary"].is_available
         mgr.reset_circuit("primary")

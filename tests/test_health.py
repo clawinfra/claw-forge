@@ -1,7 +1,6 @@
 """Tests for circuit breaker."""
 
 import time
-from unittest.mock import patch
 
 from claw_forge.pool.health import CircuitBreaker, CircuitState
 
@@ -72,7 +71,7 @@ class TestCircuitBreaker:
         assert d["state"] == "closed"
 
     def test_half_open_max_calls(self):
-        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=1)
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=1)  # noqa: E501
         cb.record_failure()
         time.sleep(0.15)
         assert cb.is_available
