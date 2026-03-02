@@ -177,11 +177,41 @@ def state(
 
 @app.command()
 def init(
-    project: str = typer.Option(".", "--project", "-p"),
-    spec: str | None = typer.Option(None, "--spec", "-s", help="Path to app_spec.txt"),
-    concurrency: int = typer.Option(5, "--concurrency", "-n", help="Max parallel agents"),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory to initialize"),
+    spec: str | None = typer.Option(
+        None, "--spec", "-s",
+        help="Path to app_spec.txt or additions_spec.xml. Parses features and builds DAG.",
+    ),
+    model: str = typer.Option(
+        "claude-sonnet-4-20250514", "--model", "-m",
+        help="Model to use for agent runs (e.g. claude-sonnet-4-20250514, gpt-4o). "
+             "Saved to claw-forge.yaml as the default.",
+    ),
+    concurrency: int = typer.Option(
+        5, "--concurrency", "-n",
+        help="Max parallel agents when running. Saved as default in claw-forge.yaml.",
+    ),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file (created if absent).",
+    ),
 ) -> None:
-    """Initialize a project — analyze spec and generate manifest."""
+    """Initialize a project — scaffold .claude/, parse spec, generate manifest.
+
+    Examples:
+
+        # Basic init (detects stack, scaffolds slash commands)
+        claw-forge init
+
+        # Init with a spec file (parses features, shows DAG summary)
+        claw-forge init --spec app_spec.txt
+
+        # Init with custom model and concurrency
+        claw-forge init --spec app_spec.txt --model claude-opus-4-5 --concurrency 3
+
+        # Init a specific directory
+        claw-forge init --project ~/projects/my-app --spec app_spec.txt
+    """
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.initializer import InitializerPlugin
     from claw_forge.scaffold import scaffold_project

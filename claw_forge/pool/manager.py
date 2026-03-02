@@ -186,3 +186,26 @@ class ProviderPoolManager:
         """Manually reset a provider's circuit breaker."""
         if provider_name in self._circuits:
             self._circuits[provider_name].reset()
+
+    def disable_provider(self, name: str) -> bool:
+        """Soft-disable a provider at runtime. Returns True if found."""
+        for p in self._providers:
+            if p.name == name:
+                p.config.enabled = False
+                return True
+        return False
+
+    def enable_provider(self, name: str) -> bool:
+        """Re-enable a previously disabled provider. Returns True if found."""
+        for p in self._providers:
+            if p.name == name:
+                p.config.enabled = True
+                return True
+        return False
+
+    def get_provider_enabled(self, name: str) -> bool | None:
+        """Returns enabled state, or None if provider not found."""
+        for p in self._providers:
+            if p.name == name:
+                return p.config.enabled
+        return None

@@ -69,6 +69,24 @@ export async function executeCommand(
   });
 }
 
+// ── Provider toggle ───────────────────────────────────────────────────────────
+
+/** Runtime-toggle a provider (does NOT write to disk). */
+export async function toggleProvider(name: string, enabled: boolean): Promise<void> {
+  await fetchJSON<unknown>(`/pool/providers/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+/** Persist a provider's enabled state to claw-forge.yaml. */
+export async function persistProvider(name: string, enabled: boolean): Promise<void> {
+  await fetchJSON<unknown>(`/pool/providers/${encodeURIComponent(name)}/persist`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 // ── WebSocket factory ─────────────────────────────────────────────────────────
 
 /**

@@ -10,8 +10,10 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -19,6 +21,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sse_starlette.sse import EventSourceResponse
 
 from claw_forge.commands.registry import COMMAND_IDS, COMMAND_SHELLS, COMMANDS
+from claw_forge.pool.manager import ProviderPoolManager
 from claw_forge.state.models import Base, Event, Session, Task
 
 logger = logging.getLogger(__name__)
@@ -152,10 +155,20 @@ class ExecuteCommandRequest(BaseModel):
     project_dir: str = "."
 
 
+class ToggleProviderRequest(BaseModel):
+    """Request to enable or disable a provider at runtime."""
+
+    enabled: bool
+
+
 class AgentStateService:
     """REST + SSE + WebSocket state service for orchestrating agents."""
 
-    def __init__(self, database_url: str = "sqlite+aiosqlite:///claw_forge.db") -> None:
+    def __init__(
+        self,
+        database_url: str = "sqlite+aiosqlite:///claw_forge.db",
+        pool_manager: ProviderPoolManager | None = None,
+    ) -> None:
         self._engine = create_async_engine(database_url, echo=False)
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
@@ -166,6 +179,36 @@ class AgentStateService:
         self._reviewer: Any | None = None
         # Command execution store: {execution_id: {...}}
         self._executions: dict[str, dict[str, Any]] = {}
+        # Provider pool manager (optional, used by toggle endpoints)
+        self._pool_manager: ProviderPoolManager | None = pool_manager
+
+    @staticmethod
+    def _find_config_path() -> Path | None:
+        """Search CWD and up to 3 parent dirs for claw-forge.yaml."""
+        candidate = Path.cwd()
+        for _ in range(4):
+            p = candidate / "claw-forge.yaml"
+            if p.exists():
+                return p
+            candidate = candidate.parent
+        return None
+
+    @staticmethod
+    def _persist_provider_enabled(config_path: Path, provider_name: str, enabled: bool) -> None:
+        """Read claw-forge.yaml, set providers.<name>.enabled, write back atomically."""
+        text = config_path.read_text()
+        data = yaml.safe_load(text)
+
+        if "providers" not in data:
+            raise ValueError("No providers section in config")
+        if provider_name not in data["providers"]:
+            raise ValueError(f"Provider {provider_name!r} not in config")
+
+        data["providers"][provider_name]["enabled"] = enabled
+
+        tmp = config_path.with_suffix(".yaml.tmp")
+        tmp.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
+        tmp.rename(config_path)
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -457,6 +500,50 @@ class AgentStateService:
             return {
                 "run_count": reviewer.run_count,
                 "last_result": last.to_dict() if last else None,
+            }
+
+        # ── Provider toggle endpoints ─────────────────────────────────────
+
+        @app.patch("/pool/providers/{name}")
+        async def toggle_provider(name: str, req: ToggleProviderRequest) -> dict[str, Any]:
+            """Runtime enable/disable of a provider. Does NOT write to disk."""
+            pm = self._pool_manager
+            if pm is None:
+                raise HTTPException(503, "Pool manager not available")
+            found = pm.enable_provider(name) if req.enabled else pm.disable_provider(name)
+            if not found:
+                raise HTTPException(404, f"Provider {name!r} not found")
+            # Broadcast pool_update so the UI refreshes immediately
+            status = await pm.get_pool_status()
+            await self.ws_manager.broadcast_pool_update(status["providers"])
+            return {"name": name, "enabled": req.enabled, "persisted": False}
+
+        @app.post("/pool/providers/{name}/persist")
+        async def persist_provider(name: str, req: ToggleProviderRequest) -> dict[str, Any]:
+            """Write enabled state to claw-forge.yaml atomically."""
+            pm = self._pool_manager
+            if pm is None:
+                raise HTTPException(503, "Pool manager not available")
+            current = pm.get_provider_enabled(name)
+            if current is None:
+                raise HTTPException(404, f"Provider {name!r} not found")
+            config_path = self._find_config_path()
+            if config_path is None:
+                raise HTTPException(422, {"error": "config file not found"})
+            try:
+                self._persist_provider_enabled(config_path, name, req.enabled)
+            except ValueError as exc:
+                raise HTTPException(422, {"error": str(exc)}) from exc
+            # Also apply runtime change to stay in sync
+            if req.enabled:
+                pm.enable_provider(name)
+            else:
+                pm.disable_provider(name)
+            status = await pm.get_pool_status()
+            await self.ws_manager.broadcast_pool_update(status["providers"])
+            return {
+                "name": name, "enabled": req.enabled,
+                "persisted": True, "config_path": str(config_path),
             }
 
         # ── Command palette endpoints ─────────────────────────────────────

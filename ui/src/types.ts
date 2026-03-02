@@ -191,6 +191,12 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
   },
 ];
 
+// ── Provider toggle ───────────────────────────────────────────────────────────
+
+export interface ToggleProviderRequest {
+  enabled: boolean;
+}
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export interface ActivityLogEntry {
