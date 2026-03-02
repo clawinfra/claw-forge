@@ -31,7 +31,7 @@ uv tool install claw-forge
 # 2. Set up credentials
 cp .env.example .env   # fill in at least one provider key
 
-# 3. Write your spec (or use /create-spec in Claude Code)
+# 3. Write your spec (plain text or XML — or use /create-spec in Claude Code)
 cat > app_spec.txt << 'EOF'
 Project: my-api
 Stack: Python, FastAPI, pytest
@@ -54,6 +54,9 @@ Features:
    Depends on: 1
 EOF
 
+# Or use XML format for richer specs with phases, DB schema, API summary:
+# claw-forge init my-api --spec app_spec.xml
+
 # 4. Initialize (runs the initializer agent + scaffolds the project)
 claw-forge init my-api --spec app_spec.txt
 # Output:
@@ -75,9 +78,22 @@ claw-forge ui
 
 ## Writing a Project Spec
 
-The spec (`app_spec.txt`) is the single input that drives everything. The initializer agent reads it, breaks it into atomic tasks, infers dependencies, and creates an execution plan. **The quality of your spec directly determines the quality of what gets built.**
+The spec is the single input that drives everything. The initializer agent reads it, breaks it
+into atomic tasks, infers dependencies, and creates an execution plan. **The quality of your
+spec directly determines the quality of what gets built.**
 
-### 3 ways to create a spec
+claw-forge supports **two spec formats**:
+
+| Format | When to use | Command |
+|--------|-------------|---------|
+| Plain text (`app_spec.txt`) | Quick greenfield projects | `claw-forge init --spec app_spec.txt` |
+| XML (`app_spec.xml`) | Richer greenfield specs with phases, DB schema, API summary | `claw-forge init --spec app_spec.xml` |
+| Brownfield XML (`additions_spec.xml`) | Adding features to an existing codebase | `claw-forge add --spec additions_spec.xml` |
+
+The `/create-spec` slash command generates whichever format is appropriate — it **auto-detects**
+whether you're in a greenfield or brownfield project and runs the matching conversational flow.
+
+### 4 ways to create a spec
 
 **Option 1 — Write it yourself** (best control)
 
@@ -124,16 +140,120 @@ Features:
    Depends on: 1, 2
 ```
 
-**Option 2 — Interactive with `/create-spec`** (easiest)
+**Option 2 — XML spec** (recommended for complex projects)
 
-Open Claude Code in your project directory, type `/create-spec`. Claude walks you through the project conversationally and writes both `app_spec.txt` and `claw-forge.yaml`.
+XML gives you richer structure: implementation phases, DB schema, API endpoint summary, design
+system, and success criteria. The parser generates 100–400 granular features automatically.
 
-```bash
-# In Claude Code:
-/create-spec
+```xml
+<!-- app_spec.xml -->
+<project_specification>
+  <project_name>my-api</project_name>
+  <overview>A REST API for task management with JWT auth.</overview>
+  <technology_stack>Python 3.12, FastAPI, SQLAlchemy, PostgreSQL, pytest</technology_stack>
+
+  <core_features>
+    User can register with email and password
+    System validates email format and enforces password strength
+    User can log in and receive JWT access + refresh tokens
+    User can create tasks with title, description, status, and priority
+    User can list their tasks with pagination
+  </core_features>
+
+  <database_schema>
+    Users: id, email, password_hash, created_at
+    Tasks: id, owner_id, title, description, status, priority, created_at
+  </database_schema>
+
+  <implementation_steps>
+    <phase name="Auth">User registration, login, JWT tokens</phase>
+    <phase name="Tasks">Task CRUD endpoints</phase>
+    <phase name="Tests">Integration test suite, coverage ≥ 90%</phase>
+  </implementation_steps>
+
+  <success_criteria>
+    All endpoints tested, coverage ≥ 90%, ruff + mypy clean
+  </success_criteria>
+</project_specification>
 ```
 
-**Option 3 — From an existing doc**
+```bash
+claw-forge init my-api --spec app_spec.xml
+```
+
+Use `skills/app_spec.template.xml` as a starting point (copied to your project by
+`claw-forge init`).
+
+**Option 3 — Brownfield XML spec** (adding features to an existing project)
+
+When you want to add a set of related features to an existing codebase, use
+`additions_spec.xml`. The `mode="brownfield"` attribute tells claw-forge to load
+`brownfield_manifest.json` and inject existing conventions into agent context.
+
+```xml
+<!-- additions_spec.xml -->
+<project_specification mode="brownfield">
+  <project_name>my-api — Stripe Integration</project_name>
+  <addition_summary>Add Stripe payment processing to the existing FastAPI app.</addition_summary>
+
+  <existing_context>
+    <!-- Auto-populated by /create-spec when brownfield_manifest.json exists -->
+    <stack>Python / FastAPI / PostgreSQL</stack>
+    <test_baseline>47 tests passing, 87% coverage</test_baseline>
+    <conventions>snake_case, async handlers, pydantic v2 models</conventions>
+  </existing_context>
+
+  <features_to_add>
+    User can add a payment method via Stripe Elements
+    System charges stored payment method on subscription creation
+    Admin can issue refunds from the dashboard
+  </features_to_add>
+
+  <integration_points>
+    Extends User model with stripe_customer_id field
+    Adds /payments router alongside existing /auth and /tasks routers
+  </integration_points>
+
+  <constraints>
+    Must not modify existing auth flow
+    All 47 existing tests must stay green
+    Follow existing async handler pattern in routers/
+  </constraints>
+
+  <implementation_steps>
+    <phase name="Stripe Setup">Stripe client, webhook handler, config</phase>
+    <phase name="Payment Methods">Add/remove cards, default card</phase>
+    <phase name="Subscriptions">Create, cancel, webhook events</phase>
+  </implementation_steps>
+</project_specification>
+```
+
+```bash
+claw-forge add --spec additions_spec.xml
+```
+
+Use `skills/app_spec.brownfield.template.xml` as a starting point.
+
+**Option 4 — Interactive with `/create-spec`** (easiest)
+
+Open Claude Code in your project directory and type `/create-spec`. It **auto-detects** the
+mode:
+
+- **No `brownfield_manifest.json`** → greenfield flow: walks through project name, stack, features,
+  DB schema, API endpoints — outputs `app_spec.xml` + `claw-forge.yaml`
+- **`brownfield_manifest.json` exists** → brownfield flow: pre-populates `<existing_context>`
+  from the manifest, asks what to add and what constraints apply — outputs `additions_spec.xml`
+
+```bash
+# In Claude Code (greenfield — new project):
+/create-spec
+
+# In Claude Code (brownfield — after claw-forge analyze):
+claw-forge analyze     # generates brownfield_manifest.json first
+/create-spec           # detects manifest → runs brownfield flow automatically
+```
+
+**Option 5 — From an existing doc**
 
 Paste a PRD, Notion export, or detailed README into Claude and ask:
 
@@ -141,16 +261,43 @@ Paste a PRD, Notion export, or detailed README into Claude and ask:
 
 ### Spec format reference
 
+**Plain text fields:**
+
 | Field | Required | Description |
 |---|---|---|
-| `Project:` | ✅ | Project name (used as identifier) |
+| `Project:` | ✅ | Project name |
 | `Stack:` | ✅ | Languages, frameworks, databases |
 | `Description:` | optional | One paragraph overview |
 | `Features:` | ✅ | List of numbered features |
-| `Description:` (per feature) | ✅ | What the agent should build |
 | `Acceptance criteria:` | ✅ | Bullet list — each item is a verifiable condition |
-| `Depends on:` | optional | Comma-separated feature numbers this feature needs first |
+| `Depends on:` | optional | Comma-separated feature numbers |
 | `Tech notes:` | optional | Library preferences, patterns, constraints |
+
+**XML elements (greenfield `app_spec.xml`):**
+
+| Element | Required | Description |
+|---|---|---|
+| `<project_name>` | ✅ | Project name |
+| `<overview>` | ✅ | One paragraph summary |
+| `<technology_stack>` | ✅ | Languages, frameworks, databases |
+| `<core_features>` | ✅ | One feature per line, action-verb format |
+| `<database_schema>` | optional | Table definitions |
+| `<api_endpoints_summary>` | optional | Route list |
+| `<ui_layout>` | optional | Page/component structure |
+| `<implementation_steps>` | optional | `<phase name="...">` blocks — features grouped by phase |
+| `<success_criteria>` | optional | Done conditions |
+
+**XML elements (brownfield `additions_spec.xml`, `mode="brownfield"`):**
+
+| Element | Required | Description |
+|---|---|---|
+| `<project_name>` | ✅ | Project + addition name |
+| `<addition_summary>` | ✅ | What you're adding and why |
+| `<existing_context>` | optional | `<stack>`, `<test_baseline>`, `<conventions>` — auto-populated by `/create-spec` |
+| `<features_to_add>` | ✅ | One feature per line (same format as `<core_features>`) |
+| `<integration_points>` | optional | Where new code hooks into existing code |
+| `<constraints>` | optional | What must NOT change |
+| `<implementation_steps>` | optional | `<phase name="...">` blocks |
 
 ### Tips for a good spec
 
@@ -407,7 +554,7 @@ Seven slash commands in `.claude/commands/` for use inside Claude Code. These ar
 
 | Command | Purpose |
 |---|---|
-| `/create-spec` | Interactive project spec creation |
+| `/create-spec` | Interactive spec creation — auto-detects greenfield vs brownfield, outputs XML |
 | `/expand-project` | Add features to an existing project |
 | `/check-code` | Run ruff + mypy + pytest and report |
 | `/checkpoint` | Commit + DB snapshot + session summary |
