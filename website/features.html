@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Why claw-forge — Features &amp; Capabilities</title>
+  <meta name="description" content="Explore everything claw-forge offers: multi-provider API rotation, circuit breakers, 18 built-in skills, pure Python, and a live Kanban UI."/>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">🔥 claw-forge</a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="features.html">Features</a>
+      <a href="https://github.com/clawinfra/claw-forge" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<section style="padding-top:60px">
+  <div class="container">
+    <p class="section-label">Capabilities</p>
+    <h2>Everything claw-forge offers</h2>
+    <p class="section-desc">A complete picture of what makes claw-forge the right harness for serious autonomous coding pipelines.</p>
+
+    <!-- Stat highlights -->
+    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin:40px 0">
+      <div class="card" style="text-align:center;padding:24px 36px;flex:0 0 auto">
+        <div style="font-size:48px;font-weight:800;color:var(--success)">7+</div>
+        <div style="color:var(--text-muted);font-size:14px">AI providers</div>
+      </div>
+      <div class="card" style="text-align:center;padding:24px 36px;flex:0 0 auto">
+        <div style="font-size:48px;font-weight:800;color:var(--accent)">18</div>
+        <div style="color:var(--text-muted);font-size:14px">built-in skills</div>
+      </div>
+      <div class="card" style="text-align:center;padding:24px 36px;flex:0 0 auto">
+        <div style="font-size:48px;font-weight:800;color:var(--warning)">427</div>
+        <div style="color:var(--text-muted);font-size:14px">tests passing</div>
+      </div>
+      <div class="card" style="text-align:center;padding:24px 36px;flex:0 0 auto">
+        <div style="font-size:48px;font-weight:800;color:var(--success)">0</div>
+        <div style="color:var(--text-muted);font-size:14px">Node.js required</div>
+      </div>
+    </div>
+
+    <!-- Full feature table -->
+    <div class="table-wrap">
+      <table class="comparison">
+        <thead>
+          <tr>
+            <th style="width:40%">Feature</th>
+            <th style="width:15%">Status</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <tr class="category-row"><td colspan="3">Language &amp; Installation</td></tr>
+          <tr><td>Language</td><td class="win">✅</td><td>Pure Python — no Node.js, no Bun, no npm</td></tr>
+          <tr><td>Package manager</td><td class="win">✅</td><td><code>uv tool install claw-forge</code> — isolated, instant, no venv ceremony</td></tr>
+          <tr><td>PyPI package</td><td class="win">✅</td><td>Also installable via <code>pip install claw-forge</code></td></tr>
+
+          <tr class="category-row"><td colspan="3">AI Provider Support</td></tr>
+          <tr><td>API rotation pool</td><td class="win">✅</td><td>Round-robin and weighted routing across 7+ providers with automatic failover</td></tr>
+          <tr><td>Anthropic (direct)</td><td class="win">✅</td><td>Direct API key or OAuth token from <code>claude login</code></td></tr>
+          <tr><td>AWS Bedrock</td><td class="win">✅</td><td>IAM credentials or instance role — no key management</td></tr>
+          <tr><td>Azure AI Foundry</td><td class="win">✅</td><td>Azure OpenAI-compat endpoint with managed identity support</td></tr>
+          <tr><td>Google Vertex AI</td><td class="win">✅</td><td>ADC credentials, auto model name conversion (<code>@</code> format)</td></tr>
+          <tr><td>Groq (free tier)</td><td class="win">✅</td><td>14,400 req/day free — ideal for monitoring and lightweight tasks</td></tr>
+          <tr><td>Cerebras (free tier)</td><td class="win">✅</td><td>1M tokens/day free — Llama 3.3 70B at near-instant inference</td></tr>
+          <tr><td>Ollama (local)</td><td class="win">✅</td><td>Any locally-running model via Ollama's OpenAI-compat API</td></tr>
+          <tr><td>Anthropic-compat proxies</td><td class="win">✅</td><td>Custom <code>base_url</code> with <code>x-api-key</code> auth — works with any proxy</td></tr>
+          <tr><td>Circuit breaker per provider</td><td class="win">✅</td><td>Closed → Half-open → Open state machine; auto-recovery after cooldown</td></tr>
+          <tr><td>Provider health dashboard</td><td class="win">✅</td><td>Live health dots in Kanban UI — RPM, latency, cost per provider</td></tr>
+          <tr><td>Per-provider cost tracking</td><td class="win">✅</td><td>USD cost tracked per session and per provider</td></tr>
+          <tr><td>OAuth token support</td><td class="win">✅</td><td>Auto-reads <code>~/.claude/.credentials.json</code>; re-reads on 401</td></tr>
+
+          <tr class="category-row"><td colspan="3">Claude Agent SDK Integration</td></tr>
+          <tr><td>Bidirectional sessions</td><td class="win">✅</td><td><code>ClaudeSDKClient</code> — mid-session follow-ups, model switching, interrupt</td></tr>
+          <tr><td>In-process MCP server</td><td class="win">✅</td><td>Feature DB tools run in-process — zero subprocess cold-start overhead</td></tr>
+          <tr><td>File checkpointing + rewind</td><td class="win">✅</td><td>Rewind all files to any prior checkpoint without git</td></tr>
+          <tr><td>Pre-compact hook</td><td class="win">✅</td><td>Custom compaction instructions preserve feature state across context limits</td></tr>
+          <tr><td>Structured JSON output</td><td class="win">✅</td><td>Schema-enforced output from reviewer and planning agents</td></tr>
+          <tr><td>Thinking config</td><td class="win">✅</td><td>Deep thinking for planning, adaptive for coding, disabled for monitoring</td></tr>
+          <tr><td>Named sub-agents</td><td class="win">✅</td><td><code>AgentDefinition</code> — planner/coder/reviewer with separate prompts and tool sets</td></tr>
+          <tr><td>Cost cap per session</td><td class="win">✅</td><td><code>max_budget_usd</code> — hard stop when budget is hit</td></tr>
+          <tr><td>Token-level streaming</td><td class="win">✅</td><td><code>StreamEvent</code> for typewriter effect in terminal UI</td></tr>
+
+          <tr class="category-row"><td colspan="3">Architecture &amp; Concurrency</td></tr>
+          <tr><td>Concurrency model</td><td class="win">✅</td><td>Pure <code>asyncio.TaskGroup</code> — no subprocess+threading mix</td></tr>
+          <tr><td>State management</td><td class="win">✅</td><td>FastAPI REST + SQLAlchemy + WebSocket — clean separation of concerns</td></tr>
+          <tr><td>Session hydration</td><td class="win">✅</td><td><code>session_manifest.json</code> survives restarts and process crashes</td></tr>
+          <tr><td>Plugin system</td><td class="win">✅</td><td><code>pyproject.toml</code> entry points — third-party plugins without forking core</td></tr>
+          <tr><td>Dependency-aware scheduling</td><td class="win">✅</td><td>Kahn's algorithm + DFS cycle detection — features run in correct order</td></tr>
+
+          <tr class="category-row"><td colspan="3">Security</td></tr>
+          <tr><td>Bash security hook</td><td class="win">✅</td><td>Hierarchical allowlist: hardcoded blocklist → global defaults → project-specific</td></tr>
+          <tr><td>CanUseTool callback</td><td class="win">✅</td><td>Programmatic permission control with input mutation before execution</td></tr>
+          <tr><td>OS-level sandbox</td><td class="win">✅</td><td><code>SandboxSettings</code> — filesystem + network isolation at OS level (macOS/Linux)</td></tr>
+          <tr><td>Write restriction to project dir</td><td class="win">✅</td><td>File writes sandboxed to the project directory automatically</td></tr>
+          <tr><td>Agent lock file</td><td class="win">✅</td><td><code>.claw-forge.lock</code> prevents duplicate agents on the same project</td></tr>
+
+          <tr class="category-row"><td colspan="3">Skills &amp; Built-in Tooling</td></tr>
+          <tr><td>LSP skills (Python)</td><td class="win">✅</td><td>Pyright — type checking, autocomplete, go-to-definition</td></tr>
+          <tr><td>LSP skills (Go)</td><td class="win">✅</td><td>gopls — full Go language intelligence</td></tr>
+          <tr><td>LSP skills (Rust)</td><td class="win">✅</td><td>rust-analyzer — borrow checker integration, refactoring</td></tr>
+          <tr><td>LSP skills (TypeScript)</td><td class="win">✅</td><td>ts-server — JS/TS type checking and navigation</td></tr>
+          <tr><td>LSP skills (Solidity)</td><td class="win">✅</td><td>Solidity LSP — smart contract analysis</td></tr>
+          <tr><td>LSP skills (C/C++)</td><td class="win">✅</td><td>clangd — C/C++ intelligence and formatting</td></tr>
+          <tr><td>Systematic debug skill</td><td class="win">✅</td><td>Structured root-cause analysis workflow</td></tr>
+          <tr><td>Verification gate skill</td><td class="win">✅</td><td>Run checks before claiming task complete</td></tr>
+          <tr><td>Parallel dispatch skill</td><td class="win">✅</td><td>Route subtasks to parallel agents automatically</td></tr>
+          <tr><td>Frontend design skill</td><td class="win">✅</td><td>Production-grade UI design guidance for web agents</td></tr>
+          <tr><td>Playwright browser skill</td><td class="win">✅</td><td>Browser automation for web testing agents</td></tr>
+
+          <tr class="category-row"><td colspan="3">Workflow Features</td></tr>
+          <tr><td>YOLO mode</td><td class="win">✅</td><td><code>--yolo</code> — max concurrency, auto-approve permissions, skip verification</td></tr>
+          <tr><td>Pause / resume</td><td class="win">✅</td><td>Drain mode: finish active features, then pause gracefully</td></tr>
+          <tr><td>Human input requests</td><td class="win">✅</td><td>Agent raises <code>needs_human</code> flag; <code>claw-forge input</code> CLI unblocks it</td></tr>
+          <tr><td>Batch feature mode</td><td class="win">✅</td><td>Implement multiple features per session with <code>--batch-size</code></td></tr>
+          <tr><td>Slash commands (.claude/)</td><td class="win">✅</td><td>create-spec, expand-project, check-code, checkpoint, review-pr, pool-status</td></tr>
+          <tr><td>Session resume</td><td class="win">✅</td><td>Continue or fork any prior session by ID</td></tr>
+          <tr><td>Rate limit handling</td><td class="win">✅</td><td>Parse retry-after headers, exponential backoff, auto-resume after cooldown</td></tr>
+
+          <tr class="category-row"><td colspan="3">UI &amp; Monitoring</td></tr>
+          <tr><td>Kanban board</td><td class="win">✅</td><td>5-column board: Pending / In Progress / Passing / Failed / Blocked</td></tr>
+          <tr><td>Provider health dots</td><td class="win">✅</td><td>Green/amber/red per provider; click for RPM, latency, circuit state</td></tr>
+          <tr><td>Real-time WebSocket updates</td><td class="win">✅</td><td>Feature status, agent events, cost — live, no polling</td></tr>
+
+          <tr class="category-row"><td colspan="3">Documentation &amp; Quality</td></tr>
+          <tr><td>Tutorial website</td><td class="win">✅</td><td>This site — quickstart, provider setup, plugin guide, skills reference</td></tr>
+          <tr><td>SDK API guide</td><td class="win">✅</td><td>20 Claude Agent SDK APIs documented with claw-forge examples (<code>docs/sdk-api-guide.md</code>)</td></tr>
+          <tr><td>Test coverage ≥ 90%</td><td class="win">✅</td><td>Enforced in CI — 427 tests, all passing</td></tr>
+          <tr><td>Type annotations (strict)</td><td class="win">✅</td><td>Full mypy strict — no <code>Any</code> escapes in core modules</td></tr>
+          <tr><td>GitHub CI/CD</td><td class="win">✅</td><td>Lint + typecheck + full test suite on every push and PR</td></tr>
+
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Roadmap -->
+    <div style="margin-top:80px">
+      <p class="section-label">Roadmap</p>
+      <h2>What we're building next</h2>
+      <p class="section-desc">Honest about what's still in progress.</p>
+
+      <div class="roadmap-grid">
+        <div class="roadmap-item">
+          <h4>🌐 Multi-machine Agents</h4>
+          <p>Distribute agent waves across multiple machines. The pool manager handles routing — we need the distributed work queue layer.</p>
+        </div>
+        <div class="roadmap-item">
+          <h4>☁️ Cloud State Backend</h4>
+          <p>Currently SQLite — great for local development. Adding PostgreSQL and a hosted cloud option for team use.</p>
+        </div>
+        <div class="roadmap-item">
+          <h4>🧩 VS Code Extension</h4>
+          <p>Embed the Kanban UI directly in VS Code. See agent progress without leaving your editor.</p>
+        </div>
+        <div class="roadmap-item">
+          <h4>📊 Cost Analytics Dashboard</h4>
+          <p>Historical cost breakdown per project, per provider, per feature — so you can optimize spend over time.</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:64px;padding-bottom:40px">
+      <a href="tutorial.html" class="btn btn-primary">Get started →</a>
+      &nbsp;&nbsp;
+      <a href="https://github.com/clawinfra/claw-forge" class="btn btn-secondary">Star on GitHub ⭐</a>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/clawinfra/claw-forge" target="_blank">GitHub</a>
+    <a href="tutorial.html">Tutorial</a>
+    <a href="features.html">Features</a>
+    <a href="https://github.com/clawinfra/claw-forge/issues" target="_blank">Issues</a>
+  </div>
+  <p>Released under the <strong>Apache 2.0 License</strong> · Built by <a href="https://github.com/clawinfra" target="_blank">ClawInfra</a></p>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>

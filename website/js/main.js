@@ -132,11 +132,10 @@ function initFadeIn() {
 function initTableHighlight() {
   document.querySelectorAll('table.comparison tbody tr').forEach(row => {
     const cells = row.querySelectorAll('td');
-    // If claw-forge column has ✅ and autoforge has ❌, highlight row
-    if (cells.length >= 3) {
-      const autoforge = cells[1].textContent.trim();
-      const clawforge = cells[2].textContent.trim();
-      if (autoforge.includes('❌') && clawforge.includes('✅')) {
+    // Highlight rows where the feature is supported
+    if (cells.length >= 2) {
+      const status = cells[1].textContent.trim();
+      if (status.includes('✅')) {
         row.style.background = 'rgba(63, 185, 80, 0.04)';
       }
     }
