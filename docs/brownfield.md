@@ -107,28 +107,130 @@ claw-forge add "WebSocket notification system" \
 
 ### `claw-forge fix <description>`
 
-Fix a bug using reproduce-first protocol (Red-Green).
+Fix a bug using a strict reproduce-first protocol (RED → GREEN). Two modes are supported: a quick one-liner, or a structured bug report for complex issues.
+
+---
+
+#### Quick fix (one-liner)
 
 ```bash
-# Fix a bug
-claw-forge fix "Login returns 500 when email contains plus sign"
+claw-forge fix "users get 500 when uploading files > 5MB"
+```
 
-# With options
+Describe the bug in plain English. The agent reproduces it, writes a failing test, fixes it, and commits.
+
+#### Structured fix (recommended for complex bugs)
+
+For bugs that are hard to describe in one line, use a structured bug report:
+
+```bash
+# Option A — Generate interactively with the /create-bug-report slash command
+# (opens guided 6-phase flow in Claude Code)
+/create-bug-report
+
+# Option B — Fill in the template manually
+cp skills/bug_report.template.md bug_report.md
+# edit bug_report.md...
+
+# Run the fix
+claw-forge fix --report bug_report.md
+```
+
+**Example filled-in `bug_report.md`:**
+
+```markdown
+# Bug Report
+
+## Title
+Users get HTTP 500 when uploading files larger than 5 MB
+
+## Symptoms
+- POST /api/upload returns 500 Internal Server Error
+- Only reproducible for files ≥ 5 MB; smaller files work fine
+- Error only appears in production (not local dev)
+- No useful error message in the response body
+
+## Steps to Reproduce
+1. Authenticate as any user
+2. POST /api/upload with a multipart file ≥ 5 MB
+3. Observe 500 response
+
+## Expected Behaviour
+File is uploaded successfully, returns 201 with `{"file_id": "..."}`.
+
+## Actual Behaviour
+500 Internal Server Error. Server logs show:
+`RequestEntityTooLargeError: request body exceeded 4194304 bytes`
+
+## Affected Scope
+- `src/api/upload.py` — upload endpoint
+- `src/config.py` — possibly where the limit is set
+
+## Constraints
+- Must not break existing file upload tests
+- Fix must work for files up to 100 MB (product requirement)
+- Do not change the request Content-Type handling
+
+## Regression Test Required
+Yes — add a test that POSTs a 6 MB file and asserts 201.
+```
+
+---
+
+#### What happens during `claw-forge fix`
+
+1. Auto-runs `analyze` if no `brownfield_manifest.json` exists
+2. Creates git branch `fix/<slug-of-description>`
+3. Runs existing test suite → establishes baseline (must all pass)
+4. Loads `BugReport` from description or `--report` file
+5. Agent writes a **failing regression test** that reproduces the bug (**RED**)
+6. Agent uses `systematic-debug` skill to isolate root cause
+7. Agent applies **surgical fix** — minimum code change, matched to project conventions
+8. Confirms the regression test now passes (**GREEN**)
+9. Runs full test suite → all must be green (no regressions)
+10. Commits with message: `fix: <title>\n\nRegression test: <test_name>`
+
+---
+
+#### RED → GREEN protocol detail
+
+```
+  Bug description / bug_report.md
+         │
+         ▼
+  BugReport.from_file() / from_description()
+         │  Parses: symptoms, repro steps, expected/actual,
+         │  affected scope, constraints, regression_test_required
+         ▼
+  BugFixPlugin.execute()
+         │  Injects: to_agent_prompt() → structured context
+         │  Skills: systematic-debug (auto), verification-gate (auto)
+         │  Thinking: ADAPTIVE_THINKING
+         ▼
+  Agent runs RED→GREEN loop:
+    1. Write failing regression test (RED) ← committed first
+    2. Isolate root cause (systematic-debug)
+    3. Surgical fix — touches only what's needed
+    4. Regression test passes (GREEN)
+    5. Full suite green — 0 regressions allowed
+    6. Atomic commit: fix: <title>\n\nRegression test: <test_name>
+```
+
+The failing test is committed **before** the fix. This proves the bug was real and the fix is targeted.
+
+---
+
+#### With options
+
+```bash
 claw-forge fix "Memory leak in WebSocket handler" \
   --project ./myapp \
   --model claude-sonnet-4-5
-```
 
-**What happens:**
-1. Auto-runs `analyze` if no `brownfield_manifest.json` exists
-2. Creates git branch `fix/login-returns-500-when-email-contains-plus-sign`
-3. Runs existing test suite → establishes baseline (must pass)
-4. Agent writes a **failing test** that reproduces the bug (RED)
-5. Agent finds root cause with systematic debugging
-6. Agent applies **surgical fix** — minimum code change
-7. Confirms the failing test now passes (GREEN)
-8. Runs full test suite → all green
-9. Generates fix report, commits on branch
+claw-forge fix --report bug_report.md \
+  --project ./myapp \
+  --config claw-forge.yaml
+```
 
 ---
 

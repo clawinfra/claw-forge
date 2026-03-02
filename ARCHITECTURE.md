@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        CLI  (Typer)                               │
-│   run | init | status | pause | resume | input | pool-status | state │
+│   run | init | status | pause | resume | input | pool-status | state | fix │
 └─────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -293,7 +293,15 @@ class AgentPlugin(Protocol):
     async def execute(self, context: PluginContext) -> PluginResult: ...
 ```
 
-Built-in: `initializer`, `coding`, `testing`, `reviewer`
+Built-in: `initializer`, `coding`, `testing`, `reviewer`, `bugfix`
+
+| Plugin | Class | Purpose |
+|---|---|---|
+| `initializer` | `InitializerPlugin` | Parse spec, create feature DAG |
+| `coding` | `CodingPlugin` | TDD-first feature implementation |
+| `testing` | `TestingPlugin` | Run regression tests, report failures |
+| `reviewer` | `ReviewerPlugin` | Structured code review with verdict |
+| `bugfix` | `BugFixPlugin` | Reproduce-first bug fix: RED→GREEN protocol, systematic-debug skill injection, BugReport context injection, mandatory regression test |
 
 All built-in plugins call `collect_result()` from `claw_forge.agent` — they don't make HTTP calls directly.
 
@@ -484,6 +492,50 @@ The manifest is consumed by `add` and `fix` agents to ensure new code matches ex
 
 ---
 
+## Bug Fix Workflow
+
+`claw-forge fix` routes through `BugFixPlugin` with a strict reproduce-first protocol:
+
+```
+  User input (description or bug_report.md)
+         │
+         ▼
+  BugReport.from_file() / from_description()
+         │  Parses: symptoms, repro steps, expected/actual,
+         │  affected scope, constraints, regression_test_required
+         ▼
+  BugFixPlugin.execute()
+         │  Injects: to_agent_prompt() → structured context
+         │  Skills: systematic-debug (auto), verification-gate (auto)
+         │  Thinking: ADAPTIVE_THINKING
+         ▼
+  Agent runs RED→GREEN protocol:
+    1. Write failing regression test (RED)
+    2. Isolate root cause
+    3. Surgical fix — minimum code change
+    4. Regression test passes (GREEN)
+    5. Full suite green — 0 regressions
+    6. Atomic commit: fix: <title>\n\nRegression test: <test_name>
+```
+
+**Entry points:**
+
+| Command | Input | Description |
+|---|---|---|
+| `claw-forge fix "description"` | Plain text | One-liner quick fix |
+| `claw-forge fix --report bug_report.md` | Structured markdown | Full bug report with repro steps, scope, constraints |
+
+**Key source files:**
+
+| File | Description |
+|---|---|
+| `claw_forge/bugfix/report.py` | `BugReport` dataclass + markdown parser |
+| `claw_forge/plugins/bugfix.py` | `BugFixPlugin` — RED-GREEN protocol |
+| `skills/bug_report.template.md` | Bug report template for users |
+| `.claude/commands/create-bug-report.md` | `/create-bug-report` slash command — guided 6-phase report creation |
+
+---
+
 ## Technology Stack
 
 | Layer | Choice | Why |
@@ -498,7 +550,7 @@ The manifest is consumed by `add` and `fix` agents to ensure new code matches ex
 | Database | SQLite (default) / PostgreSQL | Zero-config local; scalable cloud |
 | Config | YAML + env var interpolation | Human-readable, 12-factor friendly |
 | UI | React 18 + Vite + Tailwind | Fast build, small bundle, no framework overhead |
-| Testing | pytest + pytest-asyncio | 584 tests, 90%+ coverage enforced in CI |
+| Testing | pytest + pytest-asyncio | 637 tests, 90%+ coverage enforced in CI |
 | Type checking | mypy | Clean — 0 errors across 54 files |
 
 ---
@@ -516,6 +568,9 @@ The manifest is consumed by `add` and `fix` agents to ensure new code matches ex
 | `claw_forge/mcp/sdk_server.py` | In-process MCP server — feature management tools |
 | `claw_forge/state/service.py` | FastAPI state service — REST + WebSocket + SSE |
 | `claw_forge/plugins/base.py` | Plugin protocol — entry-point-based agent type extensions |
+| `claw_forge/bugfix/report.py` | `BugReport` dataclass + markdown parser — structured bug report → agent context |
+| `claw_forge/plugins/bugfix.py` | `BugFixPlugin` — RED-GREEN protocol, systematic-debug injection, regression test enforcement |
+| `skills/bug_report.template.md` | Bug report template for `claw-forge fix --report` |
 
 ## Further Reading
 

@@ -7,7 +7,7 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
-[![Tests](https://img.shields.io/badge/tests-584%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Tests](https://img.shields.io/badge/tests-637%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 
@@ -371,6 +371,8 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | Feature | Command / Flag |
 |---|---|
 | YOLO mode | `claw-forge run my-app --yolo` |
+| Fix a bug (one-liner) | `claw-forge fix "description"` |
+| Fix a bug from report | `claw-forge fix --report report.md` |
 | Pause (drain) | `claw-forge pause my-app` |
 | Resume | `claw-forge resume my-app` |
 | Human input | `claw-forge input my-app "Here's the API key"` |
@@ -412,6 +414,7 @@ Seven slash commands in `.claude/commands/` for use inside Claude Code. These ar
 | `/review-pr` | Structured PR review with verdict |
 | `/pool-status` | Provider health and cost analysis |
 | `/claw-forge-status` | Project progress, phase bars, agent state, next action |
+| `/create-bug-report` | Guided 6-phase bug report creation → runs fix |
 
 Four agent definitions in `.claude/agents/`:
 
@@ -424,7 +427,7 @@ Four agent definitions in `.claude/agents/`:
 
 ---
 
-## Pre-installed Skills (18)
+## Pre-installed Skills (18) + Templates
 
 Skills are auto-injected into agent sessions via three layers:
 
@@ -439,6 +442,8 @@ All injection is controlled by `auto_inject_skills=True` on `run_agent()` / `aut
 **Process skills (6):** systematic-debug · verification-gate · parallel-dispatch · test-driven · code-review · web-research
 
 **Integration skills (6):** git-workflow · api-client · docker · security-audit · performance · database
+
+**Templates:** `skills/bug_report.template.md` — structured bug report template for use with `claw-forge fix --report`
 
 ---
 
@@ -459,6 +464,34 @@ claw-forge fix "Login fails when email contains uppercase letters"
 
 The analyzer detects your stack, parses git history for hot files, establishes a test baseline, and writes `brownfield_manifest.json`. Subsequent `add`/`fix` runs load this manifest to match your existing conventions.
 
+### Fixing bugs
+
+**Quick fix** (one-liner):
+```bash
+claw-forge fix "users get 500 when uploading files > 5MB"
+```
+
+**Structured fix** (recommended for complex bugs):
+```bash
+# Generate a structured bug report interactively
+/create-bug-report
+
+# Or copy the template and fill it in
+cp skills/bug_report.template.md bug_report.md
+# edit bug_report.md...
+
+# Run the fix
+claw-forge fix --report bug_report.md
+```
+
+The bug-fix agent follows a strict **RED → GREEN** protocol:
+1. Writes a failing regression test first (RED)
+2. Locates root cause using systematic-debug skill
+3. Makes surgical fix — touches only what's needed
+4. Confirms regression test passes (GREEN)
+5. Runs full test suite — must be 100% green
+6. Commits with `fix: <title>\n\nRegression test: <test_name>`
+
 > **Status:** `analyze`, `add`, and `fix` commands are planned — see [`docs/brownfield.md`](docs/brownfield.md) for the full design.
 
 ---
@@ -466,6 +499,18 @@ The analyzer detects your stack, parses git history for hot files, establishes a
 ## Plugin System
 
 Extend claw-forge with custom agent types via Python entry points — no fork required:
+
+Built-in plugins (registered in `pyproject.toml`):
+
+| Entry point | Plugin | Purpose |
+|---|---|---|
+| `initializer` | `InitializerPlugin` | Parse spec, create feature DAG |
+| `coding` | `CodingPlugin` | TDD-first feature implementation |
+| `testing` | `TestingPlugin` | Run regression tests, report failures |
+| `reviewer` | `ReviewerPlugin` | Structured code review with verdict |
+| `bugfix` | `BugFixPlugin` | Reproduce-first bug fix: RED→GREEN protocol |
+
+Add your own:
 
 ```toml
 # your-package/pyproject.toml
