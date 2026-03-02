@@ -251,9 +251,10 @@ def init(
         help="Path to app_spec.txt or additions_spec.xml. Parses features and builds DAG.",
     ),
     model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m",
-        help="Model to use for agent runs (e.g. claude-sonnet-4-20250514, gpt-4o). "
-             "Saved to claw-forge.yaml as the default.",
+        "claude-opus-4-5", "--model", "-m",
+        help="Model for spec parsing and feature decomposition. Defaults to Opus — "
+             "init is the critical planning step where quality matters most. "
+             "Use Sonnet only if cost is a hard constraint.",
     ),
     concurrency: int = typer.Option(
         5, "--concurrency", "-n",
@@ -266,16 +267,20 @@ def init(
 ) -> None:
     """Initialize a project — scaffold .claude/, parse spec, generate manifest.
 
+    Uses the most capable model by default (Opus) because init is the critical
+    planning step: it decomposes the spec into a feature DAG, assigns dependencies,
+    and determines phases. Errors here cascade through every subsequent agent run.
+
     Examples:
 
         # Basic init (detects stack, scaffolds slash commands)
         claw-forge init
 
-        # Init with a spec file (parses features, shows DAG summary)
+        # Init with a spec file — Opus parses features and builds DAG
         claw-forge init --spec app_spec.txt
 
-        # Init with custom model and concurrency
-        claw-forge init --spec app_spec.txt --model claude-opus-4-5 --concurrency 3
+        # Use Sonnet if cost matters more than planning quality
+        claw-forge init --spec app_spec.txt --model claude-sonnet-4-5 --concurrency 3
 
         # Init a specific directory
         claw-forge init --project ~/projects/my-app --spec app_spec.txt
