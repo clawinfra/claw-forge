@@ -33,6 +33,7 @@ class VertexProvider(BaseProvider):
                     "Install vertex extras: pip install claw-forge[vertex]",
                     retryable=False,
                 ) from e
+            assert self._project_id is not None  # guaranteed by __init__ check
             self._client = AsyncAnthropicVertex(
                 project_id=self._project_id,
                 region=self._region,

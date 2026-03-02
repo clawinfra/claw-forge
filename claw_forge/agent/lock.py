@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -14,7 +15,7 @@ class AgentLockError(Exception):
 
 
 @contextmanager
-def agent_lock(project_dir: Path):
+def agent_lock(project_dir: Path) -> Generator[None, None, None]:
     """Context manager that acquires an exclusive lock for a project directory.
 
     Creates a lock file containing the current PID. Raises AgentLockError if

@@ -50,8 +50,8 @@ async def bash_security_hook(
     context: HookContext,
 ) -> SyncHookJSONOutput:
     """Validate bash commands against the allowlist before execution."""
-    command = input_data.get("command", "") if isinstance(input_data, dict) else str(input_data)
-    cmd_name = _extract_command_name(command)
+    raw_cmd = input_data.get("command", "") if isinstance(input_data, dict) else str(input_data)
+    cmd_name = _extract_command_name(str(raw_cmd))
 
     # Hardcoded blocklist — never allowed
     if _is_blocked(cmd_name):
@@ -62,7 +62,8 @@ async def bash_security_hook(
         })
 
     # Project-specific allowlist (from context if provided)
-    project_allowlist: list[str] = context.get("project_allowlist", []) if context else []
+    raw = context.get("project_allowlist", []) if context else []
+    project_allowlist: list[str] = list(raw) if isinstance(raw, list) else []
     full_allowlist = DEFAULT_ALLOWLIST + project_allowlist
 
     if not _is_allowed(cmd_name, full_allowlist):

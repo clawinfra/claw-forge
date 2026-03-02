@@ -136,7 +136,7 @@ class BaseProvider:
     async def health_check(self) -> bool:
         """Default health check — try a minimal request."""
         try:
-            await self.execute(
+            await self.execute(  # type: ignore[attr-defined]  # subclasses implement execute
                 model="claude-sonnet-4-20250514",
                 messages=[{"role": "user", "content": "ping"}],
                 max_tokens=1,

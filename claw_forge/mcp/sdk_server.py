@@ -11,7 +11,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 from claude_agent_sdk import McpSdkServerConfig, create_sdk_mcp_server, tool
 from sqlalchemy import create_engine, select
@@ -27,7 +30,7 @@ from claw_forge.mcp.feature_mcp import (
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 
-def _get_engine_for_dir(project_dir: Path):
+def _get_engine_for_dir(project_dir: Path) -> Engine:
     """Get (or create) a SQLAlchemy engine for the given project directory."""
     db_path = project_dir / ".claw-forge" / "features.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,12 +44,12 @@ def _get_engine_for_dir(project_dir: Path):
 # ── Tool factories ─────────────────────────────────────────────────────────────
 
 
-def _make_tools(project_dir: Path) -> list:
+def _make_tools(project_dir: Path) -> list[Any]:  # noqa: C901
     """Create bound tool functions for the given project_dir."""
     engine = _get_engine_for_dir(project_dir)
 
     @tool("feature_get_stats", "Get feature completion statistics", {})
-    async def feature_get_stats(args: dict) -> dict:
+    async def feature_get_stats(args: dict[str, Any]) -> dict[str, Any]:
         """Return counts of features per status."""
         with DBSession(engine) as session:
             all_features = session.execute(select(Feature)).scalars().all()
@@ -59,7 +62,7 @@ def _make_tools(project_dir: Path) -> list:
                 "skipped": 0,
             }
             for f in all_features:
-                status = f.status or "pending"
+                status = str(f.status or "pending")
                 if status in stats:
                     stats[status] += 1
         return {"content": [{"type": "text", "text": str(stats)}]}
@@ -69,7 +72,7 @@ def _make_tools(project_dir: Path) -> list:
         "Get a feature by its ID",
         {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
-    async def feature_get_by_id(args: dict) -> dict:
+    async def feature_get_by_id(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         with DBSession(engine) as session:
             feature = session.get(Feature, feature_id)
@@ -78,7 +81,7 @@ def _make_tools(project_dir: Path) -> list:
         return {"content": [{"type": "text", "text": json.dumps(result)}]}
 
     @tool("feature_get_ready", "Get features with all dependencies satisfied", {})
-    async def feature_get_ready(args: dict) -> dict:
+    async def feature_get_ready(args: dict[str, Any]) -> dict[str, Any]:
         with DBSession(engine) as session:
             pending = session.execute(
                 select(Feature).where(Feature.status == "pending")
@@ -92,7 +95,7 @@ def _make_tools(project_dir: Path) -> list:
         "Atomically claim the next available feature for an agent",
         {"type": "object", "properties": {"agent_id": {"type": "string"}}, "required": []},
     )
-    async def feature_claim_and_get(args: dict) -> dict:
+    async def feature_claim_and_get(args: dict[str, Any]) -> dict[str, Any]:
         agent_id = args.get("agent_id", "")
         with DBSession(engine) as session:
             pending = session.execute(
@@ -101,9 +104,9 @@ def _make_tools(project_dir: Path) -> list:
             claimed = None
             for feature in pending:
                 if _deps_satisfied(session, feature):
-                    feature.status = "in_progress"
-                    feature.claimed_by = agent_id or "unknown"
-                    feature.updated_at = datetime.now(UTC)
+                    feature.status = "in_progress"  # type: ignore[assignment]
+                    feature.claimed_by = agent_id or "unknown"  # type: ignore[assignment]
+                    feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                     session.commit()
                     session.refresh(feature)
                     claimed = feature.to_dict()
@@ -116,16 +119,16 @@ def _make_tools(project_dir: Path) -> list:
         "Mark a feature as passing (completed successfully)",
         {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
-    async def feature_mark_passing(args: dict) -> dict:
+    async def feature_mark_passing(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         with DBSession(engine) as session:
             feature = session.get(Feature, feature_id)
             result = None
             if feature:
-                feature.status = "passing"
-                feature.claimed_by = None
-                feature.fail_reason = None
-                feature.updated_at = datetime.now(UTC)
+                feature.status = "passing"  # type: ignore[assignment]
+                feature.claimed_by = None  # type: ignore[assignment]
+                feature.fail_reason = None  # type: ignore[assignment]
+                feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -144,17 +147,17 @@ def _make_tools(project_dir: Path) -> list:
             "required": ["feature_id"],
         },
     )
-    async def feature_mark_failing(args: dict) -> dict:
+    async def feature_mark_failing(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         reason = args.get("reason", "")
         with DBSession(engine) as session:
             feature = session.get(Feature, feature_id)
             result = None
             if feature:
-                feature.status = "failing"
+                feature.status = "failing"  # type: ignore[assignment]
                 feature.fail_reason = reason
-                feature.claimed_by = None
-                feature.updated_at = datetime.now(UTC)
+                feature.claimed_by = None  # type: ignore[assignment]
+                feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -166,14 +169,14 @@ def _make_tools(project_dir: Path) -> list:
         "Mark a feature as in_progress",
         {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
-    async def feature_mark_in_progress(args: dict) -> dict:
+    async def feature_mark_in_progress(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         with DBSession(engine) as session:
             feature = session.get(Feature, feature_id)
             result = None
             if feature:
-                feature.status = "in_progress"
-                feature.updated_at = datetime.now(UTC)
+                feature.status = "in_progress"  # type: ignore[assignment]
+                feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -185,15 +188,15 @@ def _make_tools(project_dir: Path) -> list:
         "Release a claim on a feature — resets it back to pending",
         {"type": "object", "properties": {"feature_id": {"type": "string"}}, "required": ["feature_id"]},  # noqa: E501
     )
-    async def feature_clear_in_progress(args: dict) -> dict:
+    async def feature_clear_in_progress(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         with DBSession(engine) as session:
             feature = session.get(Feature, feature_id)
             result = None
             if feature:
-                feature.status = "pending"
-                feature.claimed_by = None
-                feature.updated_at = datetime.now(UTC)
+                feature.status = "pending"  # type: ignore[assignment]
+                feature.claimed_by = None  # type: ignore[assignment]
+                feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                 session.commit()
                 session.refresh(feature)
                 result = feature.to_dict()
@@ -211,7 +214,7 @@ def _make_tools(project_dir: Path) -> list:
             "required": ["features_json"],
         },
     )
-    async def feature_create_bulk(args: dict) -> dict:
+    async def feature_create_bulk(args: dict[str, Any]) -> dict[str, Any]:
         import json
         features_data = json.loads(args.get("features_json", "[]"))
         created = []
@@ -245,7 +248,7 @@ def _make_tools(project_dir: Path) -> list:
             "required": ["name"],
         },
     )
-    async def feature_create(args: dict) -> dict:
+    async def feature_create(args: dict[str, Any]) -> dict[str, Any]:
         import json
         steps = json.loads(args.get("steps_json", "[]"))
         with DBSession(engine) as session:
@@ -275,7 +278,7 @@ def _make_tools(project_dir: Path) -> list:
             "required": ["feature_id", "depends_on_id"],
         },
     )
-    async def feature_add_dependency(args: dict) -> dict:
+    async def feature_add_dependency(args: dict[str, Any]) -> dict[str, Any]:
         feature_id = args.get("feature_id", "")
         depends_on_id = args.get("depends_on_id", "")
         with DBSession(engine) as session:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 from claw_forge.pool.health import CircuitBreaker, CircuitState
 from claw_forge.pool.providers.base import (
@@ -103,14 +103,17 @@ class ProviderPoolManager:
                     cb.record_half_open_attempt()
 
                 try:
-                    response = await provider.execute(
-                        model=model,
-                        messages=messages,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        system=system,
-                        tools=tools,
-                        **kwargs,
+                    response: ProviderResponse = cast(
+                        ProviderResponse,
+                        await provider.execute(  # type: ignore[attr-defined]  # subclasses implement execute
+                            model=model,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            system=system,
+                            tools=tools,
+                            **kwargs,
+                        ),
                     )
                     cb.record_success()
                     self._tracker.record_request(

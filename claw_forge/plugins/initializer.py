@@ -180,7 +180,7 @@ class InitializerPlugin(BasePlugin):
         )
 
     @staticmethod
-    def _compute_wave_count(features: list) -> int:
+    def _compute_wave_count(features: list[Any]) -> int:
         """Compute number of dependency waves (topological layers).
 
         Wave 0 = features with no dependencies.

@@ -6,6 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -35,9 +36,9 @@ class ProjectSpec:
     features: list[FeatureItem]  # all features, 100-400 items
     implementation_phases: list[str]  # phase titles in order
     success_criteria: list[str]
-    design_system: dict  # color_palette, typography, etc.
-    api_endpoints: dict  # category -> list of endpoints
-    database_tables: dict  # table_name -> list of columns
+    design_system: dict[str, Any]  # color_palette, typography, etc.
+    api_endpoints: dict[str, Any]  # category -> list of endpoints
+    database_tables: dict[str, Any]  # table_name -> list of columns
     raw_xml: str  # preserved for reference
 
     @classmethod
@@ -125,13 +126,13 @@ class ProjectSpec:
 
         # Parse design system
         ds_el = root.find("design_system")
-        design: dict = {}
+        design: dict[str, Any] = {}
         if ds_el is not None:
             design = _parse_key_value_el(ds_el)
 
         # Parse API endpoints
         api_el = root.find("api_endpoints_summary")
-        endpoints: dict = {}
+        endpoints: dict[str, Any] = {}
         if api_el is not None:
             for cat in api_el:
                 cat_name = cat.tag.replace("_", " ").title()
@@ -145,7 +146,7 @@ class ProjectSpec:
 
         # Parse database schema
         db_el = root.find("database_schema")
-        tables: dict = {}
+        tables: dict[str, Any] = {}
         if db_el is not None:
             tables_el = db_el.find("tables")
             if tables_el is not None:
@@ -178,7 +179,7 @@ class ProjectSpec:
         name = ""
         stack = ""
         features: list[FeatureItem] = []
-        current_feature: dict | None = None
+        current_feature: dict[str, Any] | None = None
 
         for line in lines:
             stripped = line.strip()
@@ -225,7 +226,7 @@ class ProjectSpec:
         )
 
 
-def _dict_to_feature(d: dict) -> FeatureItem:
+def _dict_to_feature(d: dict[str, Any]) -> FeatureItem:
     f = FeatureItem(
         category=d["category"],
         name=d["name"],
@@ -270,8 +271,8 @@ def _assign_dependencies(features: list[FeatureItem], phases: list[str]) -> None
             features[feat_idx].depends_on_indices = list(prev_phase_indices)
 
 
-def _parse_key_value_el(el: ET.Element) -> dict:
-    result: dict = {}
+def _parse_key_value_el(el: ET.Element) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for child in el:
         text = (child.text or "").strip()
         items = [line[2:].strip() for line in text.splitlines() if line.strip().startswith("- ")]

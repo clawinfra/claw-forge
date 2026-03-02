@@ -19,7 +19,10 @@ import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import (
@@ -53,7 +56,7 @@ class Feature(FeatureBase):
     name = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     steps = Column(JSON, default=list)  # list of step strings
-    status = Column(
+    status: Column[Any] = Column(
         Enum(
             "pending",
             "in_progress",
@@ -121,7 +124,7 @@ def _get_db_path() -> Path:
     return Path(project_dir) / ".claw-forge" / "features.db"
 
 
-def _get_engine():
+def _get_engine() -> Engine:
     db_path = _get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
@@ -158,7 +161,7 @@ def feature_get_stats() -> dict[str, int]:
             "skipped": 0,
         }
         for f in all_features:
-            status = f.status or "pending"
+            status = str(f.status or "pending")
             if status in stats:
                 stats[status] += 1
         return stats
@@ -250,9 +253,9 @@ def feature_claim_and_get(agent_id: str = "") -> dict[str, Any] | None:
         )
         for feature in pending:
             if _deps_satisfied(session, feature):
-                feature.status = "in_progress"
-                feature.claimed_by = agent_id or "unknown"
-                feature.updated_at = datetime.now(UTC)
+                feature.status = "in_progress"  # type: ignore[assignment]
+                feature.claimed_by = agent_id or "unknown"  # type: ignore[assignment]
+                feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
                 session.commit()
                 session.refresh(feature)
                 return feature.to_dict()
@@ -267,8 +270,8 @@ def feature_mark_in_progress(feature_id: str) -> dict[str, Any] | None:
         feature = session.get(Feature, feature_id)
         if feature is None:
             return None
-        feature.status = "in_progress"
-        feature.updated_at = datetime.now(UTC)
+        feature.status = "in_progress"  # type: ignore[assignment]
+        feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -282,10 +285,10 @@ def feature_mark_passing(feature_id: str) -> dict[str, Any] | None:
         feature = session.get(Feature, feature_id)
         if feature is None:
             return None
-        feature.status = "passing"
-        feature.claimed_by = None
-        feature.fail_reason = None
-        feature.updated_at = datetime.now(UTC)
+        feature.status = "passing"  # type: ignore[assignment]
+        feature.claimed_by = None  # type: ignore[assignment]
+        feature.fail_reason = None  # type: ignore[assignment]
+        feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -299,10 +302,10 @@ def feature_mark_failing(feature_id: str, reason: str = "") -> dict[str, Any] | 
         feature = session.get(Feature, feature_id)
         if feature is None:
             return None
-        feature.status = "failing"
-        feature.fail_reason = reason
-        feature.claimed_by = None
-        feature.updated_at = datetime.now(UTC)
+        feature.status = "failing"  # type: ignore[assignment]
+        feature.fail_reason = reason  # type: ignore[assignment]
+        feature.claimed_by = None  # type: ignore[assignment]
+        feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -316,9 +319,9 @@ def feature_clear_in_progress(feature_id: str) -> dict[str, Any] | None:
         feature = session.get(Feature, feature_id)
         if feature is None:
             return None
-        feature.status = "pending"
-        feature.claimed_by = None
-        feature.updated_at = datetime.now(UTC)
+        feature.status = "pending"  # type: ignore[assignment]
+        feature.claimed_by = None  # type: ignore[assignment]
+        feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -332,9 +335,9 @@ def feature_skip(feature_id: str) -> dict[str, Any] | None:
         feature = session.get(Feature, feature_id)
         if feature is None:
             return None
-        feature.status = "skipped"
-        feature.claimed_by = None
-        feature.updated_at = datetime.now(UTC)
+        feature.status = "skipped"  # type: ignore[assignment]
+        feature.claimed_by = None  # type: ignore[assignment]
+        feature.updated_at = datetime.now(UTC)  # type: ignore[assignment]
         session.commit()
         session.refresh(feature)
         return feature.to_dict()
@@ -432,7 +435,7 @@ def feature_set_dependencies(feature_id: str, depends_on_ids: list[str]) -> bool
 # ── Config helper ─────────────────────────────────────────────────────────────
 
 
-def mcp_server_config(project_dir: Path) -> dict:
+def mcp_server_config(project_dir: Path) -> dict[str, Any]:
     """Return the MCP server config dict for ClaudeAgentOptions.mcp_servers."""
     return {
         "features": {

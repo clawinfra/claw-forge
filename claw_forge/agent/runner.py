@@ -4,11 +4,11 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import claude_agent_sdk
 from claude_agent_sdk import McpServerConfig, PermissionMode, query
-from claude_agent_sdk.types import SdkPluginConfig, ThinkingConfig
+from claude_agent_sdk.types import HookEvent, HookMatcher, SdkPluginConfig, ThinkingConfig
 
 from claw_forge.pool.providers.base import ProviderConfig
 
@@ -29,7 +29,7 @@ async def run_agent(
     provider_config: ProviderConfig | None = None,
     agent_type: str = "coding",
     project_dir: Path | None = None,
-    hooks: dict | None = None,
+    hooks: dict[HookEvent, list[HookMatcher]] | None = None,
     # ── New SDK options ──────────────────────────────────────────────────
     thinking: ThinkingConfig | None = None,
     output_format: dict[str, Any] | None = None,
@@ -116,7 +116,7 @@ async def run_agent(
 
     # Use default hooks if not provided
     if hooks is None:
-        hooks = get_default_hooks()
+        hooks = get_default_hooks()  # type: ignore[assignment]  # compatible at runtime  # type: ignore[assignment]
 
     # Resolve LSP plugins
     resolved_lsp_plugins: list[SdkPluginConfig]
@@ -226,6 +226,6 @@ async def collect_structured_result(
         return None
 
     try:
-        return json.loads(result_text)
+        return cast(dict[str, Any], json.loads(result_text))
     except (json.JSONDecodeError, TypeError):
         return None

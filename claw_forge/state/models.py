@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -29,7 +30,7 @@ class Session(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_path = Column(String(1024), nullable=False)
-    status = Column(
+    status: Column[Any] = Column(
         Enum("pending", "running", "paused", "completed", "failed", name="session_status"),
         default="pending",
     )
@@ -52,7 +53,7 @@ class Task(Base):
     session_id = Column(String(36), ForeignKey("sessions.id"), nullable=False)
     plugin_name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(
+    status: Column[Any] = Column(
         Enum(
             "pending",
             "queued",

@@ -77,7 +77,7 @@ def discover_plugins() -> dict[str, type[BasePlugin]]:
     """Discover installed plugins via entry points."""
     plugins: dict[str, type[BasePlugin]] = {}
     eps = entry_points()
-    group = eps.get("claw_forge.plugins", []) if isinstance(eps, dict) else eps.select(group="claw_forge.plugins")  # noqa: E501
+    group: Any = eps.get("claw_forge.plugins", []) if isinstance(eps, dict) else eps.select(group="claw_forge.plugins")  # noqa: E501
     for ep in group:
         try:
             cls = ep.load()

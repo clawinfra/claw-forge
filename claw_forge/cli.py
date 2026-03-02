@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import Any
 
 import httpx
 import typer
-import yaml
+import yaml  # type: ignore[import-untyped]
 from rich.console import Console
 from rich.table import Table
 
@@ -39,7 +40,7 @@ def _expand_env_vars(obj: object) -> object:
     return obj
 
 
-def _load_config(config_path: str) -> dict:
+def _load_config(config_path: str) -> dict[str, Any]:
     """Load YAML config and expand ${ENV_VAR} placeholders from environment."""
     path = Path(config_path)
     if not path.exists():
@@ -61,12 +62,12 @@ def _state_url(port: int = 8420) -> str:
     return f"http://localhost:{port}"
 
 
-def _http_get(url: str) -> dict | list:
+def _http_get(url: str) -> dict[str, Any] | list[Any]:
     """Simple synchronous GET helper."""
     try:
         resp = httpx.get(url, timeout=5)
         resp.raise_for_status()
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
     except httpx.ConnectError:
         console.print(f"[red]State service not reachable at {url}[/red]")
         raise typer.Exit(1) from None
@@ -75,12 +76,12 @@ def _http_get(url: str) -> dict | list:
         raise typer.Exit(1) from None
 
 
-def _http_post(url: str, json: dict | None = None) -> dict:
+def _http_post(url: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
     """Simple synchronous POST helper."""
     try:
         resp = httpx.post(url, json=json or {}, timeout=5)
         resp.raise_for_status()
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
     except httpx.ConnectError:
         console.print(f"[red]State service not reachable at {url}[/red]")
         raise typer.Exit(1) from None
@@ -308,7 +309,7 @@ def human_input(
     the feature back to 'pending' for the dispatcher to retry.
     """
     url = f"{_state_url(port)}/features/needs-human?session_id={project}"
-    pending: list[dict] = _http_get(url)  # type: ignore[assignment]
+    pending: list[dict[str, Any]] = _http_get(url)  # type: ignore[assignment]
 
     if not pending:
         console.print(f"[green]✅ No pending human-input questions for {project!r}[/green]")

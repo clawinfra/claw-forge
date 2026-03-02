@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from claude_agent_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
 
@@ -65,7 +65,7 @@ async def post_tool_hook(
     progress, or other metrics alongside the tool result.
     """
     return SyncHookJSONOutput(
-        hookSpecificOutput={  # type: ignore[typeddict-item]
+        hookSpecificOutput={
             "hookEventName": "PostToolUse",
             "additionalContext": "",  # populated by caller via closure/subclass
         }
@@ -81,12 +81,12 @@ async def post_tool_failure_hook(
     context: HookContext,
 ) -> SyncHookJSONOutput:
     """Auto-log tool failures and inject recovery guidance into the context."""
-    data = input_data if isinstance(input_data, dict) else {}
-    error = data.get("error", "")
-    tool_name = data.get("tool_name", "")
+    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+    error = str(data.get("error", ""))
+    tool_name = str(data.get("tool_name", ""))
     print(f"[Tool failure] {tool_name}: {error[:200]}")
     return SyncHookJSONOutput(
-        hookSpecificOutput={  # type: ignore[typeddict-item]
+        hookSpecificOutput={
             "hookEventName": "PostToolUseFailure",
             "additionalContext": (
                 f"The {tool_name} tool failed. Consider alternative approaches."
@@ -129,7 +129,7 @@ def make_prompt_enrichment_hook(
     ) -> SyncHookJSONOutput:
         extra = context_fn() if callable(context_fn) else str(context_fn)
         return SyncHookJSONOutput(
-            hookSpecificOutput={  # type: ignore[typeddict-item]
+            hookSpecificOutput={
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": extra,
             }
@@ -169,18 +169,22 @@ def make_stop_hook(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data = input_data if isinstance(input_data, dict) else {}
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data)
+            if isinstance(input_data, dict)
+            else {}
+        )
         if data.get("stop_hook_active") and should_continue_fn():
             return SyncHookJSONOutput(
                 continue_=True,
-                hookSpecificOutput={  # type: ignore[typeddict-item]
+                hookSpecificOutput={  # type: ignore[typeddict-item,misc]
                     "hookEventName": "Stop",
                     "additionalContext": "Continue working — there are remaining tasks.",
                 },
             )
         return SyncHookJSONOutput(
             continue_=False,
-            hookSpecificOutput={  # type: ignore[typeddict-item]
+            hookSpecificOutput={  # type: ignore[typeddict-item,misc]
                 "hookEventName": "Stop",
             },
         )
@@ -217,7 +221,11 @@ def make_notification_hook(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data = input_data if isinstance(input_data, dict) else {}
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data)
+            if isinstance(input_data, dict)
+            else {}
+        )
         msg = data.get("message", "")
         title = data.get("title", "Agent")
         print(f"[{title}] {msg}")
@@ -228,7 +236,7 @@ def make_notification_hook(
                 )
             )
         return SyncHookJSONOutput(
-            hookSpecificOutput={  # type: ignore[typeddict-item]
+            hookSpecificOutput={
                 "hookEventName": "Notification",
                 "additionalContext": "",
             }
@@ -249,12 +257,12 @@ async def subagent_start_hook(
     Automatically injects claw-forge coding standards into the sub-agent's
     context so that every spawned agent starts with the same baseline.
     """
-    data = input_data if isinstance(input_data, dict) else {}
+    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
     agent_id = data.get("agent_id", "")
     agent_type = data.get("agent_type", "")
     print(f"[SubAgent] Starting: {agent_type} ({agent_id})")
     return SyncHookJSONOutput(
-        hookSpecificOutput={  # type: ignore[typeddict-item]
+        hookSpecificOutput={
             "hookEventName": "SubagentStart",
             "additionalContext": (
                 f"You are a {agent_type} sub-agent. Follow claw-forge coding standards."
@@ -272,12 +280,12 @@ async def subagent_stop_hook(
     context: HookContext,
 ) -> SyncHookJSONOutput:
     """Log when a sub-agent finishes."""
-    data = input_data if isinstance(input_data, dict) else {}
+    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
     agent_id = data.get("agent_id", "")
     agent_type = data.get("agent_type", "")
     print(f"[SubAgent] Stopped: {agent_type} ({agent_id})")
     return SyncHookJSONOutput(
-        hookSpecificOutput={  # type: ignore[typeddict-item]
+        hookSpecificOutput={  # type: ignore[typeddict-item,misc]
             "hookEventName": "SubagentStop",
             "additionalContext": "",
         }
@@ -287,7 +295,7 @@ async def subagent_stop_hook(
 # ── Default hooks factory ─────────────────────────────────────────────────────
 
 
-def get_default_hooks() -> dict:
+def get_default_hooks() -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
     Includes:

@@ -175,7 +175,7 @@ class AgentStateService:
                 db.add(session)
                 await db.commit()
                 await db.refresh(session)
-                await self._emit_event(session.id, None, "session.created", {"session_id": session.id})  # noqa: E501
+                await self._emit_event(str(session.id), None, "session.created", {"session_id": str(session.id)})  # noqa: E501
                 return {"id": session.id, "status": session.status}
 
         @app.get("/sessions/{session_id}")
@@ -208,7 +208,9 @@ class AgentStateService:
                 db.add(task)
                 await db.commit()
                 await db.refresh(task)
-                await self._emit_event(session_id, task.id, "task.created", {"task_id": task.id})
+                await self._emit_event(
+                    session_id, str(task.id), "task.created", {"task_id": task.id}
+                )
                 return {"id": task.id, "status": task.status}
 
         @app.patch("/tasks/{task_id}")
@@ -218,24 +220,24 @@ class AgentStateService:
                 if not task:
                     raise HTTPException(404, "Task not found")
                 if req.status:
-                    task.status = req.status
+                    task.status = req.status  # type: ignore[assignment]  # SQLAlchemy instrumented attr
                     if req.status == "running" and not task.started_at:
-                        task.started_at = datetime.now(UTC)
+                        task.started_at = datetime.now(UTC)  # type: ignore[assignment]
                     elif req.status in ("completed", "failed"):
-                        task.completed_at = datetime.now(UTC)
+                        task.completed_at = datetime.now(UTC)  # type: ignore[assignment]
                 if req.result is not None:
-                    task.result_json = req.result
+                    task.result_json = req.result  # type: ignore[assignment]
                 if req.error_message is not None:
-                    task.error_message = req.error_message
+                    task.error_message = req.error_message  # type: ignore[assignment]
                 if req.input_tokens is not None:
-                    task.input_tokens += req.input_tokens
+                    task.input_tokens = task.input_tokens + req.input_tokens  # type: ignore[assignment]
                 if req.output_tokens is not None:
-                    task.output_tokens += req.output_tokens
+                    task.output_tokens = task.output_tokens + req.output_tokens  # type: ignore[assignment]
                 if req.cost_usd is not None:
-                    task.cost_usd += req.cost_usd
+                    task.cost_usd = task.cost_usd + req.cost_usd  # type: ignore[assignment]
                 await db.commit()
                 await self._emit_event(
-                    task.session_id, task.id, "task.updated", {"status": task.status}
+                    str(task.session_id), str(task.id), "task.updated", {"status": str(task.status)}
                 )
                 return {"id": task.id, "status": task.status}
 
@@ -320,7 +322,7 @@ class AgentStateService:
                 session = await db.get(Session, session_id)
                 if not session:
                     raise HTTPException(404, "Session not found")
-                session.project_paused = True
+                session.project_paused = True  # type: ignore[assignment]
                 await db.commit()
                 await self._emit_event(session_id, None, "project.paused", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": True}
@@ -333,7 +335,7 @@ class AgentStateService:
                 session = await db.get(Session, session_id)
                 if not session:
                     raise HTTPException(404, "Session not found")
-                session.project_paused = False
+                session.project_paused = False  # type: ignore[assignment]
                 await db.commit()
                 await self._emit_event(session_id, None, "project.resumed", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": False}
@@ -360,12 +362,12 @@ class AgentStateService:
                 task = await db.get(Task, task_id)
                 if not task:
                     raise HTTPException(404, "Task not found")
-                task.status = "needs_human"
-                task.human_question = req.question
-                task.human_answer = None  # clear any stale answer
+                task.status = "needs_human"  # type: ignore[assignment]
+                task.human_question = req.question  # type: ignore[assignment]
+                task.human_answer = None  # type: ignore[assignment]  # clear any stale answer
                 await db.commit()
                 await self._emit_event(
-                    task.session_id,
+                    str(task.session_id),
                     task_id,
                     "task.needs_human",
                     {"task_id": task_id, "question": req.question},
@@ -388,11 +390,11 @@ class AgentStateService:
                     raise HTTPException(404, "Task not found")
                 if task.status != "needs_human":
                     raise HTTPException(400, f"Task is not in needs_human status (got: {task.status})")  # noqa: E501
-                task.human_answer = req.answer
-                task.status = "pending"
+                task.human_answer = req.answer  # type: ignore[assignment]
+                task.status = "pending"  # type: ignore[assignment]
                 await db.commit()
                 await self._emit_event(
-                    task.session_id,
+                    str(task.session_id),
                     task_id,
                     "task.human_answered",
                     {"task_id": task_id, "answer": req.answer},
