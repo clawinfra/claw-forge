@@ -95,9 +95,25 @@ def _http_post(url: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
 
 @app.command()
 def status(
-    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file.",
+    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
 ) -> None:
-    """Show project progress, active agent state, and recommended next action."""
+    """Show project progress, agent status, and recommended next action.
+
+    Zero-friction re-entry command — run this after returning to a project
+    to see exactly where you left off and what to do next.
+
+    Examples:
+
+        # Show status for current directory
+        claw-forge status
+
+        # Show status for a specific project
+        claw-forge status --project ~/projects/my-app
+    """
     from claw_forge.commands.help_cmd import run_help
 
     run_help(config_path=config)
@@ -111,14 +127,44 @@ def version() -> None:
 
 @app.command()
 def run(
-    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
-    project: str = typer.Option(".", "--project", "-p"),
-    task: str = typer.Option("coding", "--task", "-t"),
-    model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m"),
-    concurrency: int = typer.Option(5, "--concurrency", "-n", help="Max parallel agents"),
-    yolo: bool = typer.Option(False, "--yolo", help="Skip human input, max concurrency, aggressive retry"),  # noqa: E501
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file.",
+    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    task: str = typer.Option(
+        "coding", "--task", "-t",
+        help="Agent task type: coding | testing | review.",
+    ),
+    model: str = typer.Option(
+        "claude-sonnet-4-20250514", "--model", "-m",
+        help="Model override (e.g. claude-opus-4-5). Defaults to value in claw-forge.yaml.",
+    ),
+    concurrency: int = typer.Option(
+        5, "--concurrency", "-n",
+        help="Max parallel coding agents (1–10). Higher = faster but more API spend.",
+    ),
+    yolo: bool = typer.Option(
+        False, "--yolo",
+        help="YOLO mode: skip human-input gates, max concurrency, aggressive retry on errors.",
+    ),
 ) -> None:
-    """Run an agent task on a project."""
+    """Run agents on a project until all features pass.
+
+    Examples:
+
+        # Run with defaults (reads claw-forge.yaml)
+        claw-forge run
+
+        # Run with 3 parallel agents
+        claw-forge run --concurrency 3
+
+        # Run with a specific model
+        claw-forge run --model claude-opus-4-5 --concurrency 2
+
+        # YOLO mode — no human-input gates, max speed
+        claw-forge run --yolo
+    """
     cfg = _load_config(config)
     console.print(f"[bold]claw-forge[/bold] v{__version__}")
     console.print(f"Project: {project}")
@@ -163,10 +209,32 @@ def pool_status(
 
 @app.command()
 def state(
-    port: int = typer.Option(8420, "--port"),
-    host: str = typer.Option("0.0.0.0", "--host"),
+    port: int = typer.Option(8420, "--port", help="Port to bind the state service on."),
+    host: str = typer.Option(
+        "0.0.0.0", "--host",
+        help="Host to bind (use 127.0.0.1 for local-only).",
+    ),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml (used for provider config and project metadata).",
+    ),
 ) -> None:
-    """Start the AgentStateService REST API."""
+    """Start the AgentStateService REST + WebSocket API.
+
+    The state service powers the Kanban UI and exposes REST endpoints for
+    session, task, pool, regression, and command management.
+
+    Examples:
+
+        # Start on default port 8420
+        claw-forge state
+
+        # Start on a custom port, local-only
+        claw-forge state --port 9000 --host 127.0.0.1
+
+        # Start the UI separately (connects to state service automatically)
+        claw-forge ui --state-port 8420
+    """
     import uvicorn
 
     from claw_forge.state.service import AgentStateService
@@ -294,12 +362,52 @@ def init(
 
 @app.command()
 def add(
-    feature: str = typer.Argument(..., help="Feature description or @spec-file"),
-    spec: str | None = typer.Option(None, "--spec", "-s", help="Path to brownfield XML spec"),
-    project: str = typer.Option(".", "--project", "-p"),
-    branch: bool = typer.Option(True, "--branch/--no-branch", help="Create git branch"),
+    feature: str = typer.Argument(
+        ...,
+        help="Feature description (plain text) or @path/to/additions_spec.xml.",
+    ),
+    spec: str | None = typer.Option(
+        None, "--spec", "-s",
+        help="Path to brownfield XML spec (additions_spec.xml). "
+             "Use /create-spec in Claude Code to generate one.",
+    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    model: str = typer.Option(
+        "claude-sonnet-4-20250514", "--model", "-m",
+        help="Model to use for coding agents.",
+    ),
+    concurrency: int = typer.Option(
+        3, "--concurrency", "-n",
+        help="Max parallel agents for this addition (default 3, lower than greenfield).",
+    ),
+    branch: bool = typer.Option(
+        True, "--branch/--no-branch",
+        help="Create a feat/<slug> git branch for this addition.",
+    ),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file.",
+    ),
 ) -> None:
-    """Add a feature or brownfield spec to an existing project."""
+    """Add a feature or brownfield spec to an existing project.
+
+    Runs a brownfield agent that respects existing conventions, keeps all
+    current tests green, and works on a dedicated git branch.
+
+    Examples:
+
+        # Add a single feature by description
+        claw-forge add 'add Stripe payment webhook handler'
+
+        # Add features from a brownfield spec
+        claw-forge add --spec additions_spec.xml
+
+        # Add without branching
+        claw-forge add 'add rate limiting' --no-branch
+
+        # Add with a specific model and concurrency
+        claw-forge add --spec additions_spec.xml --model claude-opus-4-5 --concurrency 2
+    """
     import json
 
     from claw_forge.plugins.base import PluginContext
@@ -518,11 +626,43 @@ def fix(
     description: str | None = typer.Argument(
         None, help="Bug description (use --report for structured reports)"
     ),
-    report: str | None = typer.Option(None, "--report", "-r", help="Path to bug_report.md"),
-    project: str = typer.Option(".", "--project", "-p"),
-    branch: bool = typer.Option(True, "--branch/--no-branch", help="Create git branch"),
+    report: str | None = typer.Option(
+        None, "--report", "-r",
+        help="Path to bug_report.md (generated by /create-bug-report in Claude Code).",
+    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    model: str = typer.Option(
+        "claude-sonnet-4-20250514", "--model", "-m",
+        help="Model to use for the fix agent.",
+    ),
+    branch: bool = typer.Option(
+        True, "--branch/--no-branch",
+        help="Create a fix/<slug> git branch before applying the fix.",
+    ),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file.",
+    ),
 ) -> None:
-    """Fix a bug — reproduce-first protocol with mandatory regression test."""
+    """Fix a bug using reproduce-first (RED→GREEN) protocol.
+
+    Writes a regression test that reproduces the bug first, then fixes the root
+    cause and verifies the full test suite still passes.
+
+    Examples:
+
+        # Fix from a description
+        claw-forge fix 'users get 500 on login with uppercase email'
+
+        # Fix from a structured bug report
+        claw-forge fix --report bug_report.md
+
+        # Fix without creating a branch
+        claw-forge fix --report bug_report.md --no-branch
+
+        # Fix with a specific model
+        claw-forge fix 'search returns empty results' --model claude-opus-4-5
+    """
     import re
     import subprocess
 
