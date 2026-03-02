@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -16,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sse_starlette.sse import EventSourceResponse
 
+from claw_forge.commands.registry import COMMAND_IDS, COMMAND_SHELLS, COMMANDS
 from claw_forge.state.models import Base, Event, Session, Task
 
 logger = logging.getLogger(__name__)
@@ -141,6 +144,14 @@ class HumanAnswerRequest(BaseModel):
     answer: str
 
 
+class ExecuteCommandRequest(BaseModel):
+    """Request to execute a command from the command palette."""
+
+    command: str
+    args: dict[str, Any] = {}
+    project_dir: str = "."
+
+
 class AgentStateService:
     """REST + SSE + WebSocket state service for orchestrating agents."""
 
@@ -153,6 +164,8 @@ class AgentStateService:
         self.ws_manager: ConnectionManager = ConnectionManager()
         # Regression reviewer reference (set by dispatcher)
         self._reviewer: Any | None = None
+        # Command execution store: {execution_id: {...}}
+        self._executions: dict[str, dict[str, Any]] = {}
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -445,6 +458,94 @@ class AgentStateService:
                 "run_count": reviewer.run_count,
                 "last_result": last.to_dict() if last else None,
             }
+
+        # ── Command palette endpoints ─────────────────────────────────────
+
+        @app.get("/commands/list")
+        async def list_commands() -> list[dict[str, Any]]:
+            """Return the full command registry for the command palette."""
+            return COMMANDS
+
+        @app.post("/commands/execute")
+        async def execute_command(req: ExecuteCommandRequest) -> dict[str, Any]:
+            """Start executing a command and stream output via WebSocket.
+
+            Returns immediately with an execution_id.  Progress is broadcast
+            as ``command_output`` and ``command_done`` WebSocket events.
+            """
+            if req.command not in COMMAND_IDS:
+                raise HTTPException(404, f"Unknown command: {req.command!r}")
+
+            execution_id = str(uuid.uuid4())
+            started_at = time.monotonic()
+
+            shell_cmd = list(COMMAND_SHELLS[req.command])
+
+            self._executions[execution_id] = {
+                "command": req.command,
+                "status": "running",
+                "output": [],
+                "exit_code": None,
+                "started_at": started_at,
+            }
+
+            async def _run() -> None:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *shell_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=req.project_dir if req.project_dir != "." else None,
+                    )
+
+                    async def _stream(stream: asyncio.StreamReader, stream_name: str) -> None:
+                        async for raw in stream:
+                            line = raw.decode(errors="replace").rstrip()
+                            self._executions[execution_id]["output"].append(line)
+                            await self.ws_manager.broadcast(
+                                {
+                                    "type": "command_output",
+                                    "execution_id": execution_id,
+                                    "line": line,
+                                    "stream": stream_name,
+                                }
+                            )
+
+                    assert proc.stdout is not None
+                    assert proc.stderr is not None
+                    await asyncio.gather(
+                        _stream(proc.stdout, "stdout"),
+                        _stream(proc.stderr, "stderr"),
+                    )
+                    exit_code = await proc.wait()
+                except Exception as exc:
+                    logger.exception("Command execution failed: %s", exc)
+                    exit_code = 1
+                    self._executions[execution_id]["output"].append(str(exc))
+
+                duration_ms = int((time.monotonic() - started_at) * 1000)
+                status = "done" if exit_code == 0 else "failed"
+                self._executions[execution_id]["status"] = status
+                self._executions[execution_id]["exit_code"] = exit_code
+                await self.ws_manager.broadcast(
+                    {
+                        "type": "command_done",
+                        "execution_id": execution_id,
+                        "exit_code": exit_code,
+                        "duration_ms": duration_ms,
+                    }
+                )
+
+            asyncio.create_task(_run())
+            return {"execution_id": execution_id, "status": "started"}
+
+        @app.get("/commands/executions/{execution_id}")
+        async def get_execution(execution_id: str) -> dict[str, Any]:
+            """Fetch stored execution state by ID."""
+            entry = self._executions.get(execution_id)
+            if not entry:
+                raise HTTPException(404, "Execution not found")
+            return {"execution_id": execution_id, **entry}
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]

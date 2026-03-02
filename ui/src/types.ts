@@ -219,3 +219,33 @@ export interface FilterState {
 // ── App view mode ─────────────────────────────────────────────────────────────
 
 export type ViewMode = "kanban" | "graph";
+
+// ── Command palette ───────────────────────────────────────────────────────────
+
+export interface CommandArg {
+  name: string;
+  label: string;
+  type: "string" | "number";
+  optional: boolean;
+}
+
+export interface Command {
+  id: string;
+  label: string;
+  icon: string;
+  description: string;
+  category: "setup" | "build" | "quality" | "save" | "monitoring" | "fix";
+  shortcut?: string;
+  args: CommandArg[];
+}
+
+export interface Execution {
+  execution_id: string;
+  command_id: string;
+  command_label: string;
+  status: "running" | "done" | "failed";
+  output: string[];
+  exit_code?: number;
+  duration_ms?: number;
+  started_at: number;
+}

@@ -107,12 +107,23 @@ export function useWebSocket(sessionId: string) {
     };
 
     ws.onmessage = (evt: MessageEvent<string>) => {
-      let event: WsEvent;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let raw: Record<string, any>;
       try {
-        event = JSON.parse(evt.data) as WsEvent;
+        raw = JSON.parse(evt.data) as Record<string, unknown>;
       } catch {
         return;
       }
+
+      // Handle command execution events (not part of WsEvent union)
+      if (raw.type === "command_output" || raw.type === "command_done") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cmdHandler = (window as any).__commandEventHandler;
+        if (cmdHandler) cmdHandler(raw);
+        return;
+      }
+
+      const event = raw as unknown as WsEvent;
 
       // Log all events
       addLogEntry(event);
@@ -159,6 +170,7 @@ export function useWebSocket(sessionId: string) {
             : next;
         });
       }
+
     };
 
     ws.onclose = () => {

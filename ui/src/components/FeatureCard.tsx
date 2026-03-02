@@ -12,6 +12,7 @@
  * - Left border accent by status
  */
 
+import { useState } from "react";
 import type { Feature } from "../types";
 import { AgentMascot } from "./AgentMascot";
 
@@ -22,6 +23,8 @@ interface FeatureCardProps {
   implicatedFeatureIds?: number[];
   /** Direct boolean flag — true when this feature is implicated in a regression */
   implicatedInRegression?: boolean;
+  /** Called when user selects a quick command action */
+  onQuickCommand?: (commandId: string, args: Record<string, unknown>) => void;
 }
 
 const STATUS_BADGE: Record<Feature["status"], string> = {
@@ -64,7 +67,9 @@ export function FeatureCard({
   onClick,
   implicatedFeatureIds = [],
   implicatedInRegression = false,
+  onQuickCommand,
 }: FeatureCardProps) {
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const depCount = feature.depends_on.length;
   const featureNumId = Number(feature.id);
   const isImplicated =
@@ -86,16 +91,66 @@ export function FeatureCard({
         ${isFixingRegression ? "animate-pulse border-yellow-400 dark:border-yellow-400" : ""}
       `}
     >
-      {/* Header: ID + status */}
+      {/* Header: ID + status + quick-action button */}
       <div className="flex items-start justify-between gap-2">
         <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 select-none">
           #{shortId(feature.id)}
         </span>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[feature.status]}`}
-        >
-          {feature.status}
-        </span>
+        <div className="flex items-center gap-1">
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[feature.status]}`}
+          >
+            {feature.status}
+          </span>
+          {onQuickCommand && (
+            <div className="relative">
+              <button
+                type="button"
+                title="Quick actions"
+                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600
+                  dark:hover:text-slate-200 transition-opacity text-xs leading-none px-0.5"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuickMenuOpen((v) => !v);
+                }}
+              >
+                ⚡
+              </button>
+              {quickMenuOpen && (
+                <div
+                  className="absolute right-0 top-5 z-20 bg-white dark:bg-slate-800 rounded-lg
+                    shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-max"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200
+                      hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    onClick={() => {
+                      onQuickCommand("create-bug-report", {
+                        feature_id: Number(feature.id),
+                      });
+                      setQuickMenuOpen(false);
+                    }}
+                  >
+                    🐛 Create Bug Report
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200
+                      hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    onClick={() => {
+                      onQuickCommand("review-pr", {});
+                      setQuickMenuOpen(false);
+                    }}
+                  >
+                    📋 Review PR
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Regression badge */}

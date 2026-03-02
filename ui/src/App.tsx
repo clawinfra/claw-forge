@@ -15,7 +15,7 @@
  * Real-time updates via WebSocket (ws://localhost:8888/ws).
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -29,6 +29,7 @@ import {
   GitBranch,
   LayoutGrid,
   Inbox,
+  Zap,
 } from "lucide-react";
 import { FeatureCard } from "./components/FeatureCard";
 import { RegressionHealthBar } from "./components/RegressionHealthBar";
@@ -43,14 +44,24 @@ import { CelebrationOverlay } from "./components/CelebrationOverlay";
 import { ConnectionIndicator } from "./components/ConnectionIndicator";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { ToastContainer } from "./components/ToastContainer";
+import { CommandPalette } from "./components/CommandPalette";
+import { CommandsPanel } from "./components/CommandsPanel";
+import { ExecutionDrawer } from "./components/ExecutionDrawer";
 import { useFeatures } from "./hooks/useFeatures";
 import { usePoolStatus } from "./hooks/usePoolStatus";
 import { useDarkMode } from "./hooks/useDarkMode";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
-import { fetchSession } from "./api";
+import { fetchSession, fetchCommands, executeCommand } from "./api";
 import { KANBAN_COLUMNS } from "./types";
-import type { Feature, FeatureStatus, FilterState, ViewMode } from "./types";
+import type {
+  Command,
+  Execution,
+  Feature,
+  FeatureStatus,
+  FilterState,
+  ViewMode,
+} from "./types";
 
 // ── Query client ──────────────────────────────────────────────────────────────
 
@@ -172,6 +183,22 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   // Shortcuts modal
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
+  // Command palette
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Commands panel (sidebar tab)
+  const [commandsPanelOpen, setCommandsPanelOpen] = useState(false);
+
+  // Active executions for the ExecutionDrawer
+  const [activeExecutions, setActiveExecutions] = useState<Execution[]>([]);
+
+  // Fetch command registry
+  const { data: commands = [] } = useQuery<Command[]>({
+    queryKey: ["commands"],
+    queryFn: fetchCommands,
+    staleTime: Infinity,
+  });
+
   // Column refs for scrolling
   const columnRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -197,11 +224,82 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     return map;
   }, [filteredFeatures]);
 
+  // Handle command WebSocket events (command_output / command_done)
+  useEffect(() => {
+    // We listen via a custom event dispatched from useWebSocket
+    // Instead, poll activityLog for command events — handled below in useWebSocket extension
+    // For now we attach a direct handler by monkey-patching via a ref approach.
+    // The cleanest approach: intercept in useWebSocket hook — but to avoid changing hook,
+    // we expose a global handler here that the ExecutionDrawer can reference.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__commandEventHandler = (event: Record<string, unknown>) => {
+      if (event.type === "command_output") {
+        const exec_id = event.execution_id as string;
+        const line = event.line as string;
+        setActiveExecutions((prev) =>
+          prev.map((ex) =>
+            ex.execution_id === exec_id
+              ? { ...ex, output: [...ex.output, line] }
+              : ex,
+          ),
+        );
+      } else if (event.type === "command_done") {
+        const exec_id = event.execution_id as string;
+        const exit_code = event.exit_code as number;
+        const duration_ms = event.duration_ms as number;
+        setActiveExecutions((prev) =>
+          prev.map((ex) =>
+            ex.execution_id === exec_id
+              ? {
+                  ...ex,
+                  status: exit_code === 0 ? "done" : "failed",
+                  exit_code,
+                  duration_ms,
+                }
+              : ex,
+          ),
+        );
+      }
+    };
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__commandEventHandler;
+    };
+  }, []);
+
+  // Execute a command
+  const handleExecuteCommand = useCallback(
+    async (command: Command) => {
+      try {
+        const result = await executeCommand(command.id, {});
+        const newExec: Execution = {
+          execution_id: result.execution_id,
+          command_id: command.id,
+          command_label: command.label,
+          status: "running",
+          output: [],
+          started_at: Date.now(),
+        };
+        setActiveExecutions((prev) => [...prev, newExec]);
+      } catch (err) {
+        console.error("Failed to execute command:", err);
+      }
+    },
+    [],
+  );
+
+  const dismissExecution = useCallback((execution_id: string) => {
+    setActiveExecutions((prev) =>
+      prev.filter((ex) => ex.execution_id !== execution_id),
+    );
+  }, []);
+
   // Keyboard shortcuts
   const closeAll = useCallback(() => {
     setSelectedFeatureId(null);
     setShortcutsOpen(false);
     setLogOpen(false);
+    setPaletteOpen(false);
   }, []);
 
   const shortcutHandlers = useMemo(
@@ -223,6 +321,18 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   );
 
   useKeyboardShortcuts(shortcutHandlers);
+
+  // ⌘K / Ctrl+K → open command palette
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-200">
@@ -291,6 +401,17 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                 title="Activity Log"
               >
                 <Terminal size={18} />
+              </button>
+
+              {/* Commands panel toggle */}
+              <button
+                type="button"
+                onClick={() => setCommandsPanelOpen((v) => !v)}
+                className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200
+                  ${commandsPanelOpen ? "text-yellow-600 dark:text-yellow-400 bg-slate-100 dark:bg-slate-700" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"}`}
+                title="Commands (⌘K)"
+              >
+                <Zap size={18} />
               </button>
 
               {/* Dark mode toggle */}
@@ -421,6 +542,28 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
         isOpen={logOpen}
         onToggle={() => setLogOpen((v) => !v)}
         entries={activityLog}
+      />
+
+      {/* ── Commands panel ──────────────────────────────────────────────── */}
+      <CommandsPanel
+        isOpen={commandsPanelOpen}
+        commands={commands}
+        onToggle={() => setCommandsPanelOpen((v) => !v)}
+        onExecute={handleExecuteCommand}
+      />
+
+      {/* ── Command palette ─────────────────────────────────────────────── */}
+      <CommandPalette
+        isOpen={paletteOpen}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+        onExecute={handleExecuteCommand}
+      />
+
+      {/* ── Execution drawer ─────────────────────────────────────────────── */}
+      <ExecutionDrawer
+        executions={activeExecutions}
+        onDismiss={dismissExecution}
       />
 
       {/* ── Feature detail drawer ───────────────────────────────────────── */}

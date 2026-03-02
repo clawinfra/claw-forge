@@ -4,7 +4,7 @@
  * and the same paths work in production when served from the same origin.
  */
 
-import type { Feature, ProviderStatus, ProjectSummary } from "./types";
+import type { Command, Feature, ProviderStatus, ProjectSummary } from "./types";
 
 const BASE = "/api";
 
@@ -48,6 +48,25 @@ export async function fetchProjectSummary(
   sessionId: string,
 ): Promise<ProjectSummary> {
   return fetchJSON<ProjectSummary>(`/sessions/${sessionId}/summary`);
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+/** Fetch the full command registry from the backend. */
+export async function fetchCommands(): Promise<Command[]> {
+  return fetchJSON<Command[]>("/commands/list");
+}
+
+/** Execute a command. Returns { execution_id, status }. */
+export async function executeCommand(
+  command: string,
+  args: Record<string, unknown> = {},
+  project_dir = ".",
+): Promise<{ execution_id: string; status: string }> {
+  return fetchJSON<{ execution_id: string; status: string }>("/commands/execute", {
+    method: "POST",
+    body: JSON.stringify({ command, args, project_dir }),
+  });
 }
 
 // ── WebSocket factory ─────────────────────────────────────────────────────────
