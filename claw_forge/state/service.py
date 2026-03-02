@@ -130,6 +130,18 @@ class UpdateTaskRequest(BaseModel):
     cost_usd: float | None = None
 
 
+class HumanInputRequest(BaseModel):
+    """Request for human input — moves the feature to 'needs_human' status."""
+
+    question: str
+
+
+class HumanAnswerRequest(BaseModel):
+    """Answer to a pending human input request — moves feature back to 'pending'."""
+
+    answer: str
+
+
 class AgentStateService:
     """REST + SSE + WebSocket state service for orchestrating agents."""
 
@@ -298,6 +310,121 @@ class AgentStateService:
             except WebSocketDisconnect:
                 if websocket in self._ws_clients:
                     self._ws_clients.remove(websocket)
+
+        # ── Pause / Resume endpoints ─────────────────────────────────────────
+
+        @app.post("/project/pause")
+        async def pause_project(session_id: str) -> dict[str, Any]:
+            """Set the project_paused flag. The dispatcher will drain in-flight
+            agents but will not start new ones until resumed."""
+            async with self._session_factory() as db:
+                session = await db.get(Session, session_id)
+                if not session:
+                    raise HTTPException(404, "Session not found")
+                session.project_paused = True
+                await db.commit()
+                await self._emit_event(session_id, None, "project.paused", {"session_id": session_id})
+                return {"session_id": session_id, "paused": True}
+
+        @app.post("/project/resume")
+        async def resume_project(session_id: str) -> dict[str, Any]:
+            """Clear the project_paused flag. The dispatcher resumes dispatching
+            new tasks immediately."""
+            async with self._session_factory() as db:
+                session = await db.get(Session, session_id)
+                if not session:
+                    raise HTTPException(404, "Session not found")
+                session.project_paused = False
+                await db.commit()
+                await self._emit_event(session_id, None, "project.resumed", {"session_id": session_id})
+                return {"session_id": session_id, "paused": False}
+
+        @app.get("/project/paused")
+        async def is_project_paused(session_id: str) -> dict[str, Any]:
+            """Check whether a session is currently paused."""
+            async with self._session_factory() as db:
+                session = await db.get(Session, session_id)
+                if not session:
+                    raise HTTPException(404, "Session not found")
+                return {"session_id": session_id, "paused": bool(session.project_paused)}
+
+        # ── Human input endpoints ────────────────────────────────────────────
+
+        @app.post("/features/{task_id}/human-input")
+        async def request_human_input(task_id: str, req: HumanInputRequest) -> dict[str, Any]:
+            """Agent signals it is blocked and needs a human answer.
+
+            Moves the task to ``needs_human`` status and stores the question.
+            The Kanban UI displays these tasks in a dedicated "Needs Human" column.
+            """
+            async with self._session_factory() as db:
+                task = await db.get(Task, task_id)
+                if not task:
+                    raise HTTPException(404, "Task not found")
+                task.status = "needs_human"
+                task.human_question = req.question
+                task.human_answer = None  # clear any stale answer
+                await db.commit()
+                await self._emit_event(
+                    task.session_id,
+                    task_id,
+                    "task.needs_human",
+                    {"task_id": task_id, "question": req.question},
+                )
+                await self.ws_manager.broadcast_feature_update(
+                    {"task_id": task_id, "status": "needs_human", "question": req.question}
+                )
+                return {"task_id": task_id, "status": "needs_human", "question": req.question}
+
+        @app.post("/features/{task_id}/human-answer")
+        async def submit_human_answer(task_id: str, req: HumanAnswerRequest) -> dict[str, Any]:
+            """Submit a human answer to an awaiting task.
+
+            Stores the answer and moves the task back to ``pending`` so the
+            dispatcher will pick it up again.
+            """
+            async with self._session_factory() as db:
+                task = await db.get(Task, task_id)
+                if not task:
+                    raise HTTPException(404, "Task not found")
+                if task.status != "needs_human":
+                    raise HTTPException(400, f"Task is not in needs_human status (got: {task.status})")
+                task.human_answer = req.answer
+                task.status = "pending"
+                await db.commit()
+                await self._emit_event(
+                    task.session_id,
+                    task_id,
+                    "task.human_answered",
+                    {"task_id": task_id, "answer": req.answer},
+                )
+                await self.ws_manager.broadcast_feature_update(
+                    {"task_id": task_id, "status": "pending", "answer": req.answer}
+                )
+                return {"task_id": task_id, "status": "pending"}
+
+        @app.get("/features/needs-human")
+        async def list_needs_human(session_id: str | None = None) -> list[dict[str, Any]]:
+            """List all tasks waiting for human input.
+
+            Optionally filter by *session_id*.  Used by ``claw-forge input``
+            CLI command to display pending questions.
+            """
+            async with self._session_factory() as db:
+                query = select(Task).where(Task.status == "needs_human")
+                if session_id:
+                    query = query.where(Task.session_id == session_id)
+                result = await db.execute(query)
+                tasks = result.scalars().all()
+                return [
+                    {
+                        "task_id": t.id,
+                        "session_id": t.session_id,
+                        "description": t.description,
+                        "question": t.human_question,
+                    }
+                    for t in tasks
+                ]
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]

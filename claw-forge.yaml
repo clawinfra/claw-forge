@@ -10,6 +10,17 @@ pool:
   backoff_max: 30.0
 
 providers:
+  # ── Local Ollama instance — zero-config for most setups ───────────────────
+  local-ollama:
+    type: ollama
+    base_url: "http://localhost:11434"
+    model: "llama3.2"
+    # api_key: optional, usually not needed for local Ollama
+    priority: 10
+    cost_per_mtok_input: 0.0
+    cost_per_mtok_output: 0.0
+    tags: [local, free]
+
   # ── Claude CLI OAuth (from `claude login`) — zero-config ──────────────────
   claude-oauth:
     type: anthropic_oauth

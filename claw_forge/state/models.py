@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text, JSON, Float
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, JSON, Float
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -22,8 +22,13 @@ class Session(Base):
         Enum("pending", "running", "paused", "completed", "failed", name="session_status"),
         default="pending",
     )
+    project_paused = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     manifest_json = Column(JSON, nullable=True)
 
     tasks = relationship("Task", back_populates="session", cascade="all, delete-orphan")
@@ -37,13 +42,24 @@ class Task(Base):
     plugin_name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(
-        Enum("pending", "queued", "running", "completed", "failed", "blocked", name="task_status"),
+        Enum(
+            "pending",
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "blocked",
+            "needs_human",
+            name="task_status",
+        ),
         default="pending",
     )
     priority = Column(Integer, default=0)
     depends_on = Column(JSON, default=list)  # list of task IDs
     result_json = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
+    human_question = Column(Text, nullable=True)
+    human_answer = Column(Text, nullable=True)
     input_tokens = Column(Integer, default=0)
     output_tokens = Column(Integer, default=0)
     cost_usd = Column(Float, default=0.0)

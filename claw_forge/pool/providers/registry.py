@@ -18,6 +18,8 @@ _PROVIDER_CLASSES: dict[ProviderType, str] = {
     ProviderType.ANTHROPIC_COMPAT: "claw_forge.pool.providers.anthropic_compat.AnthropicCompatProvider",
     # anthropic_oauth auto-reads the Claude CLI token and delegates to AnthropicProvider
     ProviderType.ANTHROPIC_OAUTH: "claw_forge.pool.providers.anthropic.AnthropicProvider",
+    # Local Ollama instance via OpenAI-compat endpoint
+    ProviderType.OLLAMA: "claw_forge.pool.providers.ollama.OllamaProvider",
 }
 
 
@@ -44,13 +46,24 @@ def create_provider(config: ProviderConfig) -> BaseProvider:
 
         import claw_forge.pool.providers.oauth as _oauth_mod
 
-        token = _oauth_mod.read_claude_oauth_token()
-        if not token:
-            raise ValueError(
-                f"anthropic_oauth provider '{config.name}': no Claude OAuth token found. "
-                "Run `claude login` first, or set oauth_token explicitly."
+        token = _oauth_mod.get_oauth_token_optional()
+        if token:
+            # Inject the OAuth token so AnthropicProvider uses Bearer auth.
+            config = dataclasses.replace(config, oauth_token=token)
+        elif config.api_key:
+            # No credentials file but an api_key was supplied — fall back silently.
+            logger.debug(
+                "anthropic_oauth provider '%s': no OAuth credentials file found; "
+                "falling back to api_key auth.",
+                config.name,
             )
-        config = dataclasses.replace(config, oauth_token=token)
+        else:
+            raise ValueError(
+                f"anthropic_oauth provider '{config.name}': "
+                "no OAuth credentials file (~/.claude/.credentials.json) found "
+                "and no api_key supplied. "
+                "Run `claude login` first, set oauth_token explicitly, or provide api_key."
+            )
 
     dotted = _PROVIDER_CLASSES.get(ptype)
     if not dotted:

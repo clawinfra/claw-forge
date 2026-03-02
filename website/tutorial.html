@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tutorial — claw-forge</title>
+  <meta name="description" content="Step-by-step guide to get claw-forge running with multi-provider API rotation."/>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">🔥 claw-forge</a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="comparison.html">vs AutoForge</a>
+      <a href="https://github.com/clawinfra/claw-forge" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<section style="padding-top:60px">
+  <div class="container">
+    <p class="section-label">Getting Started</p>
+    <h2>Tutorial</h2>
+    <p class="section-desc">From zero to running autonomous agents in 6 steps.</p>
+
+    <div class="steps">
+
+      <!-- Step 1: Install -->
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Install claw-forge</h3>
+          <p>We use <strong>uv</strong> for fast, isolated installation. <code>uv tool install</code> puts the CLI on your PATH without polluting your system Python.</p>
+          <pre><code class="language-bash">pip install uv
+uv tool install claw-forge
+claw-forge --version</code></pre>
+          <div class="output-block">claw-forge 0.2.0b1</div>
+          <p style="margin-top:12px">If you prefer pipx: <code>pipx install claw-forge</code></p>
+        </div>
+      </div>
+
+      <!-- Step 2: Configure providers -->
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Configure providers</h3>
+          <p>Create <code>claw-forge.yaml</code> in your project root. The minimal setup uses your existing <code>claude login</code> session (zero API key required) plus Groq as a free backup.</p>
+          <div class="config-block"><span style="color:#8b949e"># claw-forge.yaml</span>
+<span style="color:#79c0ff">project</span>:
+  <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">my-app</span>
+  <span style="color:#79c0ff">path</span>: <span style="color:#a5d6ff">.</span>
+
+<span style="color:#79c0ff">providers</span>:
+  <span style="color:#8b949e"># Zero config — uses your claude login session</span>
+  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">claude-oauth</span>
+    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">oauth</span>
+    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
+    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">10</span>
+
+  <span style="color:#8b949e"># Direct key — higher RPM, lower priority as backup</span>
+  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">anthropic-direct</span>
+    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">anthropic</span>
+    <span style="color:#79c0ff">api_key_env</span>: <span style="color:#a5d6ff">ANTHROPIC_API_KEY</span>
+    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
+    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">5</span>
+
+  <span style="color:#8b949e"># Groq — free tier, great for lightweight tasks</span>
+  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">groq-backup</span>
+    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">openai_compat</span>
+    <span style="color:#79c0ff">api_key_env</span>: <span style="color:#a5d6ff">GROQ_API_KEY</span>
+    <span style="color:#79c0ff">base_url</span>: <span style="color:#a5d6ff">https://api.groq.com/openai/v1</span>
+    <span style="color:#79c0ff">model</span>: <span style="color:#a5d6ff">llama-3.3-70b-versatile</span>
+    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
+    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">2</span>
+
+<span style="color:#79c0ff">orchestrator</span>:
+  <span style="color:#79c0ff">max_concurrent</span>: <span style="color:#79c0ff">3</span>   <span style="color:#8b949e"># parallel agents</span>
+  <span style="color:#79c0ff">retry_attempts</span>: <span style="color:#79c0ff">3</span></div>
+          <p style="margin-top:12px">The pool manager automatically routes to the healthiest available provider. If <code>claude-oauth</code> hits rate limits, it falls back to <code>anthropic-direct</code>, then <code>groq-backup</code>.</p>
+        </div>
+      </div>
+
+      <!-- Step 3: Create project -->
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Create your project</h3>
+          <p>Write <code>app_spec.txt</code> describing what you want to build. Then initialize the project — the initializer agent reads your spec and creates atomic, dependency-ordered feature tasks.</p>
+          <pre><code class="language-bash">claw-forge init my-app --spec app_spec.txt</code></pre>
+          <div class="output-block">✅ Project analyzed successfully
+  project_name: my-app
+  tech_stack: python/fastapi
+  features_detected: 7
+  session_manifest: session_manifest.json</div>
+          <p style="margin-top:12px">Or use the Claude slash command for interactive setup: type <code>/create-spec</code> in any Claude session in your project directory.</p>
+        </div>
+      </div>
+
+      <!-- Step 4: Run -->
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3>Run with live output</h3>
+          <p>Start the agent harness. The dispatcher executes features in dependency-ordered waves — independent features run in parallel, bounded by <code>--concurrency</code>.</p>
+          <pre><code class="language-bash">claw-forge run my-app --concurrency 3
+# Watch the Kanban at http://localhost:8888</code></pre>
+          <div class="output-block"><span style="color:#58a6ff">claw-forge</span> v0.2.0b1
+Project: my-app
+Providers: 3  (claude-oauth 🟢  anthropic-direct 🟢  groq-backup 🟢)
+
+<span style="color:#56d364">Wave 1/3</span> — 3 tasks (parallel)
+  [claude-oauth]    🤖 coding: Create User SQLAlchemy model     ✅ 12s  $0.02
+  [anthropic-direct] 🤖 coding: Implement JWT utility           ✅ 18s  $0.03
+  [groq-backup]     🔬 testing: Test infrastructure setup       ✅  8s  $0.00
+
+<span style="color:#56d364">Wave 2/3</span> — 2 tasks
+  [claude-oauth]    🤖 coding: Add POST /auth/login endpoint    ✅ 24s  $0.04
+  [anthropic-direct] 👁 reviewing: Review wave 1 output        ✅ 10s  $0.01
+
+<span style="color:#56d364">Wave 3/3</span> — 2 tasks
+  ...</div>
+          <p style="margin-top:12px">The Kanban UI at <code>http://localhost:8888</code> shows real-time status with WebSocket updates, provider health dots, and a running cost tracker.</p>
+        </div>
+      </div>
+
+      <!-- Step 5: Pool status -->
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <h3>Check provider pool status</h3>
+          <p>See which providers are healthy, their current RPM, and how much each has cost today.</p>
+          <pre><code class="language-bash">claw-forge pool-status</code></pre>
+          <div class="output-block">                     Provider Pool
+┌──────────────────┬────────────┬──────────┬─────────┬────────────────────┐
+│ Name             │ Type       │ Priority │ Enabled │ Cost (in/out $/Mtok│
+├──────────────────┼────────────┼──────────┼─────────┼────────────────────┤
+│ claude-oauth     │ oauth      │ 10       │ ✅      │ $0.0/$0.0          │
+│ anthropic-direct │ anthropic  │ 5        │ ✅      │ $3.0/$15.0         │
+│ groq-backup      │ openai_... │ 2        │ ✅      │ $0.05/$0.08        │
+└──────────────────┴────────────┴──────────┴─────────┴────────────────────┘</div>
+          <p style="margin-top:12px">Use the <code>/pool-status</code> slash command inside Claude for a richer analysis with recommendations.</p>
+        </div>
+      </div>
+
+      <!-- Step 6: YOLO mode -->
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <h3>YOLO mode for maximum speed 🚀</h3>
+          <p>When you need to ship fast and you trust the agents, YOLO mode disables human-input prompts, maxes concurrency to your CPU count, and enables aggressive retry (5 attempts).</p>
+          <pre><code class="language-bash">claw-forge run my-app --yolo</code></pre>
+          <div class="output-block"><span style="color:#d29922">⚠️  YOLO MODE: Human approval skipped, max concurrency (12), aggressive retry</span>
+
+claw-forge v0.2.0b1
+Project: my-app
+Providers: 3
+
+Wave 1/3 — 12 tasks (all parallel — CPU count)
+  ...</div>
+          <p style="margin-top:12px">YOLO mode is perfect for: first-pass feature generation, rebuilding from a clean spec, or when you've already reviewed the agent prompts and trust them.</p>
+          <p style="margin-top:8px"><strong>Pause and resume</strong> at any time:</p>
+          <pre><code class="language-bash">claw-forge pause my-session-id   # drains in-flight agents
+claw-forge resume my-session-id  # continues from where it stopped</code></pre>
+        </div>
+      </div>
+
+    </div><!-- /steps -->
+
+    <div style="text-align:center;padding:40px 0 0">
+      <p style="color:var(--text-muted);margin-bottom:20px">Ready to build something?</p>
+      <a href="https://github.com/clawinfra/claw-forge" class="btn btn-primary">Get claw-forge on GitHub →</a>
+      &nbsp;&nbsp;
+      <a href="comparison.html" class="btn btn-secondary">See vs AutoForge</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/clawinfra/claw-forge" target="_blank">GitHub</a>
+    <a href="tutorial.html">Tutorial</a>
+    <a href="comparison.html">vs AutoForge</a>
+    <a href="https://github.com/clawinfra/claw-forge/issues" target="_blank">Issues</a>
+  </div>
+  <p>Released under the <strong>Apache 2.0 License</strong> · Built by <a href="https://github.com/clawinfra" target="_blank">ClawInfra</a></p>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>

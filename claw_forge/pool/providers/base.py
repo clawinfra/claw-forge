@@ -18,6 +18,7 @@ class ProviderType(str, Enum):
     OPENAI_COMPAT = "openai_compat"
     ANTHROPIC_COMPAT = "anthropic_compat"
     ANTHROPIC_OAUTH = "anthropic_oauth"
+    OLLAMA = "ollama"
 
 
 @dataclass
@@ -41,6 +42,7 @@ class ProviderConfig:
     project_id: str | None = None
     endpoint: str | None = None
     model_deployment: str | None = None
+    model: str | None = None
     model_map: dict[str, str] = field(default_factory=dict)
     # OAuth token support (Claude CLI `claude login`)
     oauth_token: str | None = None

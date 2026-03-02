@@ -80,6 +80,29 @@ def read_claude_oauth_token(
     return None
 
 
+def get_oauth_token_optional(
+    extra_paths: list[Path] | None = None,
+) -> str | None:
+    """Return the Claude CLI OAuth token, or ``None`` if not found.
+
+    This is a *safe* variant of :func:`read_claude_oauth_token` that is
+    guaranteed never to raise.  It returns ``None`` when the credentials
+    file is missing, malformed, or lacks a token — and logs a debug-level
+    warning for each non-fatal failure.
+
+    Args:
+        extra_paths: Optional additional credential paths to check first.
+
+    Returns:
+        The OAuth access token string, or ``None``.
+    """
+    try:
+        return read_claude_oauth_token(extra_paths=extra_paths)
+    except Exception as exc:  # pragma: no cover — belt-and-suspenders guard
+        logger.debug("Unexpected error reading Claude OAuth token: %s", exc)
+        return None
+
+
 def get_oauth_provider_config(
     name: str = "claude-oauth",
     priority: int = 1,

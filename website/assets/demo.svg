@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="900" height="520" style="background:#0d1117;border-radius:12px;font-family:JetBrains Mono,Fira Code,monospace">
+
+  <!-- Background grid lines -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#30363d" stroke-width="0.4" opacity="0.5"/>
+    </pattern>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <rect width="900" height="520" fill="url(#grid)" opacity="0.3"/>
+
+  <!-- Title -->
+  <text x="450" y="40" text-anchor="middle" font-size="20" font-weight="bold" fill="#58a6ff" font-family="Inter,system-ui,sans-serif">claw-forge System Architecture</text>
+
+  <!-- ── CLI Layer ────────────────────────────────────────────── -->
+  <g transform="translate(30,70)">
+    <rect width="180" height="52" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="90" y="21" text-anchor="middle" font-size="11" fill="#8b949e">CLI</text>
+    <text x="90" y="39" text-anchor="middle" font-size="13" fill="#e6edf3" font-weight="bold">claw-forge run</text>
+    <text x="90" y="52" text-anchor="middle" font-size="10" fill="#58a6ff">--yolo  --concurrency N</text>
+  </g>
+
+  <!-- ── Dispatcher ──────────────────────────────────────────── -->
+  <g transform="translate(270,55)">
+    <rect width="200" height="80" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="2"/>
+    <text x="100" y="20" text-anchor="middle" font-size="11" fill="#8b949e">Orchestrator</text>
+    <text x="100" y="40" text-anchor="middle" font-size="14" fill="#e6edf3" font-weight="bold">Dispatcher</text>
+    <text x="100" y="58" text-anchor="middle" font-size="11" fill="#3fb950">asyncio.TaskGroup</text>
+    <text x="100" y="74" text-anchor="middle" font-size="10" fill="#8b949e">pause / resume / yolo</text>
+  </g>
+
+  <!-- ── State Service ───────────────────────────────────────── -->
+  <g transform="translate(560,55)">
+    <rect width="180" height="80" rx="8" fill="#161b22" stroke="#d29922" stroke-width="1.5"/>
+    <text x="90" y="20" text-anchor="middle" font-size="11" fill="#8b949e">State Service</text>
+    <text x="90" y="40" text-anchor="middle" font-size="14" fill="#e6edf3" font-weight="bold">REST + WS</text>
+    <text x="90" y="58" text-anchor="middle" font-size="11" fill="#d29922">SQLite / aiosqlite</text>
+    <text x="90" y="74" text-anchor="middle" font-size="10" fill="#8b949e">SSE  WebSocket</text>
+  </g>
+
+  <!-- ── Provider Pool ───────────────────────────────────────── -->
+  <g transform="translate(30,200)">
+    <rect width="840" height="110" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="420" y="22" text-anchor="middle" font-size="12" fill="#8b949e" letter-spacing="2">PROVIDER POOL  —  Circuit Breaker  +  RPM Tracker</text>
+
+    <!-- Providers -->
+    <g transform="translate(18,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#3fb950">🟢 HEALTHY</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">claude-oauth</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">$0.00 / free</text>
+    </g>
+    <g transform="translate(148,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#3fb950">🟢 HEALTHY</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">anthropic</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">$3/$15 per M</text>
+    </g>
+    <g transform="translate(278,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#3fb950">🟢 HEALTHY</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">bedrock</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">AWS</text>
+    </g>
+    <g transform="translate(408,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#3fb950">🟢 HEALTHY</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">azure</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">AI Foundry</text>
+    </g>
+    <g transform="translate(538,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#d29922" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#d29922">🟡 SLOW</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">groq</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">free tier</text>
+    </g>
+    <g transform="translate(668,35)">
+      <rect width="110" height="56" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="55" y="22" text-anchor="middle" font-size="10" fill="#3fb950">🟢 HEALTHY</text>
+      <text x="55" y="40" text-anchor="middle" font-size="12" fill="#e6edf3" font-weight="bold">vertex</text>
+      <text x="55" y="56" text-anchor="middle" font-size="9" fill="#8b949e">Google Cloud</text>
+    </g>
+  </g>
+
+  <!-- ── Agent Wave ──────────────────────────────────────────── -->
+  <g transform="translate(30,335)">
+    <rect width="840" height="100" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="420" y="22" text-anchor="middle" font-size="12" fill="#8b949e" letter-spacing="2">AGENT WAVE  —  TaskGroup parallel execution</text>
+
+    <g transform="translate(18,32)">
+      <rect width="120" height="52" rx="6" fill="#0d1117" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="60" y="20" text-anchor="middle" font-size="10" fill="#58a6ff">🤖 coding</text>
+      <text x="60" y="36" text-anchor="middle" font-size="10" fill="#3fb950">✅ done</text>
+      <text x="60" y="50" text-anchor="middle" font-size="9" fill="#8b949e">$0.023</text>
+    </g>
+    <g transform="translate(158,32)">
+      <rect width="120" height="52" rx="6" fill="#0d1117" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="60" y="20" text-anchor="middle" font-size="10" fill="#58a6ff">🤖 coding</text>
+      <text x="60" y="36" text-anchor="middle" font-size="10" fill="#d29922">⏳ running</text>
+      <text x="60" y="50" text-anchor="middle" font-size="9" fill="#8b949e">$0.011</text>
+    </g>
+    <g transform="translate(298,32)">
+      <rect width="120" height="52" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="60" y="20" text-anchor="middle" font-size="10" fill="#3fb950">🔬 testing</text>
+      <text x="60" y="36" text-anchor="middle" font-size="10" fill="#3fb950">✅ done</text>
+      <text x="60" y="50" text-anchor="middle" font-size="9" fill="#8b949e">$0.008</text>
+    </g>
+    <g transform="translate(438,32)">
+      <rect width="120" height="52" rx="6" fill="#0d1117" stroke="#d29922" stroke-width="1.5"/>
+      <text x="60" y="20" text-anchor="middle" font-size="10" fill="#d29922">🙋 needs_human</text>
+      <text x="60" y="36" text-anchor="middle" font-size="10" fill="#d29922">❓ waiting</text>
+      <text x="60" y="50" text-anchor="middle" font-size="9" fill="#8b949e">claw-forge input</text>
+    </g>
+    <g transform="translate(578,32)">
+      <rect width="120" height="52" rx="6" fill="#0d1117" stroke="#f85149" stroke-width="1.5"/>
+      <text x="60" y="20" text-anchor="middle" font-size="10" fill="#f85149">👁 reviewing</text>
+      <text x="60" y="36" text-anchor="middle" font-size="10" fill="#8b949e">⏸ paused</text>
+      <text x="60" y="50" text-anchor="middle" font-size="9" fill="#8b949e">drain mode</text>
+    </g>
+    <g transform="translate(718,32)">
+      <rect width="110" height="52" rx="6" fill="#0d1117" stroke="#8b949e" stroke-width="1"/>
+      <text x="55" y="20" text-anchor="middle" font-size="10" fill="#8b949e">🚀 pending</text>
+      <text x="55" y="36" text-anchor="middle" font-size="10" fill="#8b949e">queued</text>
+      <text x="55" y="50" text-anchor="middle" font-size="9" fill="#8b949e">wave 2</text>
+    </g>
+  </g>
+
+  <!-- ── Kanban UI ───────────────────────────────────────────── -->
+  <g transform="translate(30,458)">
+    <rect width="840" height="46" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="420" y="19" text-anchor="middle" font-size="11" fill="#8b949e">Kanban UI  —  http://localhost:8888</text>
+    <text x="420" y="38" text-anchor="middle" font-size="12" fill="#58a6ff">React  +  WebSocket  +  Provider Health Dots  +  Cost Tracker</text>
+  </g>
+
+  <!-- Arrows: CLI → Dispatcher -->
+  <line x1="210" y1="96" x2="268" y2="96" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr-blue)" opacity="0.7"/>
+
+  <!-- Arrows: Dispatcher → State Service -->
+  <line x1="470" y1="96" x2="558" y2="96" stroke="#d29922" stroke-width="1.5" marker-end="url(#arr-yellow)" opacity="0.7"/>
+
+  <!-- Arrows: Dispatcher → Provider Pool -->
+  <line x1="370" y1="136" x2="370" y2="198" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arr-green)" opacity="0.7"/>
+
+  <!-- Arrows: Provider Pool → Agent Wave -->
+  <line x1="450" y1="310" x2="450" y2="333" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr-blue)" opacity="0.7"/>
+
+  <!-- Arrows: Agent Wave → Kanban -->
+  <line x1="450" y1="435" x2="450" y2="456" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr-gray)" opacity="0.7"/>
+
+  <!-- Arrow defs -->
+  <defs>
+    <marker id="arr-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arr-yellow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#d29922"/>
+    </marker>
+    <marker id="arr-green" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arr-gray" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+</svg>
