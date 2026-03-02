@@ -168,8 +168,9 @@ def state(
 def init(
     project: str = typer.Option(".", "--project", "-p"),
     spec: str | None = typer.Option(None, "--spec", "-s", help="Path to app_spec.txt"),
+    concurrency: int = typer.Option(5, "--concurrency", "-n", help="Max parallel agents"),
 ) -> None:
-    """Initialize a project — analyze and generate manifest."""
+    """Initialize a project — analyze spec and generate manifest."""
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.initializer import InitializerPlugin
 
@@ -179,9 +180,58 @@ def init(
         ctx.metadata = {"spec_file": spec}
     result = asyncio.run(plugin.execute(ctx))
     if result.success:
-        console.print("[green]Project analyzed successfully[/green]")
-        for k, v in result.metadata.items():
-            console.print(f"  {k}: {v}")
+        meta = result.metadata
+
+        # If spec was parsed, show detailed summary
+        if "feature_count" in meta:
+            console.print(f"\n[bold green]✅ Spec parsed: {meta['project_name']}[/bold green]")
+            console.print(f"   {result.output}\n")
+
+            # Feature count by category
+            category_counts = meta.get("category_counts", {})
+            if category_counts:
+                cat_table = Table(title="Features by Category")
+                cat_table.add_column("Category", style="cyan")
+                cat_table.add_column("Count", justify="right", style="bold")
+                for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+                    cat_table.add_row(cat, str(count))
+                cat_table.add_row("[bold]Total[/bold]", f"[bold]{meta['feature_count']}[/bold]")
+                console.print(cat_table)
+
+            # Wave count
+            wave_count = meta.get("wave_count", 0)
+            console.print(f"\n   [bold]Dependency waves:[/bold] {wave_count}")
+
+            # Estimated run time
+            feature_count = meta.get("feature_count", 0)
+            if feature_count > 0 and concurrency > 0:
+                # Estimate ~2 min per feature, divided by concurrency
+                est_minutes = (feature_count * 2) / concurrency
+                if est_minutes < 60:
+                    est_str = f"{est_minutes:.0f} minutes"
+                else:
+                    est_str = f"{est_minutes / 60:.1f} hours"
+                console.print(
+                    f"   [bold]Estimated run time:[/bold] ~{est_str} "
+                    f"(at concurrency={concurrency})"
+                )
+
+            # Phases
+            phases = meta.get("phases", [])
+            if phases:
+                console.print(f"\n   [bold]Implementation phases ({len(phases)}):[/bold]")
+                for i, phase in enumerate(phases, 1):
+                    console.print(f"     {i}. {phase}")
+
+            console.print(
+                f"\n   Next: [bold]claw-forge run --spec {spec} --concurrency {concurrency}[/bold]"
+            )
+        else:
+            # Basic project analysis (no spec)
+            console.print("[green]Project analyzed successfully[/green]")
+            for k, v in meta.items():
+                if k != "features":
+                    console.print(f"  {k}: {v}")
     else:
         console.print(f"[red]Analysis failed: {result.output}[/red]")
 

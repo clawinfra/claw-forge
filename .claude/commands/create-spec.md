@@ -1,30 +1,118 @@
-# Create Project Spec
+# Create Project Spec (XML)
 
-Help the user create a `claw-forge.yaml` configuration and `app_spec.txt` project specification interactively.
+Generate an AutoForge-compatible XML project specification for claw-forge. This produces 100-300+ granular feature bullets that become individual agent tasks.
 
 ## Instructions
 
-You are a project setup assistant for claw-forge. Walk the user through setting up their project step by step.
+You are the claw-forge spec generator. Walk the user through creating a comprehensive `app_spec.txt` (XML format) and `claw-forge.yaml` in a conversational, phased approach.
 
-### Step 1: Gather project information
+**Important:** Wait for the user's response after each phase before continuing. Do not generate the spec until you have enough information.
 
-Ask the user the following questions (one at a time, conversationally):
+---
 
-1. **Project name**: What should we call this project? (used as directory name and identifier)
-2. **Tech stack**: What languages/frameworks will this project use? (e.g., Python/FastAPI, TypeScript/React, Go, Rust)
-3. **Main features**: List the top 3-7 features or user stories for this project. Be specific — each one becomes an agent task.
-4. **Preferred providers**: Which AI providers do you have access to?
-   - `claude-oauth` — uses your `claude login` credentials (zero config, recommended)
-   - `anthropic` — direct Anthropic API key
-   - `groq` — free tier (great for backup)
-   - `bedrock` — AWS Bedrock
-   - `azure` — Azure AI Foundry
-   - `vertex` — Google Vertex AI
-5. **Concurrency**: How many agents should run in parallel? (1-10, default: 3)
+### Phase 1: Project Identity
 
-### Step 2: Generate `claw-forge.yaml`
+Ask the user (one at a time, conversationally):
 
-Create `.claw-forge/claw-forge.yaml` with this structure, filling in the user's choices:
+1. **What are you building?** Get the project name and a 2-3 sentence description.
+2. **Who is it for?** Target audience / users.
+3. **What problem does it solve?** The core value proposition.
+
+Summarize back: "So we're building **X** — a tool that helps **Y** by **Z**. Sound right?"
+
+---
+
+### Phase 2: Quick vs Detailed
+
+Ask the user:
+
+> **How detailed do you want to go?**
+>
+> - **Quick** (5 min): I'll derive the tech stack, database schema, and API from your features. Good for MVPs.
+> - **Detailed** (15 min): We'll go through tech stack, database design, API structure, and UI layout together. Better for production apps.
+
+Wait for their choice.
+
+---
+
+### Phase 3: Core Features (Conversational)
+
+This is the most important phase. Ask the user to describe their app's main functionality in natural language. Guide them through categories:
+
+> **Let's map out what your app does.** Describe the main things a user can do — I'll turn each one into specific, testable feature bullets.
+>
+> Let's start with: **What happens when a user first opens your app?** (Registration, onboarding, landing page?)
+
+After each response, derive granular bullets and confirm:
+
+```
+From what you described, I'm generating these features:
+
+**Authentication (5 bullets)**
+- User can register with email and password (returns 201 with user_id)
+- User can login and receive JWT access_token and refresh_token
+- ...
+
+Does this capture it? Anything to add or change?
+```
+
+Continue through categories:
+- **Authentication & user management**
+- **Core functionality** (the main thing the app does)
+- **Data management** (CRUD, search, filtering, pagination)
+- **UI/UX** (responsive design, loading states, error handling, notifications)
+- **API layer** (validation, error responses, pagination format)
+- **Admin features** (if applicable)
+- **Integrations** (third-party services, webhooks, notifications)
+
+**Target: 100-300 bullets total.** Each bullet should be a testable behavior starting with an action verb:
+- "User can..." / "System returns..." / "API validates..." / "UI displays..."
+
+---
+
+### Phase 4: Technical Details (Detailed mode only)
+
+If the user chose **Detailed**, ask about:
+
+1. **Tech stack preferences:**
+   - Frontend: React/Vue/Svelte/Next.js? Styling: Tailwind/CSS modules?
+   - Backend: Python (FastAPI/Django) / Node (Express/Fastify) / Go / Rust?
+   - Database: SQLite/PostgreSQL/MySQL/MongoDB?
+
+2. **Database schema:** Walk through the main tables/collections based on the features.
+
+3. **API structure:** REST vs GraphQL? Authentication method (JWT, session, OAuth)?
+
+4. **UI layout:** Dashboard style? Sidebar navigation? Single page or multi-page?
+
+For **Quick** mode, derive sensible defaults from the features (React + Vite, FastAPI, SQLite for dev / PostgreSQL for prod, JWT auth, REST API).
+
+---
+
+### Phase 5: Generate the Spec
+
+Generate two files:
+
+#### `app_spec.txt` (XML format)
+
+Use the template structure from `claw_forge/spec/app_spec.template.xml` but filled with the user's project details. The XML must include:
+
+- `<project_specification>` root element
+- `<project_name>`, `<overview>`
+- `<technology_stack>` with frontend/backend/communication
+- `<prerequisites>` with environment setup
+- `<core_features>` with categorized bullet lists (this is the bulk — 100-300 bullets)
+- `<database_schema>` with `<tables>` containing column definitions
+- `<api_endpoints_summary>` categorized by domain
+- `<ui_layout>` with main structure
+- `<design_system>` with color palette, typography, animations
+- `<key_interactions>` with numbered user flows
+- `<implementation_steps>` with 4-6 phased steps
+- `<success_criteria>` with functionality, UX, and technical quality
+
+**Important:** Use `&amp;` for `&` in XML content. Each bullet in `<core_features>` becomes one agent task.
+
+#### `claw-forge.yaml`
 
 ```yaml
 project:
@@ -32,67 +120,48 @@ project:
   path: .
 
 providers:
-  # Zero-config: uses claude login credentials
   - name: claude-oauth
     type: oauth
     enabled: true
     priority: 10
 
-  # Add other providers the user selected
-  # Example for Anthropic direct:
-  # - name: anthropic-direct
-  #   type: anthropic
-  #   api_key_env: ANTHROPIC_API_KEY
-  #   enabled: true
-  #   priority: 5
-
 orchestrator:
-  max_concurrent: <concurrency>
+  max_concurrent: 5
   retry_attempts: 3
   retry_delay_seconds: 5
 
 features:
-  # Auto-generated from app_spec.txt by: claw-forge init my-app --spec .claw-forge/app_spec.txt
+  # Generated by: claw-forge init --spec app_spec.txt
 ```
 
-### Step 3: Generate `app_spec.txt`
+Show both files to the user and ask: "Does this look right? I'll write these files now."
 
-Create `.claw-forge/app_spec.txt` with this format:
-
-```
-Project: <project-name>
-Stack: <tech-stack>
-Description: <one-paragraph description based on the features listed>
-
-Features:
-1. <Feature 1 title>
-   Description: <detailed description>
-   Acceptance criteria:
-   - <criterion 1>
-   - <criterion 2>
-
-2. <Feature 2 title>
-   ...
-```
-
-### Step 4: Confirm and write files
-
-Show the user both files before writing. Ask: "Does this look right? I'll write these files now." Then:
-
+Then write:
 ```bash
-mkdir -p .claw-forge
-# Write the files
+# Write app_spec.txt to project root
+# Write claw-forge.yaml to project root
 ```
 
-### Step 5: Next steps
+---
 
-Tell the user:
+### Phase 6: Next Steps
+
+After writing files, show:
+
 ```
 ✅ Project spec created!
 
-Next steps:
-  claw-forge init <project-name> --spec .claw-forge/app_spec.txt
-  claw-forge run <project-name> --concurrency <n>
+📊 Summary:
+  Features: <N> across <M> categories
+  Phases: <K> implementation steps
+  Tables: <T> database tables
+  Endpoints: <E> API endpoints
 
-Or use /expand-project to add more features later.
+Next steps:
+  1. Review app_spec.txt — add/remove features as needed
+  2. Run: claw-forge init --spec app_spec.txt
+  3. Run: claw-forge run --concurrency 5
+
+💡 Tip: Each feature bullet = one agent task. More specific bullets = better agent output.
+   Aim for 100-300 bullets for a full application.
 ```

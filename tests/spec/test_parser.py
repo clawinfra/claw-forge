@@ -1,0 +1,496 @@
+"""Tests for claw_forge.spec.parser — XML and plain-text spec parsing."""
+
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from claw_forge.spec.parser import (
+    FeatureItem,
+    ProjectSpec,
+    TechStack,
+    _assign_dependencies,
+    _parse_key_value_el,
+)
+
+# ── Fixtures ─────────────────────────────────────────────────────────────────
+
+TEMPLATE_XML = (Path(__file__).parent.parent.parent / "claw_forge" / "spec" / "app_spec.template.xml").read_text()
+
+MINIMAL_XML = textwrap.dedent("""\
+    <project_specification>
+      <project_name>test-app</project_name>
+      <overview>A test application for unit testing.</overview>
+      <technology_stack>
+        <frontend>
+          <framework>Vue 3</framework>
+          <port>5173</port>
+        </frontend>
+        <backend>
+          <runtime>Node.js with Express</runtime>
+          <database>PostgreSQL</database>
+          <port>4000</port>
+        </backend>
+      </technology_stack>
+      <core_features>
+        <auth>
+          - User can register
+          - User can login
+          - User can logout
+        </auth>
+        <dashboard>
+          - User can view dashboard
+          - User can filter data
+        </dashboard>
+      </core_features>
+      <implementation_steps>
+        <step number="1">
+          <title>Auth Setup</title>
+        </step>
+        <step number="2">
+          <title>Dashboard Features</title>
+        </step>
+      </implementation_steps>
+      <success_criteria>
+        <quality>
+          - All tests pass
+          - Coverage above 90%
+        </quality>
+      </success_criteria>
+      <design_system>
+        <color_palette>
+          - Primary: #3b82f6
+          - Secondary: #10b981
+        </color_palette>
+        <typography>
+          - Font: Inter
+        </typography>
+      </design_system>
+      <api_endpoints_summary>
+        <auth>
+          - POST /api/register
+          - POST /api/login
+        </auth>
+        <data>
+          - GET /api/dashboard
+        </data>
+      </api_endpoints_summary>
+      <database_schema>
+        <tables>
+          <users>
+            - id (PRIMARY KEY)
+            - email (UNIQUE)
+            - password_hash
+          </users>
+          <sessions>
+            - id (PRIMARY KEY)
+            - user_id (FOREIGN KEY)
+            - token
+          </sessions>
+        </tables>
+      </database_schema>
+    </project_specification>
+""")
+
+PLAIN_TEXT_SPEC = textwrap.dedent("""\
+    Project: my-todo-app
+    Stack: Python/FastAPI + React
+
+    1. User Authentication
+       Description: Login and registration system
+       - Set up auth routes
+       - Create user model
+       Depends on:
+
+    2. Todo CRUD
+       Description: Create, read, update, delete todos
+       - Create todo model
+       - Build REST endpoints
+       Depends on: 1
+
+    3. Frontend UI
+       Description: React frontend for todos
+       - Build todo list component
+       - Add create/edit forms
+       Depends on: 1, 2
+""")
+
+XML_WITH_COMMENTS = textwrap.dedent("""\
+    <!-- This is a comment that should be stripped -->
+    <project_specification>
+      <!-- Another comment -->
+      <project_name>commented-app</project_name>
+      <overview>App with comments in XML.</overview>
+      <core_features>
+        <basic>
+          - Feature one
+          - Feature two
+        </basic>
+      </core_features>
+    </project_specification>
+""")
+
+
+# ── Test XML parsing ─────────────────────────────────────────────────────────
+
+
+class TestXmlParsing:
+    """Test XML spec parsing."""
+
+    def test_parse_project_name(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert spec.project_name == "test-app"
+
+    def test_parse_overview(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert spec.overview == "A test application for unit testing."
+
+    def test_parse_tech_stack_frontend(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert spec.tech_stack.frontend_framework == "Vue 3"
+        assert spec.tech_stack.frontend_port == 5173
+
+    def test_parse_tech_stack_backend(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert spec.tech_stack.backend_runtime == "Node.js with Express"
+        assert spec.tech_stack.backend_db == "PostgreSQL"
+        assert spec.tech_stack.backend_port == 4000
+
+    def test_parse_tech_stack_raw_preserved(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "<framework>Vue 3</framework>" in spec.tech_stack.raw
+
+    def test_feature_count(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert len(spec.features) == 5
+
+    def test_feature_categories(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        categories = {f.category for f in spec.features}
+        assert "Auth" in categories
+        assert "Dashboard" in categories
+
+    def test_feature_names_derived(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        names = [f.name for f in spec.features]
+        assert "User can register" in names
+        assert "User can login" in names
+
+    def test_feature_description_is_full_bullet(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        desc = spec.features[0].description
+        assert desc == "User can register"
+
+    def test_implementation_phases(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert spec.implementation_phases == ["Auth Setup", "Dashboard Features"]
+
+    def test_success_criteria(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "All tests pass" in spec.success_criteria
+        assert "Coverage above 90%" in spec.success_criteria
+
+    def test_design_system_parsed(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "color_palette" in spec.design_system
+        assert len(spec.design_system["color_palette"]) == 2
+        assert "Primary: #3b82f6" in spec.design_system["color_palette"]
+
+    def test_design_system_typography(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "typography" in spec.design_system
+        assert "Font: Inter" in spec.design_system["typography"]
+
+    def test_api_endpoints_parsed(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "Auth" in spec.api_endpoints
+        assert "POST /api/register" in spec.api_endpoints["Auth"]
+        assert "POST /api/login" in spec.api_endpoints["Auth"]
+        assert "Data" in spec.api_endpoints
+        assert "GET /api/dashboard" in spec.api_endpoints["Data"]
+
+    def test_database_tables_parsed(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "users" in spec.database_tables
+        assert "sessions" in spec.database_tables
+        assert "id (PRIMARY KEY)" in spec.database_tables["users"]
+        assert "email (UNIQUE)" in spec.database_tables["users"]
+        assert "user_id (FOREIGN KEY)" in spec.database_tables["sessions"]
+
+    def test_raw_xml_preserved(self) -> None:
+        spec = ProjectSpec._parse_xml(MINIMAL_XML)
+        assert "<project_specification>" in spec.raw_xml
+
+    def test_xml_comments_stripped(self) -> None:
+        spec = ProjectSpec._parse_xml(XML_WITH_COMMENTS)
+        assert spec.project_name == "commented-app"
+        assert len(spec.features) == 2
+
+
+# ── Test template XML ────────────────────────────────────────────────────────
+
+
+class TestTemplateXml:
+    """Test parsing the actual template XML file."""
+
+    def test_template_parses_successfully(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert spec.project_name == "my-project"
+
+    def test_template_feature_count(self) -> None:
+        """Template should have 17 features across 4 categories."""
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        # 5 auth + 5 core + 4 UI + 3 API = 17
+        assert len(spec.features) == 17
+
+    def test_template_categories(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        categories = {f.category for f in spec.features}
+        assert "Authentication" in categories
+        assert "Core Functionality" in categories
+        assert "User Interface" in categories
+        assert "Api Layer" in categories
+
+    def test_template_phases(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert len(spec.implementation_phases) == 4
+        assert "Project Setup and Database" in spec.implementation_phases
+        assert "Authentication System" in spec.implementation_phases
+
+    def test_template_design_system(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert "color_palette" in spec.design_system
+        assert "typography" in spec.design_system
+        assert "animations" in spec.design_system
+
+    def test_template_api_endpoints(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert "Authentication" in spec.api_endpoints
+        assert len(spec.api_endpoints["Authentication"]) == 5
+
+    def test_template_database_tables(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert "users" in spec.database_tables
+        assert len(spec.database_tables["users"]) == 5
+
+    def test_template_success_criteria(self) -> None:
+        spec = ProjectSpec._parse_xml(TEMPLATE_XML)
+        assert len(spec.success_criteria) >= 6
+
+
+# ── Test plain text parsing ──────────────────────────────────────────────────
+
+
+class TestPlainTextParsing:
+    """Test legacy plain text spec format."""
+
+    def test_parse_project_name(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert spec.project_name == "my-todo-app"
+
+    def test_parse_tech_stack_raw(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert spec.tech_stack.raw == "Python/FastAPI + React"
+
+    def test_feature_count(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert len(spec.features) == 3
+
+    def test_feature_names(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        names = [f.name for f in spec.features]
+        assert "User Authentication" in names
+        assert "Todo CRUD" in names
+        assert "Frontend UI" in names
+
+    def test_feature_descriptions(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert spec.features[0].description == "Login and registration system"
+
+    def test_feature_steps(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert "Set up auth routes" in spec.features[0].steps
+        assert "Create user model" in spec.features[0].steps
+
+    def test_feature_dependencies(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert spec.features[0].depends_on_indices == []
+        assert spec.features[1].depends_on_indices == [0]
+        assert spec.features[2].depends_on_indices == [0, 1]
+
+    def test_plain_text_defaults(self) -> None:
+        spec = ProjectSpec._parse_plain_text(PLAIN_TEXT_SPEC)
+        assert spec.implementation_phases == []
+        assert spec.success_criteria == []
+        assert spec.design_system == {}
+        assert spec.api_endpoints == {}
+        assert spec.database_tables == {}
+
+    def test_plain_text_default_project_name(self) -> None:
+        spec = ProjectSpec._parse_plain_text("1. Some feature\n   Description: does stuff\n")
+        assert spec.project_name == "project"
+
+
+# ── Test from_file dispatch ──────────────────────────────────────────────────
+
+
+class TestFromFile:
+    """Test from_file dispatches correctly based on format."""
+
+    def test_from_file_xml(self, tmp_path: Path) -> None:
+        spec_file = tmp_path / "app_spec.txt"
+        spec_file.write_text(MINIMAL_XML, encoding="utf-8")
+        spec = ProjectSpec.from_file(spec_file)
+        assert spec.project_name == "test-app"
+        assert len(spec.features) == 5
+
+    def test_from_file_plain_text(self, tmp_path: Path) -> None:
+        spec_file = tmp_path / "app_spec.txt"
+        spec_file.write_text(PLAIN_TEXT_SPEC, encoding="utf-8")
+        spec = ProjectSpec.from_file(spec_file)
+        assert spec.project_name == "my-todo-app"
+        assert len(spec.features) == 3
+
+    def test_from_file_detects_xml_by_tag(self, tmp_path: Path) -> None:
+        """Ensure detection works with leading whitespace."""
+        content = "\n  \n" + MINIMAL_XML
+        spec_file = tmp_path / "spec.txt"
+        spec_file.write_text(content, encoding="utf-8")
+        spec = ProjectSpec.from_file(spec_file)
+        assert spec.project_name == "test-app"
+
+
+# ── Test dependency assignment ───────────────────────────────────────────────
+
+
+class TestDependencyAssignment:
+    """Test _assign_dependencies logic."""
+
+    def test_no_phases_no_deps(self) -> None:
+        features = [FeatureItem(category="Auth", name="login", description="login")]
+        _assign_dependencies(features, [])
+        assert features[0].depends_on_indices == []
+
+    def test_single_phase_no_deps(self) -> None:
+        features = [FeatureItem(category="Auth", name="login", description="login")]
+        _assign_dependencies(features, ["Auth Setup"])
+        assert features[0].depends_on_indices == []
+
+    def test_two_phases_creates_deps(self) -> None:
+        features = [
+            FeatureItem(category="Auth", name="login", description="login"),
+            FeatureItem(category="Dashboard", name="view", description="view dashboard"),
+        ]
+        _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
+        # Auth feature is in phase 0 (matches "Auth")
+        assert features[0].depends_on_indices == []
+        # Dashboard feature is in phase 1 (matches "Dashboard"), depends on phase 0
+        assert features[1].depends_on_indices == [0]
+
+    def test_unmatched_features_go_to_middle_phase(self) -> None:
+        features = [
+            FeatureItem(category="Auth", name="login", description="login"),
+            FeatureItem(category="Misc", name="misc", description="misc feature"),
+            FeatureItem(category="Dashboard", name="view", description="view dashboard"),
+        ]
+        _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
+        # Misc doesn't match any phase, goes to middle (index 0 for 2 phases: 2//2=1)
+        # Since it goes to phase 1 (middle of 2 = index 1), it depends on phase 0
+        assert features[1].depends_on_indices == [0]
+
+
+# ── Test edge cases ──────────────────────────────────────────────────────────
+
+
+class TestEdgeCases:
+    """Test parser edge cases."""
+
+    def test_empty_core_features(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>empty</project_name>
+              <core_features>
+              </core_features>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 0
+
+    def test_asterisk_bullets(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>star</project_name>
+              <core_features>
+                <misc>
+                  * Feature with asterisk
+                  * Another asterisk feature
+                </misc>
+              </core_features>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 2
+        assert spec.features[0].name == "Feature with asterisk"
+
+    def test_long_bullet_name_truncated(self) -> None:
+        long_desc = "User can do something very very long " + "x" * 100
+        xml = f"""\
+            <project_specification>
+              <project_name>long</project_name>
+              <core_features>
+                <misc>
+                  - {long_desc}
+                </misc>
+              </core_features>
+            </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features[0].name) <= 60
+
+    def test_no_tech_stack(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>minimal</project_name>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.tech_stack.frontend_framework == ""
+        assert spec.tech_stack.frontend_port == 3000
+        assert spec.tech_stack.backend_port == 3001
+
+    def test_non_numeric_port_defaults(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>ports</project_name>
+              <technology_stack>
+                <frontend>
+                  <port>abc</port>
+                </frontend>
+                <backend>
+                  <port>xyz</port>
+                </backend>
+              </technology_stack>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.tech_stack.frontend_port == 3000
+        assert spec.tech_stack.backend_port == 3001
+
+    def test_empty_bullets_ignored(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>blanks</project_name>
+              <core_features>
+                <misc>
+                  - 
+                  -
+                  - Real feature
+                </misc>
+              </core_features>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 1
+        assert spec.features[0].name == "Real feature"

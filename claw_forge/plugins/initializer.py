@@ -1,15 +1,24 @@
-"""Initializer plugin — project analysis and manifest generation."""
+"""Initializer plugin — project analysis, spec parsing, and manifest generation."""
 
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
 
+logger = logging.getLogger(__name__)
+
 
 class InitializerPlugin(BasePlugin):
-    """Analyzes a project and generates a session manifest."""
+    """Analyzes a project and generates a session manifest.
+
+    If a spec file is provided (via context.metadata["spec_file"]),
+    parses it using ProjectSpec (XML or plain text) and returns
+    granular features (typically 100-400 items).
+    """
 
     @property
     def name(self) -> str:
@@ -23,7 +32,7 @@ class InitializerPlugin(BasePlugin):
         return (
             "You are a project analyzer. Examine the project structure, identify the "
             "language, framework, build system, and key files. Generate a comprehensive "
-            "session manifest that will help other agents understand and work with this project.\n\n"  # noqa: E501
+            "session manifest that will help other agents understand and work with this project.\n\n"
             "Output a JSON manifest with: project_name, language, framework, description, "
             "key_files (with roles), build_commands, test_commands, and any special notes."
         )
@@ -41,12 +50,151 @@ class InitializerPlugin(BasePlugin):
         if not project.exists():
             return PluginResult(success=False, output=f"Project path not found: {project}")
 
+        # Check if a spec file was provided
+        spec_file = context.metadata.get("spec_file")
+        if spec_file:
+            return self._execute_with_spec(project, Path(spec_file))
+
+        # Fallback to basic project analysis
         analysis = self._analyze_project(project)
         return PluginResult(
             success=True,
-            output=f"Project analyzed: {analysis.get('language', 'unknown')} / {analysis.get('framework', 'unknown')}",  # noqa: E501
+            output=(
+                f"Project analyzed: {analysis.get('language', 'unknown')} / "
+                f"{analysis.get('framework', 'unknown')}"
+            ),
             metadata=analysis,
         )
+
+    def _execute_with_spec(self, project: Path, spec_path: Path) -> PluginResult:
+        """Parse a spec file and return features for bulk creation."""
+        from claw_forge.spec import ProjectSpec
+
+        # Resolve spec path relative to project if not absolute
+        if not spec_path.is_absolute():
+            spec_path = project / spec_path
+
+        if not spec_path.exists():
+            return PluginResult(
+                success=False,
+                output=f"Spec file not found: {spec_path}",
+            )
+
+        try:
+            spec = ProjectSpec.from_file(spec_path)
+        except Exception as exc:
+            return PluginResult(
+                success=False,
+                output=f"Failed to parse spec: {exc}",
+            )
+
+        # Count categories
+        category_counts = Counter(f.category for f in spec.features)
+        num_features = len(spec.features)
+        num_categories = len(category_counts)
+        num_phases = len(spec.implementation_phases)
+
+        logger.info(
+            "Parsed %d features across %d categories in %d phases",
+            num_features,
+            num_categories,
+            num_phases,
+        )
+
+        # Build feature list for bulk creation
+        feature_list = []
+        for i, feat in enumerate(spec.features):
+            feature_list.append(
+                {
+                    "index": i,
+                    "category": feat.category,
+                    "name": feat.name,
+                    "description": feat.description,
+                    "steps": feat.steps,
+                    "depends_on_indices": feat.depends_on_indices,
+                }
+            )
+
+        # Build the summary
+        category_summary = ", ".join(
+            f"{cat} ({count})" for cat, count in category_counts.most_common()
+        )
+
+        # Compute wave count (number of distinct dependency layers)
+        wave_count = self._compute_wave_count(spec.features)
+
+        return PluginResult(
+            success=True,
+            output=(
+                f"Parsed {num_features} features across {num_categories} categories "
+                f"in {num_phases} phases"
+            ),
+            metadata={
+                "project_name": spec.project_name,
+                "overview": spec.overview,
+                "tech_stack": {
+                    "frontend_framework": spec.tech_stack.frontend_framework,
+                    "frontend_port": spec.tech_stack.frontend_port,
+                    "backend_runtime": spec.tech_stack.backend_runtime,
+                    "backend_db": spec.tech_stack.backend_db,
+                    "backend_port": spec.tech_stack.backend_port,
+                },
+                "feature_count": num_features,
+                "category_counts": dict(category_counts),
+                "category_summary": category_summary,
+                "phase_count": num_phases,
+                "phases": spec.implementation_phases,
+                "wave_count": wave_count,
+                "features": feature_list,
+                "success_criteria": spec.success_criteria,
+                "design_system": spec.design_system,
+                "api_endpoints": spec.api_endpoints,
+                "database_tables": spec.database_tables,
+            },
+        )
+
+    @staticmethod
+    def _compute_wave_count(features: list) -> int:
+        """Compute number of dependency waves (topological layers).
+
+        Wave 0 = features with no dependencies.
+        Wave N = features whose deps are all in waves < N.
+        """
+        if not features:
+            return 0
+
+        num = len(features)
+        wave: list[int] = [-1] * num
+
+        # Features with no deps are wave 0
+        for i, feat in enumerate(features):
+            if not feat.depends_on_indices:
+                wave[i] = 0
+
+        changed = True
+        while changed:
+            changed = False
+            for i, feat in enumerate(features):
+                if wave[i] >= 0:
+                    continue
+                deps = feat.depends_on_indices
+                # Filter valid deps
+                valid_deps = [d for d in deps if 0 <= d < num]
+                if not valid_deps:
+                    wave[i] = 0
+                    changed = True
+                    continue
+                if all(wave[d] >= 0 for d in valid_deps):
+                    wave[i] = max(wave[d] for d in valid_deps) + 1
+                    changed = True
+
+        # Any still -1 are in cycles; assign max+1
+        max_wave = max((w for w in wave if w >= 0), default=0)
+        for i in range(num):
+            if wave[i] < 0:
+                wave[i] = max_wave + 1
+
+        return max(wave) + 1 if wave else 0
 
     def _analyze_project(self, path: Path) -> dict[str, Any]:
         indicators: dict[str, tuple[str, str]] = {
@@ -76,7 +224,9 @@ class InitializerPlugin(BasePlugin):
 
         # Collect key files
         for pattern in ["README*", "LICENSE*", "Dockerfile", ".github/workflows/*"]:
-            key_files.extend(str(f.relative_to(path)) for f in path.glob(pattern) if f.is_file())
+            key_files.extend(
+                str(f.relative_to(path)) for f in path.glob(pattern) if f.is_file()
+            )
 
         return {
             "language": language,
