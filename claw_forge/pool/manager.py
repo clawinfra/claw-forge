@@ -1,0 +1,185 @@
+"""ProviderPoolManager — core multi-provider rotation with fallback."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from claw_forge.pool.health import CircuitBreaker, CircuitState
+from claw_forge.pool.providers.base import (
+    BaseProvider,
+    ProviderConfig,
+    ProviderError,
+    ProviderResponse,
+    RateLimitError,
+)
+from claw_forge.pool.providers.registry import create_providers_from_configs
+from claw_forge.pool.router import Router, RoutingStrategy
+from claw_forge.pool.tracker import UsageTracker
+
+logger = logging.getLogger(__name__)
+
+
+class ProviderPoolExhausted(Exception):
+    """All providers failed or are unavailable."""
+
+
+class ProviderPoolManager:
+    """Multi-provider API rotation pool with circuit breaker, health checking,
+    rate limit detection, and cost tracking.
+
+    Fallback chain: try providers by priority, skip circuit-open or rate-limited ones.
+    If all fail, raise ProviderPoolExhausted.
+    """
+
+    def __init__(
+        self,
+        configs: list[ProviderConfig],
+        *,
+        strategy: RoutingStrategy = RoutingStrategy.PRIORITY,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 60.0,
+        max_retries: int = 3,
+        backoff_base: float = 1.0,
+        backoff_max: float = 30.0,
+    ) -> None:
+        self._providers = create_providers_from_configs(configs)
+        self._circuits: dict[str, CircuitBreaker] = {
+            p.name: CircuitBreaker(
+                name=p.name,
+                failure_threshold=failure_threshold,
+                recovery_timeout=recovery_timeout,
+            )
+            for p in self._providers
+        }
+        self._router = Router(strategy=strategy)
+        self._tracker = UsageTracker()
+        self._max_retries = max_retries
+        self._backoff_base = backoff_base
+        self._backoff_max = backoff_max
+        self._lock = asyncio.Lock()
+
+    @property
+    def providers(self) -> list[BaseProvider]:
+        return list(self._providers)
+
+    @property
+    def tracker(self) -> UsageTracker:
+        return self._tracker
+
+    async def execute(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        """Execute a request with automatic provider fallback.
+
+        Tries providers in order determined by the routing strategy.
+        On failure, records the error, trips circuit breaker if needed,
+        and falls through to the next provider.
+        """
+        errors: list[tuple[str, Exception]] = []
+
+        for attempt in range(self._max_retries):
+            ordered = self._router.select(self._providers, self._circuits, self._tracker)
+            if not ordered:
+                if attempt < self._max_retries - 1:
+                    wait = min(self._backoff_base * (2**attempt), self._backoff_max)
+                    logger.warning("No providers available, backing off %.1fs", wait)
+                    await asyncio.sleep(wait)
+                    continue
+                break
+
+            for provider in ordered:
+                cb = self._circuits[provider.name]
+                if cb.state == CircuitState.HALF_OPEN:
+                    cb.record_half_open_attempt()
+
+                try:
+                    response = await provider.execute(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        system=system,
+                        tools=tools,
+                        **kwargs,
+                    )
+                    cb.record_success()
+                    self._tracker.record_request(
+                        provider_name=provider.name,
+                        input_tokens=response.input_tokens,
+                        output_tokens=response.output_tokens,
+                        cost_input_per_mtok=provider.config.cost_per_mtok_input,
+                        cost_output_per_mtok=provider.config.cost_per_mtok_output,
+                        latency_ms=response.latency_ms,
+                    )
+                    return response
+
+                except RateLimitError as e:
+                    logger.warning("Rate limited on %s: %s", provider.name, e)
+                    self._tracker.record_error(provider.name)
+                    errors.append((provider.name, e))
+                    if e.retry_after:
+                        await asyncio.sleep(min(e.retry_after, self._backoff_max))
+                    continue
+
+                except ProviderError as e:
+                    logger.warning("Provider %s error: %s", provider.name, e)
+                    cb.record_failure()
+                    self._tracker.record_error(provider.name)
+                    errors.append((provider.name, e))
+                    if not e.retryable:
+                        continue
+                    continue
+
+                except Exception as e:
+                    logger.exception("Unexpected error from %s", provider.name)
+                    cb.record_failure()
+                    self._tracker.record_error(provider.name)
+                    errors.append((provider.name, e))
+                    continue
+
+        error_summary = "; ".join(f"{n}: {e}" for n, e in errors)
+        raise ProviderPoolExhausted(f"All providers exhausted. Errors: {error_summary}")
+
+    async def get_pool_status(self) -> dict[str, Any]:
+        """Return current pool status including circuits and usage."""
+        return {
+            "providers": [
+                {
+                    "name": p.name,
+                    "type": p.config.provider_type.value,
+                    "priority": p.config.priority,
+                    "enabled": p.config.enabled,
+                    "circuit": self._circuits[p.name].to_dict(),
+                }
+                for p in self._providers
+            ],
+            "usage": self._tracker.get_all_stats(),
+            "strategy": self._router.strategy.value,
+        }
+
+    async def health_check_all(self) -> dict[str, bool]:
+        """Run health checks on all providers concurrently."""
+        async def _check(p: BaseProvider) -> tuple[str, bool]:
+            try:
+                ok = await p.health_check()
+            except Exception:
+                ok = False
+            return p.name, ok
+
+        results = await asyncio.gather(*[_check(p) for p in self._providers])
+        return dict(results)
+
+    def reset_circuit(self, provider_name: str) -> None:
+        """Manually reset a provider's circuit breaker."""
+        if provider_name in self._circuits:
+            self._circuits[provider_name].reset()

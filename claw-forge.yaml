@@ -1,0 +1,112 @@
+# claw-forge configuration
+# Full example with all provider types
+
+pool:
+  strategy: priority          # priority | round_robin | weighted_random | least_cost | least_latency
+  max_retries: 3
+  failure_threshold: 5        # failures before circuit opens
+  recovery_timeout: 60        # seconds before half-open retry
+  backoff_base: 1.0
+  backoff_max: 30.0
+
+providers:
+  # Direct Anthropic — multiple keys for rotation
+  anthropic-primary:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY_1}
+    priority: 1
+    weight: 2.0
+    max_rpm: 60
+    cost_per_mtok_input: 3.0
+    cost_per_mtok_output: 15.0
+
+  anthropic-secondary:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY_2}
+    priority: 1
+    weight: 1.0
+    max_rpm: 60
+
+  # Anthropic-compatible proxy
+  anthropic-proxy:
+    type: openai_compat
+    base_url: https://proxy.example.com
+    api_key: ${PROXY_API_KEY}
+    priority: 2
+    cost_per_mtok_input: 2.5
+    cost_per_mtok_output: 12.0
+    model_map:
+      claude-sonnet-4-20250514: claude-sonnet-4-20250514
+
+  # AWS Bedrock
+  bedrock-us-east:
+    type: bedrock
+    region: us-east-1
+    priority: 3
+    max_rpm: 40
+    cost_per_mtok_input: 3.0
+    cost_per_mtok_output: 15.0
+    model_map:
+      claude-sonnet-4-20250514: anthropic.claude-sonnet-4-20250514-v2:0
+
+  # Azure AI Foundry
+  azure-eastus:
+    type: azure
+    endpoint: https://my-resource.openai.azure.com
+    api_key: ${AZURE_API_KEY}
+    model_deployment: claude-sonnet
+    priority: 4
+    cost_per_mtok_input: 3.0
+    cost_per_mtok_output: 15.0
+
+  # Google Vertex AI
+  vertex-us:
+    type: vertex
+    project_id: my-gcp-project
+    region: us-east5
+    priority: 5
+    cost_per_mtok_input: 3.0
+    cost_per_mtok_output: 15.0
+
+  # Groq (OpenAI-compatible)
+  groq:
+    type: openai_compat
+    base_url: https://api.groq.com/openai
+    api_key: ${GROQ_API_KEY}
+    priority: 6
+    max_rpm: 30
+    cost_per_mtok_input: 0.0
+    cost_per_mtok_output: 0.0
+    tags: [fast, free-tier]
+
+  # Local/custom OpenAI-compatible endpoint
+  local-llm:
+    type: openai_compat
+    base_url: http://localhost:8080
+    priority: 10
+    enabled: false
+    cost_per_mtok_input: 0.0
+    cost_per_mtok_output: 0.0
+
+# Agent configuration
+agent:
+  default_model: claude-sonnet-4-20250514
+  max_tokens: 8192
+  temperature: 0.0
+  max_concurrent_agents: 5
+
+# Skills to activate
+skills:
+  - pyright
+  - typescript-lsp
+  - rust-analyzer
+  - systematic-debug
+  - verification-gate
+  - git-workflow
+  - test-driven
+
+# State service
+state:
+  database_url: "sqlite+aiosqlite:///claw_forge.db"
+  host: "0.0.0.0"
+  port: 8420
