@@ -266,5 +266,5 @@ class TestRegistryAnthropicOauth:
             "claw_forge.pool.providers.oauth.read_claude_oauth_token",
             return_value=None,
         ):
-            with pytest.raises(ValueError, match="no Claude OAuth token found"):
+            with pytest.raises(ValueError, match="no OAuth credentials"):
                 create_provider(cfg)
