@@ -1,0 +1,53 @@
+<!-- claw-forge Brownfield Addition Spec -->
+<!-- Use this template to describe features you want to ADD to an existing project -->
+<!-- Run: claw-forge add --spec additions_spec.xml -->
+
+<project_specification mode="brownfield">
+  <project_name>Your Project — Feature Name</project_name>
+  <addition_summary>
+    One paragraph describing what you're adding and why.
+  </addition_summary>
+
+  <existing_context>
+    <!-- Auto-populated by /create-spec when brownfield_manifest.json exists -->
+    <!-- Or fill in manually -->
+    <stack>Language / Framework / Database</stack>
+    <test_baseline>N tests passing, X% coverage</test_baseline>
+    <conventions>naming style, error handling, logging approach</conventions>
+  </existing_context>
+
+  <features_to_add>
+    <!-- One feature per line. Action-verb format. -->
+    <!-- Example: User can add a payment method via Stripe Elements -->
+    <!-- Aim for 10-50 features for a medium addition -->
+  </features_to_add>
+
+  <integration_points>
+    <!-- Where does new code hook into existing code? -->
+    <!-- Example: Extends User model with stripe_customer_id field -->
+    <!-- Example: Adds /payments router to existing FastAPI app -->
+  </integration_points>
+
+  <constraints>
+    <!-- What must NOT change? -->
+    <!-- Example: Must not modify existing auth flow -->
+    <!-- Example: All existing tests must stay green -->
+    <!-- Example: Follow existing async handler pattern in routers/ -->
+  </constraints>
+
+  <implementation_steps>
+    <phase name="Phase 1 Name">
+      Feature one in this phase
+      Feature two in this phase
+    </phase>
+    <phase name="Phase 2 Name">
+      Feature three
+    </phase>
+  </implementation_steps>
+
+  <success_criteria>
+    All new features implemented and tested
+    Existing test suite still 100% green
+    Coverage maintained above X%
+  </success_criteria>
+</project_specification>

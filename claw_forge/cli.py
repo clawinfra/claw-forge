@@ -263,6 +263,84 @@ def init(
 
 
 @app.command()
+def add(
+    feature: str = typer.Argument(..., help="Feature description or @spec-file"),
+    spec: str | None = typer.Option(None, "--spec", "-s", help="Path to brownfield XML spec"),
+    project: str = typer.Option(".", "--project", "-p"),
+    branch: bool = typer.Option(True, "--branch/--no-branch", help="Create git branch"),
+) -> None:
+    """Add a feature or brownfield spec to an existing project."""
+    import json
+
+    from claw_forge.plugins.base import PluginContext
+    from claw_forge.plugins.initializer import InitializerPlugin
+
+    if spec:
+        # Brownfield spec path provided — parse and inject context
+        from claw_forge.spec import ProjectSpec
+
+        spec_path = Path(spec)
+        try:
+            parsed = ProjectSpec.from_file(spec_path)
+        except Exception as exc:
+            console.print(f"[red]Failed to parse spec: {exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        # Load manifest if brownfield
+        manifest: dict[str, Any] | None = None
+        if parsed.is_brownfield:
+            manifest_path = Path(project) / "brownfield_manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    for key in ("stack", "test_baseline", "conventions"):
+                        if key in manifest:
+                            parsed.existing_context[key] = str(manifest[key])
+                except Exception as exc:
+                    console.print(f"[yellow]Warning: could not load manifest: {exc}[/yellow]")
+
+        agent_ctx = parsed.to_agent_context(manifest)
+        num_features = len(parsed.features)
+
+        console.print(f"\n[bold green]✅ Brownfield spec: {parsed.project_name}[/bold green]")
+        console.print(f"   Mode: {parsed.mode}")
+        console.print(f"   Features to add: {num_features}")
+        if parsed.constraints:
+            console.print(f"   Constraints: {len(parsed.constraints)}")
+        if parsed.integration_points:
+            console.print(f"   Integration points: {len(parsed.integration_points)}")
+
+        console.print("\n[bold]Agent context:[/bold]")
+        console.print(agent_ctx)
+
+        # Delegate to initializer for feature creation
+        plugin = InitializerPlugin()
+        ctx = PluginContext(project_path=project, session_id="add", task_id="add")
+        ctx.metadata = {"spec_file": spec}
+        result = asyncio.run(plugin.execute(ctx))
+        if not result.success:
+            console.print(f"[red]Failed: {result.output}[/red]")
+            raise typer.Exit(1) from None
+
+        if branch:
+            branch_name = parsed.project_name.lower().replace(" ", "-").replace("—", "")
+            branch_name = "".join(c for c in branch_name if c.isalnum() or c == "-")
+            console.print(f"\n[dim]Suggested git branch: feature/{branch_name}[/dim]")
+
+        console.print(
+            f"\n   Next: [bold]claw-forge run --spec {spec} --project {project}[/bold]"
+        )
+    else:
+        # Single feature description
+        console.print(f"[bold]Adding feature:[/bold] {feature}")
+        console.print(f"[bold]Project:[/bold] {project}")
+        if branch:
+            slug = feature.lower().replace(" ", "-")[:40]
+            console.print(f"[dim]Suggested git branch: feature/{slug}[/dim]")
+        console.print("[yellow]Feature addition not yet integrated — scaffold only[/yellow]")
+
+
+@app.command()
 def pause(
     project: str = typer.Argument(..., help="Session ID or project name to pause"),
     port: int = typer.Option(8420, "--port", help="State service port"),

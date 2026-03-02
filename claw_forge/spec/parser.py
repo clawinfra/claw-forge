@@ -40,6 +40,54 @@ class ProjectSpec:
     api_endpoints: dict[str, Any]  # category -> list of endpoints
     database_tables: dict[str, Any]  # table_name -> list of columns
     raw_xml: str  # preserved for reference
+    mode: str = "greenfield"  # "greenfield" or "brownfield"
+    addition_summary: str = ""
+    existing_context: dict[str, str] = field(default_factory=dict)  # stack, test_baseline, etc.
+    integration_points: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+
+    @property
+    def is_brownfield(self) -> bool:
+        """Return True if this is a brownfield (addition) spec."""
+        return self.mode == "brownfield"
+
+    def to_agent_context(self, manifest: dict[str, Any] | None = None) -> str:
+        """Return a formatted string for injection into agent system prompts.
+
+        Greenfield specs return a brief overview.
+        Brownfield specs return existing_context + integration_points + constraints.
+        """
+        if not self.is_brownfield:
+            return (
+                f"## Project: {self.project_name}\n"
+                f"{self.overview}\n\n"
+                f"Stack: {self.tech_stack.raw or 'see spec'}\n"
+                f"Features: {len(self.features)}"
+            )
+
+        # Merge manifest into existing_context (manifest wins)
+        ctx = dict(self.existing_context)
+        if manifest:
+            for key in ("stack", "test_baseline", "conventions"):
+                if key in manifest:
+                    ctx[key] = str(manifest[key])
+
+        lines: list[str] = ["## Existing Codebase Context"]
+        for key, value in ctx.items():
+            label = key.replace("_", " ").title()
+            lines.append(f"{label}: {value}")
+
+        if self.integration_points:
+            lines.append("\n## Integration Points")
+            for point in self.integration_points:
+                lines.append(f"- {point}")
+
+        if self.constraints:
+            lines.append("\n## Constraints (must not violate)")
+            for constraint in self.constraints:
+                lines.append(f"- {constraint}")
+
+        return "\n".join(lines)
 
     @classmethod
     def from_file(cls, path: Path) -> ProjectSpec:
@@ -57,8 +105,39 @@ class ProjectSpec:
         content_no_comments = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
         root = ET.fromstring(content_no_comments.strip())
 
+        mode = root.get("mode", "greenfield")
         name = root.findtext("project_name", "").strip()
         overview = root.findtext("overview", "").strip()
+
+        # Brownfield: addition_summary
+        addition_summary = root.findtext("addition_summary", "").strip()
+
+        # Brownfield: existing_context children → dict
+        existing_context: dict[str, str] = {}
+        ec_el = root.find("existing_context")
+        if ec_el is not None:
+            for child in ec_el:
+                text = (child.text or "").strip()
+                if text:
+                    existing_context[child.tag] = text
+
+        # Brownfield: integration_points (one per non-empty line)
+        integration_points: list[str] = []
+        ip_el = root.find("integration_points")
+        if ip_el is not None:
+            for line in (ip_el.text or "").splitlines():
+                stripped = line.strip()
+                if stripped:
+                    integration_points.append(stripped)
+
+        # Brownfield: constraints (one per non-empty line)
+        constraints: list[str] = []
+        con_el = root.find("constraints")
+        if con_el is not None:
+            for line in (con_el.text or "").splitlines():
+                stripped = line.strip()
+                if stripped:
+                    constraints.append(stripped)
 
         # Parse tech stack
         ts_el = root.find("technology_stack")
@@ -77,11 +156,11 @@ class ProjectSpec:
                 tech.backend_port = int(port_text) if port_text.isdigit() else 3001
             tech.raw = ET.tostring(ts_el, encoding="unicode")
 
-        # Parse features from <core_features> — each bullet = one feature
+        # Parse features from <core_features> or <features_to_add> — each bullet = one feature
         features: list[FeatureItem] = []
-        cf_el = root.find("core_features")
-        if cf_el is not None:
-            for category_el in cf_el:
+        feature_root_el = root.find("core_features") or root.find("features_to_add")
+        if feature_root_el is not None:
+            for category_el in feature_root_el:
                 category = category_el.tag.replace("_", " ").title()
                 text = category_el.text or ""
                 # Extract bullet items: lines starting with -
@@ -100,15 +179,58 @@ class ProjectSpec:
                                 )
                             )
 
+        # Brownfield: if <features_to_add> has plain-text lines (not sub-elements),
+        # parse them directly as flat feature list under "Addition" category.
+        if feature_root_el is None:
+            fta_el = root.find("features_to_add")
+            if fta_el is not None and not list(fta_el):
+                # No child elements — flat text block
+                for line in (fta_el.text or "").splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- ") or stripped.startswith("* "):
+                        bullet = stripped[2:].strip()
+                        if bullet:
+                            short_name = bullet[:60].rstrip(".,:;")
+                            features.append(
+                                FeatureItem(
+                                    category="Addition",
+                                    name=short_name,
+                                    description=bullet,
+                                )
+                            )
+                    elif stripped and not stripped.startswith("#"):
+                        short_name = stripped[:60].rstrip(".,:;")
+                        features.append(
+                            FeatureItem(
+                                category="Addition",
+                                name=short_name,
+                                description=stripped,
+                            )
+                        )
+
         # Assign depends_on_indices based on implementation_steps order
         # Features in later steps depend on features in earlier steps (same category)
         impl_el = root.find("implementation_steps")
         phases: list[str] = []
         if impl_el is not None:
             for step_el in impl_el:
+                # Greenfield format: <step><title>...</title></step>
                 title = step_el.findtext("title", "").strip()
                 if title:
                     phases.append(title)
+                else:
+                    # Brownfield format: <phase name="...">
+                    phase_name = step_el.get("name", "").strip()
+                    if phase_name:
+                        phases.append(phase_name)
+                        # Assign features listed in this phase to it
+                        for line in (step_el.text or "").splitlines():
+                            stripped = line.strip()
+                            if stripped and not stripped.startswith("#"):
+                                # Match features by description and assign phase category
+                                for feat in features:
+                                    if feat.description == stripped and feat.category == "Addition":
+                                        feat.category = phase_name
 
         # Build category -> phase index map from step titles
         # Features in step N depend on features in steps 1..N-1 (same category group)
@@ -118,11 +240,19 @@ class ProjectSpec:
         sc_el = root.find("success_criteria")
         criteria: list[str] = []
         if sc_el is not None:
-            for section in sc_el:
-                for line in (section.text or "").splitlines():
+            # Greenfield: child elements with bullet lines
+            if list(sc_el):
+                for section in sc_el:
+                    for line in (section.text or "").splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith("- "):
+                            criteria.append(stripped[2:].strip())
+            else:
+                # Brownfield: flat text, one criterion per non-empty line
+                for line in (sc_el.text or "").splitlines():
                     stripped = line.strip()
-                    if stripped.startswith("- "):
-                        criteria.append(stripped[2:].strip())
+                    if stripped:
+                        criteria.append(stripped)
 
         # Parse design system
         ds_el = root.find("design_system")
@@ -170,6 +300,11 @@ class ProjectSpec:
             api_endpoints=endpoints,
             database_tables=tables,
             raw_xml=content,
+            mode=mode,
+            addition_summary=addition_summary,
+            existing_context=existing_context,
+            integration_points=integration_points,
+            constraints=constraints,
         )
 
     @classmethod

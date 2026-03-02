@@ -94,6 +94,8 @@ class InitializerPlugin(BasePlugin):
 
     def _execute_with_spec(self, project: Path, spec_path: Path) -> PluginResult:
         """Parse a spec file and return features for bulk creation."""
+        import json
+
         from claw_forge.spec import ProjectSpec
 
         # Resolve spec path relative to project if not absolute
@@ -113,6 +115,21 @@ class InitializerPlugin(BasePlugin):
                 success=False,
                 output=f"Failed to parse spec: {exc}",
             )
+
+        # Brownfield: load manifest and merge into existing_context
+        manifest: dict[str, Any] | None = None
+        if spec.is_brownfield:
+            manifest_path = project / "brownfield_manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    logger.info("Loaded brownfield_manifest.json from %s", manifest_path)
+                    # Merge manifest into spec.existing_context (manifest wins)
+                    for key in ("stack", "test_baseline", "conventions"):
+                        if key in manifest:
+                            spec.existing_context[key] = str(manifest[key])
+                except Exception as exc:
+                    logger.warning("Could not load brownfield_manifest.json: %s", exc)
 
         # Count categories
         category_counts = Counter(f.category for f in spec.features)
@@ -149,34 +166,50 @@ class InitializerPlugin(BasePlugin):
         # Compute wave count (number of distinct dependency layers)
         wave_count = self._compute_wave_count(spec.features)
 
+        # Agent context string (injected into agent system prompts)
+        agent_context = spec.to_agent_context(manifest)
+
+        metadata: dict[str, Any] = {
+            "project_name": spec.project_name,
+            "overview": spec.overview,
+            "tech_stack": {
+                "frontend_framework": spec.tech_stack.frontend_framework,
+                "frontend_port": spec.tech_stack.frontend_port,
+                "backend_runtime": spec.tech_stack.backend_runtime,
+                "backend_db": spec.tech_stack.backend_db,
+                "backend_port": spec.tech_stack.backend_port,
+            },
+            "feature_count": num_features,
+            "category_counts": dict(category_counts),
+            "category_summary": category_summary,
+            "phase_count": num_phases,
+            "phases": spec.implementation_phases,
+            "wave_count": wave_count,
+            "features": feature_list,
+            "success_criteria": spec.success_criteria,
+            "design_system": spec.design_system,
+            "api_endpoints": spec.api_endpoints,
+            "database_tables": spec.database_tables,
+            "agent_context": agent_context,
+        }
+
+        # Brownfield-specific metadata
+        if spec.is_brownfield:
+            metadata["mode"] = "brownfield"
+            metadata["addition_summary"] = spec.addition_summary
+            metadata["existing_context"] = spec.existing_context
+            metadata["integration_points"] = spec.integration_points
+            metadata["constraints"] = spec.constraints
+        else:
+            metadata["mode"] = "greenfield"
+
         return PluginResult(
             success=True,
             output=(
                 f"Parsed {num_features} features across {num_categories} categories "
                 f"in {num_phases} phases"
             ),
-            metadata={
-                "project_name": spec.project_name,
-                "overview": spec.overview,
-                "tech_stack": {
-                    "frontend_framework": spec.tech_stack.frontend_framework,
-                    "frontend_port": spec.tech_stack.frontend_port,
-                    "backend_runtime": spec.tech_stack.backend_runtime,
-                    "backend_db": spec.tech_stack.backend_db,
-                    "backend_port": spec.tech_stack.backend_port,
-                },
-                "feature_count": num_features,
-                "category_counts": dict(category_counts),
-                "category_summary": category_summary,
-                "phase_count": num_phases,
-                "phases": spec.implementation_phases,
-                "wave_count": wave_count,
-                "features": feature_list,
-                "success_criteria": spec.success_criteria,
-                "design_system": spec.design_system,
-                "api_endpoints": spec.api_endpoints,
-                "database_tables": spec.database_tables,
-            },
+            metadata=metadata,
         )
 
     @staticmethod
