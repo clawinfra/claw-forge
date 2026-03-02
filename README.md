@@ -552,16 +552,16 @@ Live updates pushed over WebSocket: feature status changes, agent events, provid
 
 Seven slash commands in `.claude/commands/` for use inside Claude Code. These are automatically scaffolded into your project directory by `claw-forge init`:
 
-| Command | Purpose |
-|---|---|
-| `/create-spec` | Interactive spec creation — auto-detects greenfield vs brownfield, outputs XML |
-| `/expand-project` | Add features to an existing project |
-| `/check-code` | Run ruff + mypy + pytest and report |
-| `/checkpoint` | Commit + DB snapshot + session summary |
-| `/review-pr` | Structured PR review with verdict |
-| `/pool-status` | Provider health and cost analysis |
-| `/claw-forge-status` | Project progress, phase bars, agent state, next action |
-| `/create-bug-report` | Guided 6-phase bug report creation → runs fix |
+| Command | Purpose | Key flags | When to use |
+|---|---|---|---|
+| `/create-spec` | Interactive spec creation — auto-detects greenfield vs brownfield, outputs XML | `--brownfield`, `--output` | Starting a new project or adding features |
+| `/expand-project` | Add features to an existing project | `--append` | Mid-run when you think of more features |
+| `/check-code` | Run ruff + mypy + pytest and report | `--fix`, `--strict` | After agent completes a batch of features |
+| `/checkpoint` | Commit + DB snapshot + session summary | `--message` | Before stepping away or at phase boundaries |
+| `/review-pr` | Structured PR review with verdict | `--strict` | Before merging any agent-generated branch |
+| `/pool-status` | Provider health and cost analysis | `--watch` | When you suspect rate limits or cost spikes |
+| `/claw-forge-status` | Project progress, phase bars, agent state, next action | — | Quick health check at any time |
+| `/create-bug-report` | Guided 6-phase bug report creation → runs fix | `--tdd` | When a bug is reported and you need a proper fix |
 
 Four agent definitions in `.claude/agents/`:
 
@@ -571,6 +571,23 @@ Four agent definitions in `.claude/agents/`:
 | `testing` | sonnet | Run regression tests, report failures |
 | `reviewing` | opus | Code review with blocking/suggestion/approve verdict |
 | `initializer` | sonnet | Parse spec, create feature DAG |
+
+---
+
+## Quick Workflow Cheatsheet
+
+| Goal | Command chain |
+|------|--------------|
+| **New project** | `claw-forge init` → `/create-spec` → `claw-forge run` |
+| **Add features to existing app** | `claw-forge analyze` → `/create-spec` → `claw-forge add` |
+| **Fix a bug (TDD)** | `/create-bug-report` → `claw-forge fix` → `/review-pr` |
+| **Quality check** | `/check-code` → `/review-pr` |
+| **Save progress** | `/checkpoint` → `git push` |
+| **Monitor providers** | `/pool-status` |
+| **Resume after crash** | `claw-forge status` → `claw-forge run` |
+
+📖 Full workflow guides: [docs/workflows.md](docs/workflows.md)
+📖 Command reference: [docs/commands.md](docs/commands.md)
 
 ---
 
