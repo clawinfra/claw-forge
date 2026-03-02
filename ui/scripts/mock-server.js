@@ -37,26 +37,29 @@ const MOCK_SESSION = {
   blocked: MOCK_FEATURES.filter(f => f.status === 'blocked').length,
 };
 
-const MOCK_TASKS = MOCK_FEATURES.map(f => ({
-  id: f.id,
-  feature_id: f.id,
+const MOCK_TASKS = MOCK_FEATURES.map((f, i) => ({
+  id: String(f.id),
   name: f.name,
+  category: "backend",
   status: f.status,
-  agent_type: f.agent_type,
+  priority: i + 1,
+  depends_on: i > 0 && f.status === 'blocked' ? [String(i)] : [],
   cost_usd: f.cost_usd,
-  duration_ms: f.duration_ms,
-  created_at: new Date(Date.now() - Math.random() * 3600000).toISOString(),
+  input_tokens: Math.floor(f.cost_usd * 1000),
+  output_tokens: Math.floor(f.cost_usd * 500),
+  progress: f.status === 'completed' ? 100 : f.status === 'running' ? Math.floor(Math.random() * 80) + 10 : 0,
+  session_id: f.status === 'running' ? `agent_${f.id}` : undefined,
+  error_message: f.status === 'failed' ? 'Test assertion failed: expected 200 got 500' : undefined,
+  created_at: new Date(Date.now() - (12 - i) * 300000).toISOString(),
+  started_at: ['running', 'completed', 'failed'].includes(f.status) ? new Date(Date.now() - (12 - i) * 200000).toISOString() : undefined,
+  completed_at: f.status === 'completed' ? new Date(Date.now() - (12 - i) * 100000).toISOString() : undefined,
 }));
 
-const MOCK_POOL_STATUS = {
-  providers: [
-    { name: "claude-oauth", status: "healthy", requests: 142, errors: 0, latency_p50_ms: 1200 },
-    { name: "anthropic-direct", status: "healthy", requests: 89, errors: 2, latency_p50_ms: 1450 },
-    { name: "groq", status: "degraded", requests: 31, errors: 8, latency_p50_ms: 890 },
-  ],
-  total_requests: 262,
-  total_cost_usd: 0.257,
-};
+const MOCK_POOL_STATUS = [
+  { name: "claude-oauth", status: "healthy", requests: 142, errors: 0, latency_p50_ms: 1200 },
+  { name: "anthropic-direct", status: "healthy", requests: 89, errors: 2, latency_p50_ms: 1450 },
+  { name: "groq", status: "degraded", requests: 31, errors: 8, latency_p50_ms: 890 },
+];
 
 const MOCK_REGRESSION = {
   run_count: 7,
@@ -64,23 +67,23 @@ const MOCK_REGRESSION = {
     passed: true,
     total: 47,
     failed: 0,
-    skipped: 2,
+    failed_tests: [],
     duration_ms: 4320,
-    run_at: new Date(Date.now() - 600000).toISOString(),
+    run_number: 7,
+    implicated_feature_ids: [],
+    output: "47 passed, 2 skipped in 4.32s",
   },
 };
 
-const MOCK_COMMANDS = {
-  commands: [
-    { name: "init", description: "Initialize a new project", usage: "claw-forge init <name>" },
-    { name: "run", description: "Run the agent harness", usage: "claw-forge run [--spec spec.txt]" },
-    { name: "status", description: "Show session status", usage: "claw-forge status [session-id]" },
-    { name: "retry", description: "Retry failed features", usage: "claw-forge retry [--all]" },
-    { name: "review", description: "Review completed features", usage: "claw-forge review" },
-    { name: "ui", description: "Launch the Kanban UI", usage: "claw-forge ui [--port 5173]" },
-    { name: "export", description: "Export session report", usage: "claw-forge export [--format json|html]" },
-  ],
-};
+const MOCK_COMMANDS = [
+  { name: "init", description: "Initialize a new project", usage: "claw-forge init <name>" },
+  { name: "run", description: "Run the agent harness", usage: "claw-forge run [--spec spec.txt]" },
+  { name: "status", description: "Show session status", usage: "claw-forge status [session-id]" },
+  { name: "retry", description: "Retry failed features", usage: "claw-forge retry [--all]" },
+  { name: "review", description: "Review completed features", usage: "claw-forge review" },
+  { name: "ui", description: "Launch the Kanban UI", usage: "claw-forge ui [--port 5173]" },
+  { name: "export", description: "Export session report", usage: "claw-forge export [--format json|html]" },
+];
 
 function sendJson(res, data, status = 200) {
   const body = JSON.stringify(data, null, 2);
@@ -108,9 +111,15 @@ const server = http.createServer((req, res) => {
   if (path.match(/^\/sessions\/[^/]+$/) && !path.includes('/tasks') && !path.includes('/summary')) return sendJson(res, MOCK_SESSION);
   if (path.match(/^\/sessions\/[^/]+\/tasks$/)) return sendJson(res, MOCK_TASKS);
   if (path.match(/^\/sessions\/[^/]+\/summary$/)) return sendJson(res, {
-    project_path: "my-api",
-    total: 12, completed: 5, running: 2, pending: 2, failed: 2, blocked: 1,
-    total_cost_usd: MOCK_SESSION.total_cost_usd,
+    name: "my-api",
+    total_features: 12,
+    passing: 5,
+    failing: 2,
+    pending: 2,
+    in_progress: 2,
+    blocked: 1,
+    active_agents: 2,
+    total_cost_usd: 0.257,
   });
   if (path === '/pool/status') return sendJson(res, MOCK_POOL_STATUS);
   if (path === '/regression/status') return sendJson(res, MOCK_REGRESSION);

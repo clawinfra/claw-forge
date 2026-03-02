@@ -647,6 +647,20 @@ Browser shows:
 └──────────────┴──────────────┴──────────────┴────────────────┘
 ```
 
+## Kanban Board Overview
+
+![Kanban board overview](../website/assets/screenshots/kanban-overview.png)
+*The Kanban board shows all features across 5 columns: Pending, Running, Passing, Failed, Blocked*
+
+### Dark Mode
+
+![Dark mode](../website/assets/screenshots/kanban-dark.png)
+
+### Command Palette (⌘K / Ctrl+K)
+
+![Command palette](../website/assets/screenshots/command-palette.png)
+*Press ⌘K (Mac) or Ctrl+K (Windows/Linux) to open the command palette*
+
 #### Pro tips
 - The Kanban board updates over WebSocket — no refreshing needed.
 - The provider health dots (🟢/🟡/🔴) in the header tell you if a provider is circuit-broken.

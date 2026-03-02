@@ -599,6 +599,12 @@ claw-forge status → /pool-status → /check-code
 
 Real-time board tracking feature progress across all agents.
 
+![claw-forge Kanban board](website/assets/screenshots/kanban-overview.png)
+
+### Dark mode
+
+![Dark mode](website/assets/screenshots/kanban-dark.png)
+
 ```bash
 claw-forge state &          # start REST + WebSocket server on :8888
 cd ui && npm install
