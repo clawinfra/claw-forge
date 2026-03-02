@@ -25,6 +25,14 @@ class ProviderPoolExhausted(Exception):
     """All providers failed or are unavailable."""
 
 
+class ProviderNotFoundError(Exception):
+    """Named provider does not exist in the pool."""
+
+
+class ProviderUnavailableError(Exception):
+    """Named provider exists but is currently unavailable."""
+
+
 class ProviderPoolManager:
     """Multi-provider API rotation pool with circuit breaker, health checking,
     rate limit detection, and cost tracking.
@@ -73,6 +81,7 @@ class ProviderPoolManager:
         model: str,
         messages: list[dict[str, Any]],
         *,
+        provider_hint: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         system: str | None = None,
@@ -81,10 +90,55 @@ class ProviderPoolManager:
     ) -> ProviderResponse:
         """Execute a request with automatic provider fallback.
 
-        Tries providers in order determined by the routing strategy.
-        On failure, records the error, trips circuit breaker if needed,
-        and falls through to the next provider.
+        When ``provider_hint`` is set the request is pinned to that specific
+        provider (skipping pool rotation).  Raises ``ProviderNotFoundError`` if
+        the name is not registered, or ``ProviderUnavailableError`` if the
+        provider is disabled / circuit-open.
+
+        Without ``provider_hint``, tries providers in order determined by the
+        routing strategy.  On failure, records the error, trips circuit breaker
+        if needed, and falls through to the next provider.
         """
+        # ── Pinned-provider fast path ─────────────────────────────────────
+        if provider_hint is not None:
+            provider_map = {p.name: p for p in self._providers}
+            if provider_hint not in provider_map:
+                available = ", ".join(sorted(provider_map.keys()))
+                raise ProviderNotFoundError(
+                    f"Provider {provider_hint!r} not found in pool. Available: {available}"
+                )
+            pinned = provider_map[provider_hint]
+            cb = self._circuits[provider_hint]
+            if not pinned.config.enabled or cb.state == CircuitState.OPEN:
+                raise ProviderUnavailableError(
+                    f"Pinned provider {provider_hint!r} is unavailable "
+                    "(disabled or circuit open)"
+                )
+            if cb.state == CircuitState.HALF_OPEN:
+                cb.record_half_open_attempt()
+            pinned_resp: ProviderResponse = cast(
+                ProviderResponse,
+                await pinned.execute(  # type: ignore[attr-defined]
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system=system,
+                    tools=tools,
+                    **kwargs,
+                ),
+            )
+            cb.record_success()
+            self._tracker.record_request(
+                provider_name=pinned.name,
+                input_tokens=pinned_resp.input_tokens,
+                output_tokens=pinned_resp.output_tokens,
+                cost_input_per_mtok=pinned.config.cost_per_mtok_input,
+                cost_output_per_mtok=pinned.config.cost_per_mtok_output,
+                latency_ms=pinned_resp.latency_ms,
+            )
+            return pinned_resp
+
         errors: list[tuple[str, Exception]] = []
 
         for attempt in range(self._max_retries):
@@ -153,9 +207,11 @@ class ProviderPoolManager:
         error_summary = "; ".join(f"{n}: {e}" for n, e in errors)
         raise ProviderPoolExhausted(f"All providers exhausted. Errors: {error_summary}")
 
-    async def get_pool_status(self) -> dict[str, Any]:
-        """Return current pool status including circuits and usage."""
-        return {
+    async def get_pool_status(
+        self, *, model_aliases: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Return current pool status including circuits, usage, and optional model aliases."""
+        result: dict[str, Any] = {
             "providers": [
                 {
                     "name": p.name,
@@ -169,6 +225,9 @@ class ProviderPoolManager:
             "usage": self._tracker.get_all_stats(),
             "strategy": self._router.strategy.value,
         }
+        if model_aliases is not None:
+            result["model_aliases"] = model_aliases
+        return result
 
     async def health_check_all(self) -> dict[str, bool]:
         """Run health checks on all providers concurrently."""

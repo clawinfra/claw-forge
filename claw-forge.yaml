@@ -1,6 +1,15 @@
 # claw-forge configuration
 # Full example with all provider types
 
+# Model aliases — use short names in --model args
+# Format: alias: model-id OR alias: provider-name/model-id
+model_aliases:
+  opus: claude-opus-4-5
+  sonnet: claude-sonnet-4-5
+  haiku: claude-haiku-4-5
+  fast: claude-haiku-4-5        # cheapest capable model
+  local: ollama/qwen2.5:32b     # local fallback
+
 pool:
   strategy: priority          # priority | round_robin | weighted_random | least_cost | least_latency
   max_retries: 3

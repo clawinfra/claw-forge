@@ -232,3 +232,29 @@ class TestRunCommand:
         """claw-forge run with a non-existent config exits 1."""
         result = runner.invoke(app, ["run", "--config", "/no/such/file.yaml"])
         assert result.exit_code != 0
+
+
+class TestModelFormats:
+    def test_init_help_shows_model_formats(self) -> None:
+        """claw-forge init --help output mentions provider/model format."""
+        result = runner.invoke(app, ["init", "--help"])
+        assert result.exit_code == 0
+        assert "provider/model" in result.output or "provider" in result.output.lower()
+
+    def test_run_help_shows_model_formats(self) -> None:
+        """claw-forge run --help output mentions provider/model format."""
+        result = runner.invoke(app, ["run", "--help"])
+        assert result.exit_code == 0
+        assert "provider/model" in result.output or "provider" in result.output.lower()
+
+    def test_fix_help_shows_model_formats(self) -> None:
+        """claw-forge fix --help output mentions provider/model format."""
+        result = runner.invoke(app, ["fix", "--help"])
+        assert result.exit_code == 0
+        assert "provider/model" in result.output or "provider" in result.output.lower()
+
+    def test_add_help_shows_model_formats(self) -> None:
+        """claw-forge add --help output mentions provider/model format."""
+        result = runner.invoke(app, ["add", "--help"])
+        assert result.exit_code == 0
+        assert "provider/model" in result.output or "provider" in result.output.lower()

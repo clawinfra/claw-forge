@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.table import Table
 
 from claw_forge import __version__
+from claw_forge.pool.model_resolver import resolve_model
 from claw_forge.pool.providers.registry import load_configs_from_yaml
 
 app = typer.Typer(name="claw-forge", help="Multi-provider autonomous coding agent harness")
@@ -138,7 +139,13 @@ def run(
     ),
     model: str = typer.Option(
         "claude-sonnet-4-20250514", "--model", "-m",
-        help="Model override (e.g. claude-opus-4-5). Defaults to value in claw-forge.yaml.",
+        help=(
+            "Model to use. Supported formats:\n"
+            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  sonnet                               alias from model_aliases in config\n"
+            "Defaults to the value in claw-forge.yaml."
+        ),
     ),
     concurrency: int = typer.Option(
         5, "--concurrency", "-n",
@@ -166,6 +173,12 @@ def run(
         claw-forge run --yolo
     """
     cfg = _load_config(config)
+    resolved = resolve_model(model, cfg)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    if resolved.provider_hint:
+        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
+    model = resolved.model_id
     console.print(f"[bold]claw-forge[/bold] v{__version__}")
     console.print(f"Project: {project}")
     console.print(f"Task: {task}")
@@ -252,9 +265,13 @@ def init(
     ),
     model: str = typer.Option(
         "claude-opus-4-5", "--model", "-m",
-        help="Model for spec parsing and feature decomposition. Defaults to Opus — "
-             "init is the critical planning step where quality matters most. "
-             "Use Sonnet only if cost is a hard constraint.",
+        help=(
+            "Model to use. Supported formats:\n"
+            "  claude-opus-4-5                      bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  opus                                 alias from model_aliases in config\n"
+            "Defaults to Opus for init — the critical planning step."
+        ),
     ),
     concurrency: int = typer.Option(
         5, "--concurrency", "-n",
@@ -288,6 +305,14 @@ def init(
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.initializer import InitializerPlugin
     from claw_forge.scaffold import scaffold_project
+
+    cfg = _load_config(config)
+    resolved = resolve_model(model, cfg)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    if resolved.provider_hint:
+        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
+    model = resolved.model_id
 
     plugin = InitializerPlugin()
     ctx = PluginContext(project_path=project, session_id="init", task_id="init")
@@ -379,7 +404,12 @@ def add(
     project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     model: str = typer.Option(
         "claude-sonnet-4-20250514", "--model", "-m",
-        help="Model to use for coding agents.",
+        help=(
+            "Model to use. Supported formats:\n"
+            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  sonnet                               alias from model_aliases in config"
+        ),
     ),
     concurrency: int = typer.Option(
         3, "--concurrency", "-n",
@@ -417,6 +447,14 @@ def add(
 
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.initializer import InitializerPlugin
+
+    cfg_data = _load_config(config)
+    resolved = resolve_model(model, cfg_data)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    if resolved.provider_hint:
+        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
+    model = resolved.model_id
 
     if spec:
         # Brownfield spec path provided — parse and inject context
@@ -638,7 +676,12 @@ def fix(
     project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     model: str = typer.Option(
         "claude-sonnet-4-20250514", "--model", "-m",
-        help="Model to use for the fix agent.",
+        help=(
+            "Model to use. Supported formats:\n"
+            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  sonnet                               alias from model_aliases in config"
+        ),
     ),
     branch: bool = typer.Option(
         True, "--branch/--no-branch",
@@ -674,6 +717,14 @@ def fix(
     from claw_forge.bugfix.report import BugReport
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.bugfix import BugFixPlugin
+
+    cfg_fix = _load_config(config)
+    resolved = resolve_model(model, cfg_fix)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    if resolved.provider_hint:
+        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
+    model = resolved.model_id
 
     if report:
         report_path = Path(report)

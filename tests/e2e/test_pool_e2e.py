@@ -304,3 +304,48 @@ class TestPoolResetCircuit:
         """reset_circuit() on unknown name is a safe no-op."""
         pool = ProviderPoolManager(configs=[], max_retries=1)
         pool.reset_circuit("does-not-exist")  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# provider/model format + provider pinning
+# ---------------------------------------------------------------------------
+
+
+class TestProviderSlashModelFormat:
+    def test_provider_slash_model_format_in_pool(self) -> None:
+        """Create pool with proxy-6, execute with provider_hint='proxy6' to verify routing."""
+        if not HAS_PROXY:
+            pytest.skip("PROXY_1_* env vars not set")
+
+        import asyncio
+
+        pool = ProviderPoolManager(configs=[_proxy6_config()], max_retries=1)
+
+        async def _run() -> Any:
+            return await pool.execute(
+                model=PROXY_MODEL,
+                messages=[{"role": "user", "content": "Say: pong"}],
+                provider_hint="proxy6",
+                max_tokens=32,
+            )
+
+        response = asyncio.run(_run())
+        assert response.content
+        assert isinstance(response.input_tokens, int)
+
+    def test_unknown_provider_hint_raises(self) -> None:
+        """provider_hint to unknown name raises ProviderNotFoundError."""
+        import asyncio
+        from claw_forge.pool.manager import ProviderNotFoundError
+
+        pool = ProviderPoolManager(configs=[], max_retries=1)
+
+        async def _run() -> Any:
+            return await pool.execute(
+                model="some-model",
+                messages=[],
+                provider_hint="ghost-provider",
+            )
+
+        with pytest.raises(ProviderNotFoundError, match="ghost-provider"):
+            asyncio.run(_run())
