@@ -1,244 +1,329 @@
-# 🔨 claw-forge
+# 🔥 claw-forge
 
-**Multi-provider autonomous coding agent harness.**
+**Autonomous coding agent harness for serious Python projects.**
 
-A Python-first coding agent framework with automatic API provider rotation, circuit breakers, and cost tracking across Anthropic, AWS Bedrock, Azure, Vertex AI, and any OpenAI-compatible endpoint.
+Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills · Pure asyncio · Zero Node.js
 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
+[![Tests](https://img.shields.io/badge/tests-427%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 
-## Why claw-forge?
+---
 
-Existing coding agent harnesses have critical limitations:
-- **Single provider** — one API key goes down, everything stops
-- **Node.js dependency** — complex toolchains for Python-centric AI work
-- **No cost tracking** — no visibility into spend across providers
-- **Cold starts** — every session starts from scratch
+## What it does
 
-claw-forge solves all of these:
+claw-forge runs autonomous coding agents that implement features, fix bugs, write tests, and review code — in parallel, across multiple AI providers, with live progress tracked in a Kanban UI.
 
-| Feature | claw-forge | Others |
-|---------|-----------|--------|
-| Multi-provider pool | ✅ 6+ provider types | ❌ Single provider |
-| Circuit breaker | ✅ Per-provider | ❌ No failover |
-| Cost tracking | ✅ Per-request | ❌ None |
-| Pure Python | ✅ `uv tool install` | ❌ Node.js required |
-| Plugin system | ✅ Entry points | ❌ Monolithic |
-| Session manifest | ✅ Cold-start elimination | ❌ Full re-analysis |
+It is built on the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) as its execution engine, with a provider pool layer on top for API key rotation, circuit breaking, and cost tracking.
+
+---
 
 ## Quick Start
 
 ```bash
 # Install
+pip install uv
 uv tool install claw-forge
 
-# Or with all provider support
-uv tool install "claw-forge[all-providers]"
+# Create a project
+claw-forge init my-app
 
-# Initialize a project
-claw-forge init --project ./my-app
+# Run agents (uses ~/.claude/.credentials.json if you've run `claude login`)
+claw-forge run my-app
 
-# Run a coding task
-claw-forge run --project ./my-app --task coding
+# YOLO mode — max speed, no verification pauses
+claw-forge run my-app --yolo
 
-# Check provider pool status
-claw-forge pool-status
-
-# Start state service
-claw-forge state --port 8420
+# Monitor in browser
+claw-forge state &  # start state service on port 8888
+cd ui && npm install && npm run dev  # open http://localhost:5173
 ```
 
-## Provider Pool (The Killer Feature)
+---
 
-Configure multiple providers with automatic failover:
+## Provider Pool
+
+Never hit a rate limit again. Configure multiple providers with automatic failover:
 
 ```yaml
+# claw-forge.yaml
 providers:
-  anthropic-1:
+  # Use your `claude login` token — no API key needed
+  claude-oauth:
+    type: anthropic_oauth
+    priority: 1
+
+  # Direct API key as primary fallback
+  anthropic-primary:
     type: anthropic
     api_key: ${ANTHROPIC_KEY_1}
-    priority: 1
-
-  anthropic-2:
-    type: anthropic
-    api_key: ${ANTHROPIC_KEY_2}
-    priority: 1
-
-  bedrock:
-    type: bedrock
-    region: us-east-1
     priority: 2
 
-  azure:
+  # Second API key for burst capacity
+  anthropic-secondary:
+    type: anthropic
+    api_key: ${ANTHROPIC_KEY_2}
+    priority: 2
+
+  # Cloud providers for enterprise scale
+  aws-bedrock:
+    type: bedrock
+    region: us-east-1
+    priority: 3
+
+  azure-ai:
     type: azure
     endpoint: https://my-resource.openai.azure.com
     api_key: ${AZURE_KEY}
-    priority: 3
+    priority: 4
+
+  # Free-tier providers for lightweight tasks
+  groq-free:
+    type: openai_compat
+    base_url: https://api.groq.com/openai/v1
+    api_key: ${GROQ_KEY}
+    priority: 5
+
+  # Local model via Ollama
+  local-ollama:
+    type: ollama
+    base_url: http://localhost:11434
+    model: qwen2.5-coder
+    priority: 6
 ```
 
 The pool automatically:
-- Routes by priority with weighted random and round-robin options
-- Detects rate limits and backs off per-provider
-- Opens circuit breakers on persistent failures
-- Tracks cost per provider per request
+- Routes requests through providers in priority order
+- Backs off per-provider when rate limited (parses `Retry-After` headers)
+- Opens per-provider circuit breakers on persistent failures
+- Tracks cost, latency, and RPM per provider
 - Falls through the entire chain before giving up
+
+**5 routing strategies:** `priority` (default) · `round_robin` · `weighted_random` · `least_cost` · `least_latency`
+
+---
 
 ## Supported Providers
 
 | Provider | Type | Auth |
-|----------|------|------|
-| Anthropic Direct | `anthropic` | API key or OAuth token |
-| Claude CLI OAuth | `anthropic_oauth` | Auto-read from `claude login` |
-| Anthropic-format proxy | `anthropic_compat` | `x-api-key` (or none for internal) |
-| AWS Bedrock | `bedrock` | IAM/boto3 |
+|---|---|---|
+| Anthropic direct | `anthropic` | API key |
+| Claude OAuth | `anthropic_oauth` | Auto-reads `~/.claude/.credentials.json` |
+| Anthropic-format proxy | `anthropic_compat` | `x-api-key` or none (internal proxies) |
+| AWS Bedrock | `bedrock` | IAM / instance role |
 | Azure AI Foundry | `azure` | API key |
-| Google Vertex AI | `vertex` | Service account |
-| Groq | `openai_compat` | API key |
-| Any OpenAI-compatible | `openai_compat` | API key (optional) |
+| Google Vertex AI | `vertex` | Application Default Credentials |
+| Groq / Cerebras | `openai_compat` | API key |
+| Any OpenAI-compat endpoint | `openai_compat` | Optional API key |
+| Ollama (local) | `ollama` | Optional (usually none) |
 
-### Zero-config Claude OAuth
-
-If you've already run `claude login`, add this to `claw-forge.yaml` — no API key needed:
-
-```yaml
-providers:
-  claude-oauth:
-    type: anthropic_oauth
-    priority: 1
-    # Token auto-read from ~/.claude/.credentials.json
-```
-
-### Anthropic-Compatible Proxies
-
-For proxies that expose the Anthropic wire format at a custom URL:
-
-```yaml
-providers:
-  my-proxy:
-    type: anthropic_compat
-    api_key: ${PROXY_KEY}
-    base_url: https://proxy.example.com/v1
-    priority: 2
-    model_map:
-      claude-sonnet-4-20250514: proxy-internal-sonnet  # optional rename
-
-  # No-auth internal proxy (k8s sidecar, etc.)
-  internal-gw:
-    type: anthropic_compat
-    api_key: null
-    base_url: http://internal-gateway:8080/v1
-    priority: 3
-```
-
-## Kanban UI
-
-Monitor feature progress in real time with the built-in React/Vite board:
-
-```bash
-cd ui
-npm install
-npm run dev   # opens http://localhost:5173/?session=<uuid>
-```
-
-The board connects to `ws://localhost:8888/ws` for live updates pushed by the
-state service (`ConnectionManager`).  Columns: **Pending | In Progress | Passing
-| Failed | Blocked**.  Header shows provider pool health dots, overall progress
-bar, active agent count, and total cost.
+---
 
 ## Agent Runtime
 
-claw-forge uses [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) as its core execution engine. Every plugin runs agents through the SDK's `query()` loop, which handles tool use, permission prompts, MCP server connections, and streaming output — without spawning a subprocess or managing raw HTTP connections yourself.
+claw-forge uses the Claude Agent SDK for all agent execution. The SDK handles the tool-use loop, MCP server connections, permission hooks, streaming — claw-forge adds the orchestration, state management, and provider rotation layer on top.
 
-### Using `run_agent()` directly
+### Bidirectional sessions
 
 ```python
 from pathlib import Path
-from claw_forge.agent import run_agent, collect_result
-import claude_agent_sdk
+from claw_forge.agent import AgentSession
+from claw_forge.agent.thinking import thinking_for_task
+from claw_forge.agent.output import CODE_REVIEW_SCHEMA
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
 
-# Stream messages as they arrive
-async for message in run_agent(
-    "Refactor the auth module to use OAuth2",
-    model="claude-sonnet-4-5",
+options = ClaudeAgentOptions(
+    model="claude-sonnet-4-6",
     cwd=Path("./my-project"),
-    allowed_tools=["Read", "Write", "Edit", "Bash"],
-    max_turns=30,
-):
-    if isinstance(message, claude_agent_sdk.AssistantMessage):
-        for block in message.content:
-            if isinstance(block, claude_agent_sdk.TextBlock):
-                print(block.text)
-    elif isinstance(message, claude_agent_sdk.ResultMessage):
-        print(f"Done. Cost: ${message.total_cost_usd:.4f}")
+    thinking=thinking_for_task("coding"),      # adaptive by default
+    max_budget_usd=1.00,                        # hard cost cap
+    betas=["context-1m-2025-08-07"],            # 1M token context
+)
 
-# Or just get the final result text
+async with AgentSession(options) as session:
+    # Primary task
+    async for msg in session.run("Implement the OAuth2 login flow"):
+        handle_message(msg)
+
+    # Tests failed — guide without restarting the session
+    async for msg in session.follow_up("Focus on fixing test_auth.py first"):
+        handle_message(msg)
+
+    # Refactor went wrong — rewind files to before the last step
+    await session.rewind(steps_back=1)
+
+    # Escalate to Opus for the hard security review
+    await session.switch_model("claude-opus-4-6")
+```
+
+### One-shot queries
+
+```python
+from claw_forge.agent import collect_result, collect_structured_result
+
+# Simple text result
 result = await collect_result(
     "Write unit tests for src/auth.py",
     cwd=Path("./my-project"),
-    allowed_tools=["Read", "Write", "Bash"],
+    agent_type="testing",   # gets correct tool list + max_turns
 )
-print(result)
+
+# Structured JSON output (schema enforced)
+review = await collect_structured_result(
+    "Review the PR diff for security issues",
+    cwd=Path("./my-project"),
+    agent_type="reviewer",
+    output_format=CODE_REVIEW_SCHEMA,
+)
+# review = {"verdict": "request_changes", "blockers": [...], "security_issues": [...]}
 ```
 
-### Combining with the provider pool
-
-The provider pool handles API key rotation and circuit breaking. Pass a `ProviderConfig` to route through any configured provider:
+### Provider pool + agent
 
 ```python
 from claw_forge.pool import ProviderPoolManager
 from claw_forge.agent import collect_result
 
 pool = ProviderPoolManager.from_config("claw-forge.yaml")
-provider = await pool.acquire("claude-sonnet-4-5")
+provider = await pool.acquire("claude-sonnet-4-6")
 
 result = await collect_result(
-    "Fix the failing tests",
+    "Fix the failing integration tests",
     cwd=Path("./project"),
-    provider_config=provider,
+    provider_config=provider,  # routes through pool with failover
 )
 ```
 
-### MCP server integration
+---
 
-Skills that declare an `mcp` section in their `skill.yaml` can be loaded as MCP servers:
+## Advanced SDK Features
 
-```python
-from claw_forge.agent.mcp_builder import load_skills_as_mcp
-from claw_forge.agent import run_agent
+claw-forge exposes all 20 Claude Agent SDK APIs. See [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) for detailed examples. Highlights:
 
-mcp_servers = load_skills_as_mcp(Path("~/.openclaw/skills").expanduser())
+| Feature | API | Use case |
+|---|---|---|
+| File undo | `enable_file_checkpointing` + `rewind_files()` | Roll back bad refactors |
+| Cost cap | `max_budget_usd` | Hard limit per session |
+| Structured output | `output_format` schema | Typed review verdicts |
+| Thinking depth | `ThinkingConfig` | Deep for planning, off for monitoring |
+| Named sub-agents | `AgentDefinition` | Planner / Coder / Reviewer roles |
+| OS sandbox | `SandboxSettings` | Filesystem + network isolation |
+| Model fallback | `fallback_model` | Auto-retry on model error |
 
-async for msg in run_agent(
-    "Search the web for recent Python security advisories",
-    mcp_servers=mcp_servers,
-    allowed_tools=["mcp__web-search__search"],
-):
-    ...
+---
+
+## Security
+
+Three-layer defence:
+
+1. **`CanUseTool` callback** — Python function runs before every tool; blocks dangerous commands, restricts writes to project directory, can mutate tool inputs
+2. **Bash security hook** — hardcoded blocklist (`sudo`, `dd`, `shutdown`, ...) + per-project `allowed_commands.yaml`
+3. **`SandboxSettings`** — OS-level bash isolation on macOS/Linux (optional)
+
+Agent lock file (`.claw-forge.lock`) prevents two agents running on the same project simultaneously.
+
+---
+
+## Workflow Features
+
+| Feature | Command / Flag |
+|---|---|
+| YOLO mode | `claw-forge run my-app --yolo` |
+| Pause (drain) | `claw-forge pause my-app` |
+| Resume | `claw-forge resume my-app` |
+| Human input | `claw-forge input my-app "Here's the API key"` |
+| Batch features | `--batch-size 3` |
+| Specific features | `--batch-features 1,2,3` |
+| Pool health | `claw-forge pool-status` |
+
+---
+
+## Kanban UI
+
+Real-time board tracking feature progress across all agents.
+
+```bash
+claw-forge state &          # start REST + WebSocket server on :8888
+cd ui && npm install
+npm run dev                  # http://localhost:5173/?session=<uuid>
 ```
 
-## Plugin System
+**Columns:** Pending · In Progress · Passing · Failed · Blocked
 
-Agent types are plugins discovered via `pyproject.toml` entry points:
+**Header:** provider health dots · progress bar (X/Y passing) · live agent count · cost tracker
 
-```toml
-[project.entry-points."claw_forge.plugins"]
-my_plugin = "my_package.plugin:MyPlugin"
-```
+Live updates pushed over WebSocket: feature status changes, agent events, provider health, cost.
 
-Built-in plugins: `initializer`, `coding`, `testing`, `reviewer`
+---
+
+## Claude Commands
+
+Six slash commands in `.claude/commands/` for use inside Claude Code:
+
+| Command | Purpose |
+|---|---|
+| `/create-spec` | Interactive project spec creation |
+| `/expand-project` | Add features to an existing project |
+| `/check-code` | Run ruff + mypy + pytest and report |
+| `/checkpoint` | Commit + DB snapshot + session summary |
+| `/review-pr` | Structured PR review with verdict |
+| `/pool-status` | Provider health and cost analysis |
+
+Four agent definitions in `.claude/agents/`:
+
+| Agent | Model | Purpose |
+|---|---|---|
+| `coding` | sonnet | Implement features, TDD-first |
+| `testing` | sonnet | Run regression tests, report failures |
+| `reviewing` | opus | Code review with blocking/suggestion/approve verdict |
+| `initializer` | sonnet | Parse spec, create feature DAG |
+
+---
 
 ## Pre-installed Skills (18)
 
-**LSP:** rust-analyzer, gopls, pyright, typescript-lsp, clangd, solidity-lsp
+**LSP servers (6):** pyright · gopls · rust-analyzer · typescript-lsp · clangd · solidity-lsp
 
-**Process:** systematic-debug, verification-gate, parallel-dispatch, test-driven, code-review
+**Process skills:** systematic-debug · verification-gate · parallel-dispatch · frontend-design · playwright-cli
 
-**Integration:** web-research, git-workflow, api-client, docker, security-audit, performance, database
+**Integration skills:** web-research · git-workflow · api-client · docker · security-audit · performance · database
 
-## Architecture
+---
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including ASCII diagrams.
+## Plugin System
+
+Extend claw-forge with custom agent types via Python entry points — no fork required:
+
+```toml
+# your-package/pyproject.toml
+[project.entry-points."claw_forge.plugins"]
+my_agent = "my_package.plugin:MyAgentPlugin"
+```
+
+```python
+from claw_forge.plugins.base import AgentPlugin, PluginContext, PluginResult
+
+class MyAgentPlugin(AgentPlugin):
+    name = "my_agent"
+    description = "Does something custom"
+    version = "1.0.0"
+
+    def get_system_prompt(self, context: PluginContext) -> str:
+        return "You are a specialist in ..."
+
+    async def execute(self, context: PluginContext) -> PluginResult:
+        from claw_forge.agent import collect_result
+        result = await collect_result(
+            self.get_system_prompt(context),
+            cwd=context.project_dir,
+            agent_type="coding",
+        )
+        return PluginResult(success=True, output=result)
+```
+
+---
 
 ## Development
 
@@ -246,11 +331,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including ASCII diagrams
 git clone https://github.com/clawinfra/claw-forge.git
 cd claw-forge
 uv sync --extra dev
-uv run pytest tests/ -v --cov
+uv run pytest tests/ -v --cov --cov-report=term-missing
 uv run ruff check claw_forge/
 uv run mypy claw_forge/
 ```
 
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, data flow, component details |
+| [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) | 20 Claude Agent SDK APIs with claw-forge examples |
+| [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
+| [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
+| [`website/features.html`](website/features.html) | Full feature list |
+
+---
+
 ## License
 
-Apache-2.0
+Apache-2.0 · Built by [ClawInfra](https://github.com/clawinfra)
