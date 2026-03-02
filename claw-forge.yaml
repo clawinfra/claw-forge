@@ -37,17 +37,24 @@ providers:
   # ── Anthropic-format proxy (x-api-key + /v1/messages) ────────────────────
   anthropic-proxy-1:
     type: anthropic_compat
-    api_key: ${PROXY_1_KEY}
-    base_url: https://proxy1.example.com/v1
+    api_key: ${PROXY_1_API_KEY}
+    base_url: ${PROXY_1_BASE_URL}
+    model: ${PROXY_1_MODEL}
     priority: 2
-    model_map:
-      claude-sonnet-4-20250514: claude-sonnet-4-5-20250929  # proxy uses older name
+
+  anthropic-proxy-2:
+    type: anthropic_compat
+    api_key: ${PROXY_2_API_KEY}
+    base_url: ${PROXY_2_BASE_URL}
+    model: ${PROXY_2_MODEL}
+    priority: 2
 
   # ── No-auth internal proxy (e.g. k8s sidecar) ────────────────────────────
   internal-gateway:
     type: anthropic_compat
     api_key: null                         # no auth needed for internal proxy
-    base_url: http://internal-gateway:8080/v1
+    base_url: ${INTERNAL_GATEWAY_URL}
+    model: ${INTERNAL_GATEWAY_MODEL}
     priority: 3
 
   # ── Direct Anthropic — multiple keys for rotation ─────────────────────────
@@ -68,15 +75,14 @@ providers:
     max_rpm: 60
 
   # Anthropic-compatible proxy
-  anthropic-proxy:
+  openai-proxy:
     type: openai_compat
-    base_url: https://proxy.example.com
-    api_key: ${PROXY_API_KEY}
+    base_url: ${OPENAI_PROXY_BASE_URL}
+    api_key: ${OPENAI_PROXY_API_KEY}
+    model: ${OPENAI_PROXY_MODEL}
     priority: 2
     cost_per_mtok_input: 2.5
     cost_per_mtok_output: 12.0
-    model_map:
-      claude-sonnet-4-20250514: claude-sonnet-4-20250514
 
   # AWS Bedrock
   bedrock-us-east:
