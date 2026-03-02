@@ -146,6 +146,77 @@ state service (`ConnectionManager`).  Columns: **Pending | In Progress | Passing
 | Failed | Blocked**.  Header shows provider pool health dots, overall progress
 bar, active agent count, and total cost.
 
+## Agent Runtime
+
+claw-forge uses [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) as its core execution engine. Every plugin runs agents through the SDK's `query()` loop, which handles tool use, permission prompts, MCP server connections, and streaming output — without spawning a subprocess or managing raw HTTP connections yourself.
+
+### Using `run_agent()` directly
+
+```python
+from pathlib import Path
+from claw_forge.agent import run_agent, collect_result
+import claude_agent_sdk
+
+# Stream messages as they arrive
+async for message in run_agent(
+    "Refactor the auth module to use OAuth2",
+    model="claude-sonnet-4-5",
+    cwd=Path("./my-project"),
+    allowed_tools=["Read", "Write", "Edit", "Bash"],
+    max_turns=30,
+):
+    if isinstance(message, claude_agent_sdk.AssistantMessage):
+        for block in message.content:
+            if isinstance(block, claude_agent_sdk.TextBlock):
+                print(block.text)
+    elif isinstance(message, claude_agent_sdk.ResultMessage):
+        print(f"Done. Cost: ${message.total_cost_usd:.4f}")
+
+# Or just get the final result text
+result = await collect_result(
+    "Write unit tests for src/auth.py",
+    cwd=Path("./my-project"),
+    allowed_tools=["Read", "Write", "Bash"],
+)
+print(result)
+```
+
+### Combining with the provider pool
+
+The provider pool handles API key rotation and circuit breaking. Pass a `ProviderConfig` to route through any configured provider:
+
+```python
+from claw_forge.pool import ProviderPoolManager
+from claw_forge.agent import collect_result
+
+pool = ProviderPoolManager.from_config("claw-forge.yaml")
+provider = await pool.acquire("claude-sonnet-4-5")
+
+result = await collect_result(
+    "Fix the failing tests",
+    cwd=Path("./project"),
+    provider_config=provider,
+)
+```
+
+### MCP server integration
+
+Skills that declare an `mcp` section in their `skill.yaml` can be loaded as MCP servers:
+
+```python
+from claw_forge.agent.mcp_builder import load_skills_as_mcp
+from claw_forge.agent import run_agent
+
+mcp_servers = load_skills_as_mcp(Path("~/.openclaw/skills").expanduser())
+
+async for msg in run_agent(
+    "Search the web for recent Python security advisories",
+    mcp_servers=mcp_servers,
+    allowed_tools=["mcp__web-search__search"],
+):
+    ...
+```
+
 ## Plugin System
 
 Agent types are plugins discovered via `pyproject.toml` entry points:

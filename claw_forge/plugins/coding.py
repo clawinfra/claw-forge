@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from claw_forge.agent import collect_result
 from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
 
 
@@ -30,10 +33,22 @@ class CodingPlugin(BasePlugin):
             f"Task: {context.metadata.get('description', 'No description')}"
         )
 
+    def _build_prompt(self, context: PluginContext) -> str:
+        return (
+            f"{self.get_system_prompt(context)}\n\n"
+            f"Session: {context.session_id}\n"
+            f"Task ID: {context.task_id}"
+        )
+
     async def execute(self, context: PluginContext) -> PluginResult:
-        # In real implementation, this would invoke the LLM with tools
+        prompt = self._build_prompt(context)
+        result = await collect_result(
+            prompt,
+            cwd=Path(context.project_path),
+            allowed_tools=["Read", "Write", "Edit", "Bash"],
+        )
         return PluginResult(
             success=True,
-            output="Coding task placeholder — requires LLM tool loop integration",
+            output=result or "Coding task completed",
             metadata={"plugin": self.name, "task_id": context.task_id},
         )

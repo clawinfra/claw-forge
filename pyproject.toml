@@ -32,6 +32,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2,<3",
     "aiosqlite>=0.20,<1",
     "anthropic>=0.40,<1",
+    "claude-agent-sdk>=0.1.44,<1",
     "openai>=1.50,<2",
     "sse-starlette>=2,<3",
 ]

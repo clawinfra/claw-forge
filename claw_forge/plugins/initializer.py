@@ -28,6 +28,14 @@ class InitializerPlugin(BasePlugin):
             "key_files (with roles), build_commands, test_commands, and any special notes."
         )
 
+    def _build_prompt(self, context: PluginContext) -> str:
+        return (
+            f"{self.get_system_prompt(context)}\n\n"
+            f"Project path: {context.project_path}\n"
+            f"Session: {context.session_id}\n"
+            f"Task ID: {context.task_id}"
+        )
+
     async def execute(self, context: PluginContext) -> PluginResult:
         project = Path(context.project_path)
         if not project.exists():

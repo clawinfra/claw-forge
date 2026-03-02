@@ -3,6 +3,7 @@
 import pytest
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from claw_forge.plugins.base import PluginContext, PluginResult
 from claw_forge.plugins.initializer import InitializerPlugin
@@ -34,21 +35,27 @@ class TestPlugins:
     async def test_coding_plugin(self):
         plugin = CodingPlugin()
         assert plugin.name == "coding"
-        result = await plugin.execute(self._ctx())
+        with patch("claw_forge.plugins.coding.collect_result", new_callable=AsyncMock) as mock_cr:
+            mock_cr.return_value = "code written"
+            result = await plugin.execute(self._ctx())
         assert result.success
 
     @pytest.mark.asyncio
     async def test_testing_plugin(self):
         plugin = TestingPlugin()
         assert plugin.name == "testing"
-        result = await plugin.execute(self._ctx())
+        with patch("claw_forge.plugins.testing.collect_result", new_callable=AsyncMock) as mock_cr:
+            mock_cr.return_value = "tests run"
+            result = await plugin.execute(self._ctx())
         assert result.success
 
     @pytest.mark.asyncio
     async def test_reviewer_plugin(self):
         plugin = ReviewerPlugin()
         assert plugin.name == "reviewer"
-        result = await plugin.execute(self._ctx())
+        with patch("claw_forge.plugins.reviewer.collect_result", new_callable=AsyncMock) as mock_cr:
+            mock_cr.return_value = "review done"
+            result = await plugin.execute(self._ctx())
         assert result.success
 
     def test_system_prompts(self):
