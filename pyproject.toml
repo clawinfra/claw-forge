@@ -58,6 +58,7 @@ initializer = "claw_forge.plugins.initializer:InitializerPlugin"
 coding = "claw_forge.plugins.coding:CodingPlugin"
 testing = "claw_forge.plugins.testing:TestingPlugin"
 reviewer = "claw_forge.plugins.reviewer:ReviewerPlugin"
+bugfix = "claw_forge.plugins.bugfix:BugFixPlugin"
 
 [project.urls]
 Homepage = "https://github.com/clawinfra/claw-forge"

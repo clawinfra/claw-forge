@@ -483,5 +483,75 @@ def ui(
     )
 
 
+@app.command()
+def fix(
+    description: str | None = typer.Argument(
+        None, help="Bug description (use --report for structured reports)"
+    ),
+    report: str | None = typer.Option(None, "--report", "-r", help="Path to bug_report.md"),
+    project: str = typer.Option(".", "--project", "-p"),
+    branch: bool = typer.Option(True, "--branch/--no-branch", help="Create git branch"),
+) -> None:
+    """Fix a bug — reproduce-first protocol with mandatory regression test."""
+    import re
+    import subprocess
+
+    from claw_forge.bugfix.report import BugReport
+    from claw_forge.plugins.base import PluginContext
+    from claw_forge.plugins.bugfix import BugFixPlugin
+
+    if report:
+        report_path = Path(report)
+        if not report_path.exists():
+            console.print(f"[red]Report file not found: {report_path}[/red]")
+            raise typer.Exit(1) from None
+        bug = BugReport.from_file(report_path)
+    elif description:
+        bug = BugReport.from_description(description)
+    else:
+        console.print("[red]Error: provide a description or --report[/red]")
+        console.print("  claw-forge fix 'users get 500 on login'")
+        console.print("  claw-forge fix --report bug_report.md")
+        raise typer.Exit(1) from None
+
+    console.print(f"[bold]🐛 Bug:[/bold] {bug.title}")
+
+    if branch:
+        slug = re.sub(r"[^a-z0-9]+", "-", bug.title.lower()).strip("-")[:50]
+        branch_name = f"fix/{slug}"
+        try:
+            subprocess.run(  # noqa: S603, S607
+                ["git", "checkout", "-b", branch_name],
+                cwd=project,
+                check=True,
+                capture_output=True,
+            )
+            console.print(f"[dim]Created branch: {branch_name}[/dim]")
+        except subprocess.CalledProcessError:
+            console.print(
+                f"[yellow]⚠ Could not create branch {branch_name!r} (continuing)[/yellow]"
+            )
+
+    ctx = PluginContext(
+        project_path=project,
+        session_id="bugfix",
+        task_id=f"fix-{bug.title[:40]}",
+        metadata={"bug_report": bug},
+    )
+
+    console.print("[cyan]Running bug-fix agent…[/cyan]")
+    result = asyncio.run(BugFixPlugin().execute(ctx))
+
+    if result.success:
+        console.print("[bold green]✅ Bug fix complete[/bold green]")
+        if result.files_modified:
+            console.print(f"   Files modified: {', '.join(result.files_modified)}")
+        if result.output:
+            console.print(result.output[:2000])
+    else:
+        console.print(f"[red]Fix failed: {result.output}[/red]")
+        raise typer.Exit(1) from None
+
+
 if __name__ == "__main__":
     app()
