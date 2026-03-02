@@ -7,3 +7,5 @@ coverage.xml
 *.egg-info/
 uv.lock
 node_modules/
+ui/dist/
+.env
