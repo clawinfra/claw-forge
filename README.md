@@ -478,6 +478,7 @@ uv run mypy claw_forge/
 |---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, data flow, component details |
 | [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) | 20 Claude Agent SDK APIs with claw-forge examples |
+| [`docs/bmad-integration.md`](docs/bmad-integration.md) | Using claw-forge with BMAD Method — convert epics/stories to spec |
 | [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
 | [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
 | [`website/features.html`](website/features.html) | Full feature list |
