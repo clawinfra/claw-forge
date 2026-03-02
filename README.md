@@ -23,22 +23,156 @@ It is built on the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/
 ## Quick Start
 
 ```bash
-# Install
+# 1. Install
 pip install uv
 uv tool install claw-forge
 
-# Create a project
-claw-forge init my-app
+# 2. Set up credentials
+cp .env.example .env   # fill in at least one provider key
 
-# Run agents (uses ~/.claude/.credentials.json if you've run `claude login`)
-claw-forge run my-app
+# 3. Write your spec (or use /create-spec in Claude Code)
+cat > app_spec.txt << 'EOF'
+Project: my-api
+Stack: Python, FastAPI, pytest
 
-# YOLO mode — max speed, no verification pauses
-claw-forge run my-app --yolo
+Features:
+1. User authentication
+   Description: JWT register/login/logout with bcrypt passwords.
+   Acceptance criteria:
+   - POST /auth/register returns 201 with user_id
+   - POST /auth/login returns {access_token, refresh_token}
+   - Passwords hashed with bcrypt (cost factor 12)
+   - 10+ unit tests
 
-# Monitor in browser
-claw-forge state &  # start state service on port 8888
-cd ui && npm install && npm run dev  # open http://localhost:5173
+2. Task CRUD
+   Description: Create/read/update/delete tasks with title, status, priority.
+   Acceptance criteria:
+   - Full REST API at /tasks
+   - Pagination on GET /tasks (?page=1&per_page=20)
+   - Auth required (401 if no token)
+   Depends on: 1
+EOF
+
+# 4. Initialize (runs the initializer agent)
+claw-forge init my-api --spec app_spec.txt
+
+# 5. Run agents
+claw-forge run my-api --concurrency 3
+
+# 6. Open the Kanban board
+claw-forge ui
+```
+
+---
+
+---
+
+## Writing a Project Spec
+
+The spec (`app_spec.txt`) is the single input that drives everything. The initializer agent reads it, breaks it into atomic tasks, infers dependencies, and creates an execution plan. **The quality of your spec directly determines the quality of what gets built.**
+
+### 3 ways to create a spec
+
+**Option 1 — Write it yourself** (best control)
+
+```
+Project: my-api
+Stack:   Python 3.12, FastAPI, SQLAlchemy, pytest
+
+Description:
+  A REST API for managing tasks with JWT auth, tag filtering, and reminders.
+
+Features:
+
+1. User authentication
+   Description: JWT-based register/login/logout using bcrypt.
+     Access tokens expire in 1h, refresh tokens in 7d.
+   Acceptance criteria:
+   - POST /auth/register creates user, returns 201 with user_id
+   - POST /auth/login returns {access_token, refresh_token, expires_in}
+   - POST /auth/refresh exchanges refresh_token for new access_token
+   - POST /auth/logout invalidates the refresh token
+   - Passwords hashed with bcrypt (cost factor 12)
+   - 15 unit tests, all passing
+   Tech notes: Use python-jose for JWT, passlib for bcrypt.
+
+2. Task CRUD
+   Description: Full CRUD for tasks with title, description, status
+     (todo/in_progress/done), priority (1–5), due_date, and tags.
+   Acceptance criteria:
+   - POST /tasks — create, returns 201
+   - GET /tasks  — list with pagination (?page=1&per_page=20)
+   - PATCH /tasks/{id} — partial update
+   - DELETE /tasks/{id} — soft delete (sets deleted_at)
+   - All endpoints require valid JWT (401 if missing)
+   - Users can only access their own tasks (403 otherwise)
+   Depends on: 1
+
+3. Integration test suite
+   Description: End-to-end API tests using pytest + httpx AsyncClient.
+     Runs against in-memory SQLite — no external dependencies.
+   Acceptance criteria:
+   - Coverage ≥ 90% across all modules
+   - Tests cover auth flow, CRUD, and error cases
+   - All tests pass: pytest tests/ -v
+   Depends on: 1, 2
+```
+
+**Option 2 — Interactive with `/create-spec`** (easiest)
+
+Open Claude Code in your project directory, type `/create-spec`. Claude walks you through the project conversationally and writes both `app_spec.txt` and `claw-forge.yaml`.
+
+```bash
+# In Claude Code:
+/create-spec
+```
+
+**Option 3 — From an existing doc**
+
+Paste a PRD, Notion export, or detailed README into Claude and ask:
+
+> "Convert this into a claw-forge `app_spec.txt`. Break each requirement into a concrete feature with acceptance criteria and `Depends on:` links."
+
+### Spec format reference
+
+| Field | Required | Description |
+|---|---|---|
+| `Project:` | ✅ | Project name (used as identifier) |
+| `Stack:` | ✅ | Languages, frameworks, databases |
+| `Description:` | optional | One paragraph overview |
+| `Features:` | ✅ | List of numbered features |
+| `Description:` (per feature) | ✅ | What the agent should build |
+| `Acceptance criteria:` | ✅ | Bullet list — each item is a verifiable condition |
+| `Depends on:` | optional | Comma-separated feature numbers this feature needs first |
+| `Tech notes:` | optional | Library preferences, patterns, constraints |
+
+### Tips for a good spec
+
+- **One feature = one atomic unit of work.** If it would take >2 hours to implement, split it.
+- **Acceptance criteria are tests.** Write them as if the agent must tick each one before marking done.
+- **Use `Depends on:` for real hard dependencies.** Features with no dependencies run in parallel in Wave 1.
+- **Start with 5–10 features.** Add more with `/expand-project` once the first wave is running.
+- **Be specific about libraries.** "Use python-jose for JWT" beats "implement JWT".
+- **Include test count targets.** "15 unit tests" gives the agent a concrete goal.
+
+### Adding features to a running project
+
+```bash
+# Option A — /expand-project slash command in Claude Code
+/expand-project
+# Claude lists current features, asks what to add, POSTs them atomically
+
+# Option B — append to spec, re-init (only new features are created)
+echo "
+4. Email reminders
+   Description: Send due-date reminders 24h before via SendGrid.
+   Acceptance criteria:
+   - Celery task runs hourly, finds tasks due in next 24h
+   - Sends email via SendGrid with task title and due date
+   - Emails only sent once per task per due date
+   Depends on: 2
+" >> app_spec.txt
+claw-forge init my-api --spec app_spec.txt
 ```
 
 ---

@@ -4,13 +4,48 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Tutorial — claw-forge</title>
-  <meta name="description" content="Step-by-step guide to get claw-forge running with multi-provider API rotation."/>
-
+  <meta name="description" content="Complete guide to claw-forge: installation, spec writing, provider setup, running agents, and the Kanban UI."/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/style.css"/>
+  <style>
+    .toc { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px 28px; margin-bottom: 48px; }
+    .toc h4 { margin: 0 0 12px; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .toc ol { margin: 0; padding-left: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 32px; }
+    .toc li { font-size: 14px; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
+    .callout.tip { background: rgba(56,139,253,.08); border-left: 3px solid #388bfd; }
+    .callout.warn { background: rgba(210,153,34,.1); border-left: 3px solid #d29922; }
+    .callout.info { background: rgba(86,211,100,.08); border-left: 3px solid #56d364; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .spec-anatomy { background: #0d1117; border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; font-family: monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; margin: 16px 0; }
+    .spec-anatomy .comment { color: #8b949e; }
+    .spec-anatomy .key { color: #79c0ff; }
+    .spec-anatomy .val { color: #a5d6ff; }
+    .spec-anatomy .hl { background: rgba(56,139,253,.15); display: inline-block; width: 100%; border-radius: 3px; }
+    .tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+    .tab-btn { background: none; border: none; padding: 8px 16px; font-size: 13px; font-family: inherit; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .tab-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 16px 0; }
+    .tab-wrap .tab-bar { padding: 0 12px; background: var(--card-bg); }
+    .tab-wrap pre { border-radius: 0; margin: 0; }
+    h2.section-anchor { scroll-margin-top: 80px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .badge.optional { background: rgba(139,148,158,.15); color: #8b949e; }
+    .badge.required { background: rgba(248,81,73,.12); color: #f85149; }
+    .badge.recommended { background: rgba(56,211,100,.12); color: #56d364; }
+    .field-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+    .field-table th { text-align: left; padding: 8px 12px; background: var(--card-bg); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+    .field-table td { padding: 8px 12px; border-bottom: 1px solid rgba(48,54,61,.5); vertical-align: top; }
+    .field-table td:first-child { font-family: monospace; color: #79c0ff; white-space: nowrap; }
+    .field-table td:last-child { color: var(--text-muted); }
+  </style>
 </head>
 <body>
 
@@ -30,156 +65,636 @@
   <div class="container">
     <p class="section-label">Getting Started</p>
     <h2>Tutorial</h2>
-    <p class="section-desc">From zero to running autonomous agents in 6 steps.</p>
+    <p class="section-desc">Everything you need to go from zero to running autonomous coding agents.</p>
+
+    <!-- TOC -->
+    <div class="toc">
+      <h4>Contents</h4>
+      <ol>
+        <li><a href="#install">Install claw-forge</a></li>
+        <li><a href="#env">Set up environment variables</a></li>
+        <li><a href="#providers">Configure providers</a></li>
+        <li><a href="#spec">Write your project spec</a></li>
+        <li><a href="#init">Initialize the project</a></li>
+        <li><a href="#run">Run agents</a></li>
+        <li><a href="#ui">Open the Kanban UI</a></li>
+        <li><a href="#expand">Add more features</a></li>
+        <li><a href="#yolo">YOLO mode</a></li>
+        <li><a href="#pause">Pause &amp; resume</a></li>
+      </ol>
+    </div>
 
     <div class="steps">
 
-      <!-- Step 1: Install -->
-      <div class="step">
+      <!-- ── 1. Install ─────────────────────────────────────────────────── -->
+      <div class="step" id="install">
         <div class="step-num">1</div>
         <div class="step-body">
           <h3>Install claw-forge</h3>
-          <p>We use <strong>uv</strong> for fast, isolated installation. <code>uv tool install</code> puts the CLI on your PATH without polluting your system Python.</p>
-          <pre><code class="language-bash">pip install uv
+          <p>We use <strong>uv</strong> for fast, isolated installation. It puts the <code>claw-forge</code> command on your PATH without polluting your system Python.</p>
+
+          <div class="tab-wrap">
+            <div class="tab-bar">
+              <button class="tab-btn active" onclick="switchTab(this,'install-uv')">uv (recommended)</button>
+              <button class="tab-btn" onclick="switchTab(this,'install-pipx')">pipx</button>
+              <button class="tab-btn" onclick="switchTab(this,'install-pip')">pip</button>
+            </div>
+            <div id="install-uv" class="tab-content active">
+              <pre><code class="language-bash">pip install uv
 uv tool install claw-forge
 claw-forge --version</code></pre>
+            </div>
+            <div id="install-pipx" class="tab-content">
+              <pre><code class="language-bash">pip install pipx
+pipx install claw-forge
+claw-forge --version</code></pre>
+            </div>
+            <div id="install-pip" class="tab-content">
+              <pre><code class="language-bash">pip install claw-forge
+claw-forge --version</code></pre>
+            </div>
+          </div>
+
           <div class="output-block">claw-forge 0.2.0b1</div>
-          <p style="margin-top:12px">If you prefer pipx: <code>pipx install claw-forge</code></p>
+
+          <div class="callout tip">
+            <strong>💡 Node.js for the Kanban UI</strong>
+            The CLI and agents need Python only. The optional Kanban UI (<code>claw-forge ui</code>) requires Node.js 18+. Install from <a href="https://nodejs.org" target="_blank">nodejs.org</a> if you want the visual board.
+          </div>
         </div>
       </div>
 
-      <!-- Step 2: Configure providers -->
-      <div class="step">
+      <!-- ── 2. Environment variables ───────────────────────────────────── -->
+      <div class="step" id="env">
         <div class="step-num">2</div>
         <div class="step-body">
-          <h3>Configure providers</h3>
-          <p>Create <code>claw-forge.yaml</code> in your project root. The minimal setup uses your existing <code>claude login</code> session (zero API key required) plus Groq as a free backup.</p>
-          <div class="config-block"><span style="color:#8b949e"># claw-forge.yaml</span>
-<span style="color:#79c0ff">project</span>:
-  <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">my-app</span>
-  <span style="color:#79c0ff">path</span>: <span style="color:#a5d6ff">.</span>
+          <h3>Set up environment variables</h3>
+          <p>claw-forge reads credentials from environment variables. Copy the example file and fill in your keys:</p>
 
-<span style="color:#79c0ff">providers</span>:
-  <span style="color:#8b949e"># Zero config — uses your claude login session</span>
-  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">claude-oauth</span>
-    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">oauth</span>
-    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
-    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">10</span>
+          <pre><code class="language-bash">cp .env.example .env
+# Edit .env with your editor</code></pre>
 
-  <span style="color:#8b949e"># Direct key — higher RPM, lower priority as backup</span>
-  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">anthropic-direct</span>
-    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">anthropic</span>
-    <span style="color:#79c0ff">api_key_env</span>: <span style="color:#a5d6ff">ANTHROPIC_API_KEY</span>
-    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
-    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">5</span>
+          <p>The minimum you need to get started is <strong>one</strong> of the following:</p>
 
-  <span style="color:#8b949e"># Groq — free tier, great for lightweight tasks</span>
-  - <span style="color:#79c0ff">name</span>: <span style="color:#a5d6ff">groq-backup</span>
-    <span style="color:#79c0ff">type</span>: <span style="color:#a5d6ff">openai_compat</span>
-    <span style="color:#79c0ff">api_key_env</span>: <span style="color:#a5d6ff">GROQ_API_KEY</span>
-    <span style="color:#79c0ff">base_url</span>: <span style="color:#a5d6ff">https://api.groq.com/openai/v1</span>
-    <span style="color:#79c0ff">model</span>: <span style="color:#a5d6ff">llama-3.3-70b-versatile</span>
-    <span style="color:#79c0ff">enabled</span>: <span style="color:#56d364">true</span>
-    <span style="color:#79c0ff">priority</span>: <span style="color:#79c0ff">2</span>
+          <div class="tab-wrap">
+            <div class="tab-bar">
+              <button class="tab-btn active" onclick="switchTab(this,'env-oauth')">Claude OAuth (easiest)</button>
+              <button class="tab-btn" onclick="switchTab(this,'env-apikey')">Anthropic API key</button>
+              <button class="tab-btn" onclick="switchTab(this,'env-proxy')">Proxy</button>
+            </div>
+            <div id="env-oauth" class="tab-content active">
+              <pre><code class="language-bash"># Run claude login once — claw-forge picks it up automatically.
+# No env vars needed for OAuth. Token is read from:
+#   ~/.claude/.credentials.json
+claude login</code></pre>
+            </div>
+            <div id="env-apikey" class="tab-content">
+              <pre><code class="language-bash"># .env
+ANTHROPIC_API_KEY_1=sk-ant-api03-...</code></pre>
+            </div>
+            <div id="env-proxy" class="tab-content">
+              <pre><code class="language-bash"># .env — Anthropic-compat proxy
+PROXY_1_API_KEY=your-proxy-key
+PROXY_1_BASE_URL=https://your-proxy.example.com/v1
+PROXY_1_MODEL=claude-sonnet-4-6</code></pre>
+            </div>
+          </div>
 
-<span style="color:#79c0ff">orchestrator</span>:
-  <span style="color:#79c0ff">max_concurrent</span>: <span style="color:#79c0ff">3</span>   <span style="color:#8b949e"># parallel agents</span>
-  <span style="color:#79c0ff">retry_attempts</span>: <span style="color:#79c0ff">3</span></div>
-          <p style="margin-top:12px">The pool manager automatically routes to the healthiest available provider. If <code>claude-oauth</code> hits rate limits, it falls back to <code>anthropic-direct</code>, then <code>groq-backup</code>.</p>
+          <p>claw-forge automatically loads <code>.env</code> from the same directory as <code>claw-forge.yaml</code> — no <code>export</code> or <code>source</code> needed.</p>
+
+          <div class="callout info">
+            <strong>✅ Full .env.example</strong>
+            The repo ships a complete <code>.env.example</code> covering every provider: Anthropic, proxies (with <code>base_url</code> + <code>model</code>), AWS Bedrock, Azure, Vertex AI, Groq, Cerebras, and Ollama. Copy it and fill in only what you use — unset vars produce a warning but won't crash the run.
+          </div>
         </div>
       </div>
 
-      <!-- Step 3: Create project -->
-      <div class="step">
+      <!-- ── 3. Configure providers ──────────────────────────────────────── -->
+      <div class="step" id="providers">
         <div class="step-num">3</div>
         <div class="step-body">
-          <h3>Create your project</h3>
-          <p>Write <code>app_spec.txt</code> describing what you want to build. Then initialize the project — the initializer agent reads your spec and creates atomic, dependency-ordered feature tasks.</p>
-          <pre><code class="language-bash">claw-forge init my-app --spec app_spec.txt</code></pre>
-          <div class="output-block">✅ Project analyzed successfully
-  project_name: my-app
-  tech_stack: python/fastapi
-  features_detected: 7
-  session_manifest: session_manifest.json</div>
-          <p style="margin-top:12px">Or use the Claude slash command for interactive setup: type <code>/create-spec</code> in any Claude session in your project directory.</p>
+          <h3>Configure providers</h3>
+          <p>Create <code>claw-forge.yaml</code> in your project root. Every credential is read from env vars — never hardcode keys.</p>
+
+          <div class="tab-wrap">
+            <div class="tab-bar">
+              <button class="tab-btn active" onclick="switchTab(this,'cfg-minimal')">Minimal (OAuth only)</button>
+              <button class="tab-btn" onclick="switchTab(this,'cfg-two')">Two providers</button>
+              <button class="tab-btn" onclick="switchTab(this,'cfg-proxy')">With proxy</button>
+              <button class="tab-btn" onclick="switchTab(this,'cfg-ollama')">With Ollama</button>
+            </div>
+            <div id="cfg-minimal" class="tab-content active">
+              <pre><code class="language-yaml">pool:
+  strategy: priority
+  max_retries: 3
+
+providers:
+  claude-oauth:
+    type: anthropic_oauth
+    priority: 1
+    # Token auto-read from ~/.claude/.credentials.json</code></pre>
+            </div>
+            <div id="cfg-two" class="tab-content">
+              <pre><code class="language-yaml">pool:
+  strategy: priority
+  max_retries: 3
+
+providers:
+  claude-oauth:
+    type: anthropic_oauth
+    priority: 1
+
+  anthropic-primary:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY_1}
+    priority: 2
+
+  groq-backup:
+    type: openai_compat
+    api_key: ${GROQ_API_KEY}
+    base_url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+    priority: 3</code></pre>
+            </div>
+            <div id="cfg-proxy" class="tab-content">
+              <pre><code class="language-yaml">pool:
+  strategy: priority
+  max_retries: 3
+
+providers:
+  # Anthropic-format proxy (x-api-key + /v1/messages)
+  anthropic-proxy-1:
+    type: anthropic_compat
+    api_key: ${PROXY_1_API_KEY}
+    base_url: ${PROXY_1_BASE_URL}
+    model: ${PROXY_1_MODEL}
+    priority: 1
+
+  anthropic-proxy-2:
+    type: anthropic_compat
+    api_key: ${PROXY_2_API_KEY}
+    base_url: ${PROXY_2_BASE_URL}
+    model: ${PROXY_2_MODEL}
+    priority: 2</code></pre>
+            </div>
+            <div id="cfg-ollama" class="tab-content">
+              <pre><code class="language-yaml">pool:
+  strategy: priority
+  max_retries: 3
+
+providers:
+  # Ollama — local model, zero cost
+  local-ollama:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL}
+    model: ${OLLAMA_MODEL}
+    priority: 1
+    cost_per_mtok_input: 0.0
+    cost_per_mtok_output: 0.0
+
+  # .env:
+  # OLLAMA_BASE_URL=http://localhost:11434
+  # OLLAMA_MODEL=qwen2.5-coder</code></pre>
+            </div>
+          </div>
+
+          <p>The pool manager routes each request through providers in priority order, skipping any that are rate-limited or have open circuit breakers.</p>
+
+          <table class="field-table">
+            <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td>type</td><td><span class="badge required">required</span></td><td><code>anthropic</code> · <code>anthropic_compat</code> · <code>anthropic_oauth</code> · <code>openai_compat</code> · <code>bedrock</code> · <code>azure</code> · <code>vertex</code> · <code>ollama</code></td></tr>
+              <tr><td>priority</td><td><span class="badge required">required</span></td><td>Lower = tried first. Providers with the same priority compete via the routing strategy.</td></tr>
+              <tr><td>api_key</td><td><span class="badge optional">optional</span></td><td>Use <code>${ENV_VAR}</code> syntax. Omit for OAuth or no-auth proxies.</td></tr>
+              <tr><td>base_url</td><td><span class="badge optional">optional</span></td><td>Required for proxy and Ollama types. Use <code>${ENV_VAR}</code>.</td></tr>
+              <tr><td>model</td><td><span class="badge optional">optional</span></td><td>Default model for this provider. Use <code>${ENV_VAR}</code>. Falls back to the request model if unset.</td></tr>
+              <tr><td>model_map</td><td><span class="badge optional">optional</span></td><td>Map model names for proxies that use different identifiers.</td></tr>
+              <tr><td>cost_per_mtok_input</td><td><span class="badge optional">optional</span></td><td>USD per million input tokens. Used for cost tracking in the Kanban UI.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <!-- Step 4: Run -->
-      <div class="step">
+      <!-- ── 4. Write spec ───────────────────────────────────────────────── -->
+      <div class="step" id="spec">
         <div class="step-num">4</div>
         <div class="step-body">
-          <h3>Run with live output</h3>
-          <p>Start the agent harness. The dispatcher executes features in dependency-ordered waves — independent features run in parallel, bounded by <code>--concurrency</code>.</p>
-          <pre><code class="language-bash">claw-forge run my-app --concurrency 3
-# Watch the Kanban at http://localhost:8888</code></pre>
-          <div class="output-block"><span style="color:#58a6ff">claw-forge</span> v0.2.0b1
-Project: my-app
-Providers: 3  (claude-oauth 🟢  anthropic-direct 🟢  groq-backup 🟢)
+          <h3>Write your project spec</h3>
+          <p>The spec is a plain text file that describes what you want to build. The initializer agent reads it and breaks it into atomic, dependency-ordered tasks that agents can implement in parallel.</p>
 
-<span style="color:#56d364">Wave 1/3</span> — 3 tasks (parallel)
-  [claude-oauth]    🤖 coding: Create User SQLAlchemy model     ✅ 12s  $0.02
-  [anthropic-direct] 🤖 coding: Implement JWT utility           ✅ 18s  $0.03
-  [groq-backup]     🔬 testing: Test infrastructure setup       ✅  8s  $0.00
+          <p><strong>You have three ways to create a spec:</strong></p>
 
-<span style="color:#56d364">Wave 2/3</span> — 2 tasks
-  [claude-oauth]    🤖 coding: Add POST /auth/login endpoint    ✅ 24s  $0.04
-  [anthropic-direct] 👁 reviewing: Review wave 1 output        ✅ 10s  $0.01
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0">
+            <div class="card" style="padding:16px">
+              <div style="font-size:22px;margin-bottom:8px">✍️</div>
+              <strong>Write it yourself</strong>
+              <p style="font-size:13px;color:var(--text-muted);margin-top:6px">Best control. Use the format below.</p>
+            </div>
+            <div class="card" style="padding:16px">
+              <div style="font-size:22px;margin-bottom:8px">💬</div>
+              <strong>/create-spec command</strong>
+              <p style="font-size:13px;color:var(--text-muted);margin-top:6px">Interactive. Claude walks you through it conversationally.</p>
+            </div>
+            <div class="card" style="padding:16px">
+              <div style="font-size:22px;margin-bottom:8px">📋</div>
+              <strong>From existing docs</strong>
+              <p style="font-size:13px;color:var(--text-muted);margin-top:6px">Paste a PRD, Notion doc, or README — Claude extracts the spec.</p>
+            </div>
+          </div>
 
-<span style="color:#56d364">Wave 3/3</span> — 2 tasks
-  ...</div>
-          <p style="margin-top:12px">The Kanban UI at <code>http://localhost:8888</code> shows real-time status with WebSocket updates, provider health dots, and a running cost tracker.</p>
+          <h4 style="margin-top:24px">Option A — Write <code>app_spec.txt</code> yourself</h4>
+          <p>The format is human-readable and intentionally flexible. The key thing is to be <strong>specific about acceptance criteria</strong> — vague features produce vague code.</p>
+
+          <div class="spec-anatomy">
+<span class="comment"># app_spec.txt — example: REST API with auth</span>
+
+<span class="hl"><span class="key">Project:</span> <span class="val">task-manager-api</span></span>
+<span class="key">Stack:</span>  <span class="val">Python 3.12, FastAPI, SQLAlchemy 2.0, PostgreSQL, pytest</span>
+<span class="key">Description:</span>
+  <span class="val">A REST API for managing personal tasks with JWT authentication,</span>
+  <span class="val">tag-based filtering, and due-date reminders.</span>
+
+<span class="comment">────────────────────────────────────────────────
+  Features — write one per task you want implemented
+────────────────────────────────────────────────</span>
+
+<span class="hl"><span class="key">1. User authentication</span></span>
+   <span class="key">Description:</span> <span class="val">JWT-based register/login/logout endpoints using</span>
+     <span class="val">bcrypt for password hashing. Access tokens expire in 1h,</span>
+     <span class="val">refresh tokens in 7d.</span>
+   <span class="key">Acceptance criteria:</span>
+   <span class="val">- POST /auth/register creates user, returns 201 with user_id</span>
+   <span class="val">- POST /auth/login returns {access_token, refresh_token, expires_in}</span>
+   <span class="val">- POST /auth/refresh exchanges refresh_token for new access_token</span>
+   <span class="val">- POST /auth/logout invalidates refresh token</span>
+   <span class="val">- Passwords hashed with bcrypt (cost factor 12)</span>
+   <span class="val">- 15 unit tests covering happy path and edge cases</span>
+   <span class="key">Tech notes:</span> <span class="val">Use python-jose for JWT, passlib for bcrypt.</span>
+
+<span class="hl"><span class="key">2. Task CRUD</span></span>
+   <span class="key">Description:</span> <span class="val">Full create/read/update/delete for tasks.</span>
+     <span class="val">Tasks have: title, description, status (todo/in_progress/done),</span>
+     <span class="val">priority (1-5), due_date, tags (many-to-many).</span>
+   <span class="key">Acceptance criteria:</span>
+   <span class="val">- POST /tasks — create task, returns 201</span>
+   <span class="val">- GET /tasks — list with pagination (?page=1&amp;per_page=20)</span>
+   <span class="val">- GET /tasks/{id} — get one</span>
+   <span class="val">- PATCH /tasks/{id} — partial update</span>
+   <span class="val">- DELETE /tasks/{id} — soft delete (sets deleted_at)</span>
+   <span class="val">- All endpoints require valid JWT (401 if missing)</span>
+   <span class="val">- Users can only see their own tasks (403 if cross-user access)</span>
+   <span class="key">Depends on:</span> <span class="val">1</span>  <span class="comment"># depends on feature 1 (auth)</span>
+
+<span class="hl"><span class="key">3. Tag filtering</span></span>
+   <span class="key">Description:</span> <span class="val">Filter tasks by tags, status, priority, and due date range.</span>
+   <span class="key">Acceptance criteria:</span>
+   <span class="val">- GET /tasks?tags=work,urgent filters by ALL given tags</span>
+   <span class="val">- GET /tasks?status=todo&amp;priority_gte=3 combines filters</span>
+   <span class="val">- GET /tasks?due_before=2026-04-01 filters by due date</span>
+   <span class="val">- Filters can be combined freely</span>
+   <span class="key">Depends on:</span> <span class="val">2</span>
+
+<span class="hl"><span class="key">4. Integration test suite</span></span>
+   <span class="key">Description:</span> <span class="val">Full end-to-end API tests using pytest + httpx AsyncClient.</span>
+     <span class="val">Tests run against an in-memory SQLite DB — no external deps required.</span>
+   <span class="key">Acceptance criteria:</span>
+   <span class="val">- Coverage ≥ 90% across all modules</span>
+   <span class="val">- Tests cover auth flow, CRUD, filtering, and error cases</span>
+   <span class="val">- All tests pass with: pytest tests/ -v</span>
+   <span class="key">Depends on:</span> <span class="val">1, 2, 3</span>
+          </div>
+
+          <div class="callout tip">
+            <strong>💡 Tips for a good spec</strong>
+            <ul style="margin:8px 0 0;padding-left:20px;font-size:13px">
+              <li><strong>One feature = one atomic unit of work.</strong> If it takes more than ~2 hours to implement, split it.</li>
+              <li><strong>Acceptance criteria are tests.</strong> Write them as if they're a checklist for the agent to verify before marking the feature done.</li>
+              <li><strong>Use <code>Depends on:</code> for hard dependencies.</strong> Features with no dependencies run in parallel in Wave 1.</li>
+              <li><strong>Tech notes help.</strong> If you have a preferred library or pattern, mention it. Agents follow instructions well.</li>
+              <li><strong>Start with 5–10 features.</strong> You can always add more with <code>/expand-project</code> once the first wave is running.</li>
+            </ul>
+          </div>
+
+          <h4 style="margin-top:28px">Option B — Interactive spec with <code>/create-spec</code></h4>
+          <p>Open Claude Code in your project directory and type <code>/create-spec</code>. Claude will walk you through the project conversationally — asking about your stack, features, providers, and concurrency — then write both <code>app_spec.txt</code> and <code>claw-forge.yaml</code> for you.</p>
+
+          <pre><code class="language-bash"># Open your project in Claude Code, then type:
+/create-spec</code></pre>
+
+          <div class="output-block">claw-forge project setup assistant
+
+What should we call this project? (used as directory name)
+> task-manager-api
+
+What's your tech stack?
+> Python, FastAPI, PostgreSQL, pytest
+
+List your top 5–7 features or user stories:
+> 1. JWT auth (register/login/logout/refresh)
+> 2. Task CRUD (title, status, priority, tags, due date)
+> 3. Tag and status filtering on GET /tasks
+> 4. Full integration test suite (≥90% coverage)
+> done
+
+Which AI providers do you have access to? (space-separated)
+> claude-oauth anthropic groq
+...
+
+✅ Written: app_spec.txt
+✅ Written: claw-forge.yaml
+✅ Written: .env.example
+
+Next: claw-forge init task-manager-api --spec app_spec.txt</div>
+
+          <h4 style="margin-top:28px">Option C — From an existing document</h4>
+          <p>If you already have a PRD, a Notion export, or a detailed README, paste its contents into Claude and ask:</p>
+          <div class="callout info" style="font-family:monospace;font-size:13px">
+            "Convert this product requirements document into a claw-forge <code>app_spec.txt</code>. Break each requirement into a concrete feature with acceptance criteria and dependencies."
+          </div>
         </div>
       </div>
 
-      <!-- Step 5: Pool status -->
-      <div class="step">
+      <!-- ── 5. Initialize ──────────────────────────────────────────────── -->
+      <div class="step" id="init">
         <div class="step-num">5</div>
         <div class="step-body">
-          <h3>Check provider pool status</h3>
-          <p>See which providers are healthy, their current RPM, and how much each has cost today.</p>
-          <pre><code class="language-bash">claw-forge pool-status</code></pre>
-          <div class="output-block">                     Provider Pool
-┌──────────────────┬────────────┬──────────┬─────────┬────────────────────┐
-│ Name             │ Type       │ Priority │ Enabled │ Cost (in/out $/Mtok│
-├──────────────────┼────────────┼──────────┼─────────┼────────────────────┤
-│ claude-oauth     │ oauth      │ 10       │ ✅      │ $0.0/$0.0          │
-│ anthropic-direct │ anthropic  │ 5        │ ✅      │ $3.0/$15.0         │
-│ groq-backup      │ openai_... │ 2        │ ✅      │ $0.05/$0.08        │
-└──────────────────┴────────────┴──────────┴─────────┴────────────────────┘</div>
-          <p style="margin-top:12px">Use the <code>/pool-status</code> slash command inside Claude for a richer analysis with recommendations.</p>
+          <h3>Initialize the project</h3>
+          <p>The <code>init</code> command runs the <strong>initializer agent</strong> — it reads your spec, analyzes the project directory, and creates a dependency-ordered task graph in the state database.</p>
+
+          <pre><code class="language-bash">claw-forge init task-manager-api --spec app_spec.txt</code></pre>
+
+          <div class="output-block">🔍 Running initializer agent…
+   Reading spec: app_spec.txt
+   Analyzing project: ./
+
+✅ Project initialized
+   project_name:    task-manager-api
+   tech_stack:      python/fastapi
+   features_parsed: 4
+   tasks_created:   4
+   dependency_graph:
+     Wave 1 (parallel): [1] User authentication
+     Wave 2 (parallel): [2] Task CRUD
+     Wave 3 (parallel): [3] Tag filtering
+     Wave 4 (parallel): [4] Integration test suite
+   session_id: abc-123-def
+   manifest:   .claw-forge/session_manifest.json</div>
+
+          <p>The initializer also writes <code>.claw-forge/session_manifest.json</code> — a pre-computed context blob that every subsequent agent session loads at start. This eliminates cold-start: agents don't re-analyse the project from scratch each time.</p>
+
+          <div class="callout warn">
+            <strong>⚠️ Re-initializing</strong>
+            Running <code>init</code> again on an existing project will add new tasks — it won't delete existing ones. Use <code>/expand-project</code> to add features to a running session instead.
+          </div>
+
+          <h4 style="margin-top:20px">What the manifest contains</h4>
+          <p>You can inspect it any time:</p>
+          <pre><code class="language-bash">cat .claw-forge/session_manifest.json</code></pre>
+          <div class="output-block">{
+  "project_name": "task-manager-api",
+  "language": "python",
+  "framework": "fastapi",
+  "description": "REST API with JWT auth, task CRUD, tag filtering",
+  "key_files": [
+    {"path": "src/auth.py", "role": "authentication module"},
+    {"path": "src/models.py", "role": "SQLAlchemy models"},
+    {"path": "tests/conftest.py", "role": "test fixtures"}
+  ],
+  "build_commands": ["uv sync", "alembic upgrade head"],
+  "test_commands": ["pytest tests/ -v --cov"],
+  "active_skills": ["pyright-lsp", "verification-gate"],
+  "prior_decisions": []
+}</div>
         </div>
       </div>
 
-      <!-- Step 6: YOLO mode -->
-      <div class="step">
+      <!-- ── 6. Run ──────────────────────────────────────────────────────── -->
+      <div class="step" id="run">
         <div class="step-num">6</div>
         <div class="step-body">
-          <h3>YOLO mode for maximum speed 🚀</h3>
-          <p>When you need to ship fast and you trust the agents, YOLO mode disables human-input prompts, maxes concurrency to your CPU count, and enables aggressive retry (5 attempts).</p>
-          <pre><code class="language-bash">claw-forge run my-app --yolo</code></pre>
+          <h3>Run agents</h3>
+          <p>Start the harness. The dispatcher executes features in dependency-ordered waves — features with no unsatisfied dependencies run in parallel up to <code>--concurrency</code>.</p>
+
+          <pre><code class="language-bash">claw-forge run task-manager-api --concurrency 3</code></pre>
+
+          <div class="output-block">🔥 claw-forge v0.2.0b1
+Project:   task-manager-api
+Session:   abc-123-def
+Providers: claude-oauth 🟢  anthropic-primary 🟢  groq-backup 🟢
+Strategy:  priority
+
+Wave 1/4 — 1 task
+  ⚙ [claude-oauth] coding: User authentication …
+  ✅ [claude-oauth] User authentication — 47s  $0.06
+
+Wave 2/4 — 1 task
+  ⚙ [claude-oauth] coding: Task CRUD …
+  ✅ [claude-oauth] Task CRUD — 63s  $0.09
+
+Wave 3/4 — 1 task
+  ⚙ [claude-oauth] coding: Tag filtering …
+  ✅ [claude-oauth] Tag filtering — 31s  $0.04
+
+Wave 4/4 — 1 task
+  ⚙ [claude-oauth] testing: Integration test suite …
+  ✅ [claude-oauth] Integration test suite — 82s  $0.11
+
+────────────────────────────────────────────────
+✅ All 4 features passing  •  total: $0.30  •  4m 23s
+────────────────────────────────────────────────</div>
+
+          <p>The state service runs automatically on port <strong>8888</strong>. Open <code>http://localhost:8888/docs</code> to explore the REST API, or use the Kanban UI (next step).</p>
+
+          <div class="callout tip">
+            <strong>💡 Useful flags</strong>
+            <table class="field-table" style="margin-top:8px">
+              <tr><td>--concurrency N</td><td></td><td>Max parallel agents (default: 3)</td></tr>
+              <tr><td>--model MODEL</td><td></td><td>Override the default model</td></tr>
+              <tr><td>--config FILE</td><td></td><td>Use a different claw-forge.yaml</td></tr>
+              <tr><td>--yolo</td><td></td><td>Max speed, no approval pauses (see <a href="#yolo">YOLO mode</a>)</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 7. Kanban UI ───────────────────────────────────────────────── -->
+      <div class="step" id="ui">
+        <div class="step-num">7</div>
+        <div class="step-body">
+          <h3>Open the Kanban UI</h3>
+          <p>claw-forge ships a React Kanban board that shows real-time agent progress, provider health, and cost. Launch it with one command:</p>
+
+          <pre><code class="language-bash">claw-forge ui --session abc-123-def</code></pre>
+
+          <div class="output-block">🔥 Starting claw-forge Kanban UI
+   UI:        http://localhost:5173/?session=abc-123-def
+   State API: http://localhost:8888
+   Press Ctrl+C to stop
+
+  vite v5.4.0 dev server running at:
+  ➜ Local: http://localhost:5173/</div>
+
+          <p>The board opens automatically in your browser. What you'll see:</p>
+
+          <ul style="font-size:14px;line-height:2">
+            <li><strong>5 columns:</strong> Pending · In Progress · Passing · Failed · Blocked</li>
+            <li><strong>Provider health dots</strong> in the header — click any dot for RPM, latency, circuit state, and cost</li>
+            <li><strong>Progress bar</strong> — X/Y features passing, live</li>
+            <li><strong>Cost tracker</strong> — total USD spent this session</li>
+            <li><strong>Feature cards</strong> — show category badge, dep count, agent session ID when running, error message when failed</li>
+          </ul>
+
+          <div class="callout tip">
+            <strong>💡 UI options</strong>
+            <pre style="margin-top:8px"><code class="language-bash">claw-forge ui --port 3000        # custom port
+claw-forge ui --no-open          # don't auto-open browser
+claw-forge ui --state-port 9000  # different state service port</code></pre>
+          </div>
+
+          <p>You can also open the board manually at any time at <code>http://localhost:5173/?session=&lt;uuid&gt;</code>.</p>
+        </div>
+      </div>
+
+      <!-- ── 8. Expand ──────────────────────────────────────────────────── -->
+      <div class="step" id="expand">
+        <div class="step-num">8</div>
+        <div class="step-body">
+          <h3>Add more features</h3>
+          <p>Once your first batch of features is running (or done), add more without restarting. There are two ways:</p>
+
+          <h4>Option A — <code>/expand-project</code> slash command</h4>
+          <p>Open Claude Code in your project directory and type <code>/expand-project</code>. Claude will list the current features, ask what you want to add, and POST them to the state service atomically.</p>
+
+          <pre><code class="language-bash">/expand-project</code></pre>
+
+          <div class="output-block">Current features (4 passing):
+  ✅ [1] User authentication
+  ✅ [2] Task CRUD
+  ✅ [3] Tag filtering
+  ✅ [4] Integration test suite
+
+What new features would you like to add?
+> 5. Email reminders — send due-date reminders via SendGrid 24h before due date
+> 6. Rate limiting — 100 req/min per user via slowapi
+> done
+
+Depends on anything?
+> 5 depends on 2 (needs tasks with due dates)
+> 6 depends on 1 (needs auth middleware)
+
+✅ Added 2 features
+  [abc456] Email reminders    (depends on: 2)
+  [def789] Rate limiting      (depends on: 1)
+
+Resuming dispatcher…</div>
+
+          <h4 style="margin-top:20px">Option B — append to <code>app_spec.txt</code> and re-init</h4>
+          <p>Add new entries to the bottom of your spec file and run <code>init</code> again. Only new features (those not already in the DB) will be created.</p>
+
+          <pre><code class="language-bash"># Append to app_spec.txt, then:
+claw-forge init task-manager-api --spec app_spec.txt</code></pre>
+        </div>
+      </div>
+
+      <!-- ── 9. YOLO ────────────────────────────────────────────────────── -->
+      <div class="step" id="yolo">
+        <div class="step-num">9</div>
+        <div class="step-body">
+          <h3>YOLO mode — maximum speed 🚀</h3>
+          <p>YOLO mode enables three things at once:</p>
+          <ul style="font-size:14px;line-height:1.9">
+            <li><strong>Max concurrency</strong> — set to your CPU count automatically</li>
+            <li><strong>Auto-approve human inputs</strong> — agents never pause waiting for you</li>
+            <li><strong>Aggressive retry</strong> — 5 attempts per task instead of 3</li>
+          </ul>
+
+          <pre><code class="language-bash">claw-forge run task-manager-api --yolo</code></pre>
+
           <div class="output-block"><span style="color:#d29922">⚠️  YOLO MODE: Human approval skipped, max concurrency (12), aggressive retry</span>
 
-claw-forge v0.2.0b1
-Project: my-app
-Providers: 3
+🔥 claw-forge v0.2.0b1
+Wave 1/4 — all 4 tasks running in parallel…</div>
 
-Wave 1/3 — 12 tasks (all parallel — CPU count)
-  ...</div>
-          <p style="margin-top:12px">YOLO mode is perfect for: first-pass feature generation, rebuilding from a clean spec, or when you've already reviewed the agent prompts and trust them.</p>
-          <p style="margin-top:8px"><strong>Pause and resume</strong> at any time:</p>
-          <pre><code class="language-bash">claw-forge pause my-session-id   # drains in-flight agents
-claw-forge resume my-session-id  # continues from where it stopped</code></pre>
+          <div class="callout warn">
+            <strong>⚠️ When to use YOLO mode</strong>
+            <ul style="margin:8px 0 0;padding-left:20px;font-size:13px">
+              <li>First-pass generation on a clean codebase</li>
+              <li>Rebuilding from a fresh spec after a big refactor</li>
+              <li>When you've already reviewed and trust the agent prompts</li>
+              <li><strong>Not recommended</strong> for production systems or when the codebase has sensitive operations</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 10. Pause / resume ─────────────────────────────────────────── -->
+      <div class="step" id="pause">
+        <div class="step-num">10</div>
+        <div class="step-body">
+          <h3>Pause &amp; resume</h3>
+          <p>Pause a running session gracefully — in-flight agents finish their current task, then no new ones start. Resume picks up exactly where it stopped.</p>
+
+          <pre><code class="language-bash"># Pause (drain mode — active agents complete, no new ones start)
+claw-forge pause abc-123-def
+
+# Resume
+claw-forge resume abc-123-def</code></pre>
+
+          <div class="output-block">⏸  Project 'abc-123-def' paused.
+   In-flight agents will complete. No new agents will start.
+   Resume with: claw-forge resume abc-123-def</div>
+
+          <div class="callout tip">
+            <strong>💡 Pause while you review</strong>
+            Pause after Wave 1 completes, review the generated code, then resume. This is a great workflow when you want human checkpoints without using full YOLO mode.
+          </div>
+
+          <h4 style="margin-top:20px">Answer a stuck agent</h4>
+          <p>If an agent has a question it can't answer on its own (a missing env var, an ambiguous requirement), it sets the task to <code>needs_human</code> and waits. Use <code>claw-forge input</code> to unblock it:</p>
+
+          <pre><code class="language-bash">claw-forge input abc-123-def</code></pre>
+
+          <div class="output-block">🙋 1 pending question for 'abc-123-def':
+
+Task: Email reminders
+Q: What is the SendGrid API key env var name?
+Your answer: SENDGRID_API_KEY
+
+✅ Answer submitted — task moved to pending</div>
         </div>
       </div>
 
     </div><!-- /steps -->
 
-    <div style="text-align:center;padding:40px 0 0">
-      <p style="color:var(--text-muted);margin-bottom:20px">Ready to build something?</p>
-      <a href="https://github.com/clawinfra/claw-forge" class="btn btn-primary">Get claw-forge on GitHub →</a>
+    <!-- Next steps -->
+    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px;margin-top:48px">
+      <h3 style="margin-top:0">What's next?</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <div>
+          <strong>📖 Reference</strong>
+          <ul style="font-size:14px;margin-top:8px;line-height:2">
+            <li><a href="features.html">Full feature list</a></li>
+            <li><a href="https://github.com/clawinfra/claw-forge/blob/main/docs/sdk-api-guide.md" target="_blank">Claude Agent SDK API guide</a></li>
+            <li><a href="https://github.com/clawinfra/claw-forge/blob/main/ARCHITECTURE.md" target="_blank">Architecture deep-dive</a></li>
+            <li><a href="https://github.com/clawinfra/claw-forge/blob/main/claw-forge.yaml" target="_blank">Full config reference</a></li>
+          </ul>
+        </div>
+        <div>
+          <strong>⚡ Go deeper</strong>
+          <ul style="font-size:14px;margin-top:8px;line-height:2">
+            <li>Write a <a href="https://github.com/clawinfra/claw-forge/blob/main/claw_forge/plugins/base.py" target="_blank">custom plugin</a></li>
+            <li>Add a <a href="https://github.com/clawinfra/claw-forge/tree/main/skills" target="_blank">skill</a> for your tools</li>
+            <li>Use the <a href="https://github.com/clawinfra/claw-forge/blob/main/docs/sdk-api-guide.md#3-file-checkpointing--rewind" target="_blank">file rewind API</a> to undo bad refactors</li>
+            <li>Enable <a href="https://github.com/clawinfra/claw-forge/blob/main/docs/sdk-api-guide.md#12-thinkingconfig--adaptive-reasoning" target="_blank">deep thinking</a> for architecture tasks</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:48px 0 0">
+      <a href="https://github.com/clawinfra/claw-forge" class="btn btn-primary">Star on GitHub ⭐</a>
       &nbsp;&nbsp;
-      <a href="features.html" class="btn btn-secondary">See all features</a>
+      <a href="features.html" class="btn btn-secondary">See all features →</a>
     </div>
   </div>
 </section>
@@ -195,5 +710,14 @@ claw-forge resume my-session-id  # continues from where it stopped</code></pre>
 </footer>
 
 <script src="js/main.js"></script>
+<script>
+function switchTab(btn, id) {
+  const wrap = btn.closest('.tab-wrap');
+  wrap.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  wrap.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(id).classList.add('active');
+}
+</script>
 </body>
 </html>
