@@ -7,8 +7,9 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
-[![Tests](https://img.shields.io/badge/tests-427%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Tests](https://img.shields.io/badge/tests-584%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 
 ---
 
@@ -53,8 +54,13 @@ Features:
    Depends on: 1
 EOF
 
-# 4. Initialize (runs the initializer agent)
+# 4. Initialize (runs the initializer agent + scaffolds the project)
 claw-forge init my-api --spec app_spec.txt
+# Output:
+# ✅ Stack detected: Python / FastAPI / uv / pytest
+# ✅ .claude/commands/ scaffolded (7 commands copied)
+# ✅ CLAUDE.md generated (tailored to your stack)
+# ✅ 3 features created from spec
 
 # 5. Run agents
 claw-forge run my-api --concurrency 3
@@ -368,6 +374,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | Pause (drain) | `claw-forge pause my-app` |
 | Resume | `claw-forge resume my-app` |
 | Human input | `claw-forge input my-app "Here's the API key"` |
+| Project status | `claw-forge status` |
 | Batch features | `--batch-size 3` |
 | Specific features | `--batch-features 1,2,3` |
 | Pool health | `claw-forge pool-status` |
@@ -394,7 +401,7 @@ Live updates pushed over WebSocket: feature status changes, agent events, provid
 
 ## Claude Commands
 
-Six slash commands in `.claude/commands/` for use inside Claude Code:
+Seven slash commands in `.claude/commands/` for use inside Claude Code. These are automatically scaffolded into your project directory by `claw-forge init`:
 
 | Command | Purpose |
 |---|---|
@@ -404,6 +411,7 @@ Six slash commands in `.claude/commands/` for use inside Claude Code:
 | `/checkpoint` | Commit + DB snapshot + session summary |
 | `/review-pr` | Structured PR review with verdict |
 | `/pool-status` | Provider health and cost analysis |
+| `/claw-forge-status` | Project progress, phase bars, agent state, next action |
 
 Four agent definitions in `.claude/agents/`:
 
@@ -418,11 +426,40 @@ Four agent definitions in `.claude/agents/`:
 
 ## Pre-installed Skills (18)
 
+Skills are auto-injected into agent sessions via three layers:
+
+1. **LSP by file extension** — `detect_lsp_plugins()` scans the project directory and injects the right language server based on file types found (`.py` → pyright, `.ts` → typescript-lsp, `.go` → gopls, etc.)
+2. **Agent type** — `skills_for_agent()` injects role-appropriate skills (e.g. coding agents get `systematic-debug` + `verification-gate`, reviewers get `code-review` + `security-audit`)
+3. **Task keywords** — same function scans the task description for keywords (`"database"` → database skill, `"docker"` → docker skill, `"security"` → security-audit, etc.)
+
+All injection is controlled by `auto_inject_skills=True` on `run_agent()` / `auto_detect_lsp=True`.
+
 **LSP servers (6):** pyright · gopls · rust-analyzer · typescript-lsp · clangd · solidity-lsp
 
-**Process skills:** systematic-debug · verification-gate · parallel-dispatch · frontend-design · playwright-cli
+**Process skills (6):** systematic-debug · verification-gate · parallel-dispatch · test-driven · code-review · web-research
 
-**Integration skills:** web-research · git-workflow · api-client · docker · security-audit · performance · database
+**Integration skills (6):** git-workflow · api-client · docker · security-audit · performance · database
+
+---
+
+## Brownfield Projects
+
+claw-forge works on **existing codebases** — not just greenfield projects. The brownfield workflow analyzes your project, learns its conventions, and adds features or fixes bugs without breaking existing patterns.
+
+```bash
+# 1. Analyze your project (creates brownfield_manifest.json)
+claw-forge analyze
+
+# 2. Add a feature
+claw-forge add "Add rate limiting to all API endpoints"
+
+# 3. Fix a bug
+claw-forge fix "Login fails when email contains uppercase letters"
+```
+
+The analyzer detects your stack, parses git history for hot files, establishes a test baseline, and writes `brownfield_manifest.json`. Subsequent `add`/`fix` runs load this manifest to match your existing conventions.
+
+> **Status:** `analyze`, `add`, and `fix` commands are planned — see [`docs/brownfield.md`](docs/brownfield.md) for the full design.
 
 ---
 
@@ -479,6 +516,7 @@ uv run mypy claw_forge/
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, data flow, component details |
 | [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) | 20 Claude Agent SDK APIs with claw-forge examples |
 | [`docs/bmad-integration.md`](docs/bmad-integration.md) | Using claw-forge with BMAD Method — convert epics/stories to spec |
+| [`docs/brownfield.md`](docs/brownfield.md) | Brownfield mode — analyze existing codebases, add features, fix bugs |
 | [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
 | [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
 | [`website/features.html`](website/features.html) | Full feature list |

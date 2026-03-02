@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        CLI  (Typer)                               │
-│   run | init | pause | resume | input | pool-status | state      │
+│   run | init | status | pause | resume | input | pool-status | state │
 └─────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -416,13 +416,71 @@ Skills live in `skills/<name>/SKILL.md`. The agent reads them at runtime for con
 
 If a skill includes a `skill.yaml` with an `mcp` section, `load_skills_as_mcp()` can convert it to an `McpServerConfig` for tool-use access.
 
+Skills are bundled into the wheel via `force-include` in `pyproject.toml`, and also copied into the project directory on `claw-forge init` (via `claw_forge/scaffold.py`). At runtime, `claw_forge/lsp.py` resolves the skills path: packaged wheel first (`claw_forge/skills/`), falling back to the dev repo root (`skills/`).
+
+### Three-Layer Skill Injection
+
+`claw_forge/lsp.py` exposes two functions that together implement automatic skill injection:
+
+#### Layer 1: LSP by file extension — `detect_lsp_plugins(project_path)`
+
+Scans the project directory recursively for source files. Maps file extensions to LSP skill names:
+
+| Extensions | Skill |
+|---|---|
+| `.py`, `.pyi` | `pyright` |
+| `.ts`, `.tsx`, `.js`, `.jsx` | `typescript-lsp` |
+| `.go` | `gopls` |
+| `.rs` | `rust-analyzer` |
+| `.c`, `.cpp`, `.cc`, `.h`, `.hpp` | `clangd` |
+| `.sol` | `solidity-lsp` |
+
+Returns deduplicated `SdkPluginConfig` list — one entry per detected language.
+
+#### Layer 2 + 3: Agent type + task keywords — `skills_for_agent(agent_type, task_description)`
+
+Combines two signal sources:
+
+- **Agent type** (`AGENT_TYPE_SKILLS`): e.g. `coding` → `systematic-debug`, `verification-gate`, `test-driven`; `reviewing` → `code-review`, `security-audit`
+- **Task keywords** (`TASK_KEYWORD_SKILLS`): e.g. `"database"` → `database`; `"docker"` → `docker`; `"security"` → `security-audit`; `"api"` / `"rest"` → `api-client`
+
+Both layers are unified into a single deduplicated `SdkPluginConfig` list.
+
+#### Auto-injection on `run_agent()`
+
+Both functions are called automatically when `auto_inject_skills=True` (default) and `auto_detect_lsp=True` (default) are set on `run_agent()`. Skills are merged and passed to `ClaudeAgentOptions.plugins`.
+
 **Pre-installed (18 total):**
 
 | Category | Skills |
 |---|---|
 | LSP | pyright, gopls, rust-analyzer, typescript-lsp, clangd, solidity-lsp |
-| Process | systematic-debug, verification-gate, parallel-dispatch |
-| Integration | web-research, git-workflow, api-client, docker, security-audit, performance, database, frontend-design, playwright-cli |
+| Process | systematic-debug, verification-gate, parallel-dispatch, test-driven, code-review, web-research |
+| Integration | git-workflow, api-client, docker, security-audit, performance, database |
+
+---
+
+## Brownfield Mode
+
+Brownfield support enables claw-forge to work on **existing codebases**. It is designed as an analysis → manifest → action pipeline:
+
+```
+claw-forge analyze        # scan project → write brownfield_manifest.json
+claw-forge add <feature>  # read manifest → implement feature matching conventions
+claw-forge fix <bug>      # read manifest → RED-GREEN fix cycle
+```
+
+**`BrownfieldAnalyzer`** (planned — see `PLAN.md`):
+1. Detect stack (language, framework, package manager)
+2. Parse git log → identify hot files
+3. Read source → infer naming conventions, test patterns
+4. Run test suite → establish passing baseline
+5. Identify entry points and architecture layers
+6. Write `brownfield_manifest.json`
+
+The manifest is consumed by `add` and `fix` agents to ensure new code matches existing conventions and doesn't break the test baseline.
+
+> **Status:** `analyze`, `add`, and `fix` commands are planned. See [`docs/brownfield.md`](docs/brownfield.md) for the full design.
 
 ---
 
@@ -433,20 +491,36 @@ If a skill includes a `skill.yaml` with an `mcp` section, `load_skills_as_mcp()`
 | Language | Python 3.11+ | AI ecosystem, asyncio, type hints |
 | Agent runtime | claude-agent-sdk | Official SDK — tool loop, MCP, hooks, streaming |
 | Package manager | uv | Fast, isolated, single binary |
-| CLI | Typer | Type-safe, auto-docs, shell completion |
+| CLI | Typer + type-safe commands | Type-safe, auto-docs, shell completion |
 | HTTP client | httpx | Async, HTTP/2, clean API |
 | API framework | FastAPI | Async, auto-OpenAPI, WebSocket |
 | ORM | SQLAlchemy 2.0 | Async, type-safe |
 | Database | SQLite (default) / PostgreSQL | Zero-config local; scalable cloud |
 | Config | YAML + env var interpolation | Human-readable, 12-factor friendly |
 | UI | React 18 + Vite + Tailwind | Fast build, small bundle, no framework overhead |
-| Testing | pytest + pytest-asyncio | 427 tests, 90%+ coverage enforced in CI |
+| Testing | pytest + pytest-asyncio | 584 tests, 90%+ coverage enforced in CI |
+| Type checking | mypy | Clean — 0 errors across 54 files |
 
 ---
+
+## Key Source Files
+
+| File | Description |
+|---|---|
+| `claw_forge/cli.py` | Typer CLI — all commands: `run`, `init`, `status`, `pause`, `resume`, `input`, `pool-status`, `state`, `ui` |
+| `claw_forge/lsp.py` | 3-layer skill injection: `detect_lsp_plugins()` (file ext → LSP), `skills_for_agent()` (agent type + task keywords) |
+| `claw_forge/scaffold.py` | Project scaffolding — detects stack, generates `CLAUDE.md`, copies `.claude/commands/` on `claw-forge init` |
+| `claw_forge/commands/help_cmd.py` | `claw-forge status` command — shows project progress bars, phase state, active agents, next action |
+| `claw_forge/agent/` | Agent layer: `AgentSession`, runner, hooks, permissions, tools, thinking, output schemas |
+| `claw_forge/pool/` | Provider pool: router, circuit breaker, usage tracker, provider registry |
+| `claw_forge/mcp/sdk_server.py` | In-process MCP server — feature management tools |
+| `claw_forge/state/service.py` | FastAPI state service — REST + WebSocket + SSE |
+| `claw_forge/plugins/base.py` | Plugin protocol — entry-point-based agent type extensions |
 
 ## Further Reading
 
 - [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) — All 20 Claude Agent SDK APIs with claw-forge examples
+- [`docs/brownfield.md`](docs/brownfield.md) — Brownfield mode design: analyze → manifest → add/fix
 - [`website/features.html`](website/features.html) — Full feature list
 - [`website/tutorial.html`](website/tutorial.html) — End-to-end quickstart
 - [`claw-forge.yaml`](claw-forge.yaml) — Annotated configuration reference
