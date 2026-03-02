@@ -13,9 +13,9 @@ providers:
   # ── Local Ollama instance — zero-config for most setups ───────────────────
   local-ollama:
     type: ollama
-    base_url: "http://localhost:11434"
-    model: "llama3.2"
-    # api_key: optional, usually not needed for local Ollama
+    base_url: ${OLLAMA_BASE_URL}
+    model: ${OLLAMA_MODEL}
+    # api_key: ${OLLAMA_API_KEY}   # optional, usually not needed
     priority: 10
     cost_per_mtok_input: 0.0
     cost_per_mtok_output: 0.0
