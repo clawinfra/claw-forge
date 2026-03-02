@@ -93,6 +93,16 @@ def _http_post(url: str, json: dict | None = None) -> dict:
 
 
 @app.command()
+def status(
+    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
+) -> None:
+    """Show project progress, active agent state, and recommended next action."""
+    from claw_forge.commands.help_cmd import run_help
+
+    run_help(config_path=config)
+
+
+@app.command()
 def version() -> None:
     """Print version."""
     console.print(f"claw-forge {__version__}")
