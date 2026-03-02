@@ -3,212 +3,308 @@
 from __future__ import annotations
 
 import sys
+from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import httpx
-
-from claw_forge.config import ConfigError, load_config
+import yaml
 
 _BAR_WIDTH = 12
 _PHASE_MAX = 20
 _DEFAULT_PORT = 8888
+_TIMEOUT = 2.0
 
 
-# ── Pure helpers ──────────────────────────────────────────────────────────────
+def _load_config(config_path: str) -> dict[str, Any]:
+    """Load YAML config file, returning raw dict."""
+    path = Path(config_path)
+    if not path.exists():
+        print(f"Config not found: {path}")
+        sys.exit(1)
+    raw: dict[str, Any] = yaml.safe_load(path.read_text()) or {}
+    return raw
 
 
 def _progress_bar(done: int, total: int, width: int = _BAR_WIDTH) -> str:
-    """Return a ``width``-char progress bar using █ / ░."""
+    """Return a fixed-width progress bar using block chars."""
     if total == 0:
-        return "░" * width
+        return "\u2591" * width
     filled = round(width * done / total)
-    return "█" * filled + "░" * (width - filled)
+    filled = min(filled, width)
+    return "\u2588" * filled + "\u2591" * (width - filled)
 
 
 def _phase_emoji(done: int, total: int, failed: int) -> str:
-    """Return a phase status emoji + label based on counts."""
-    if failed:
-        return "❌ failed"
-    if total > 0 and done == total:
-        return "✅ complete"
+    """Pick the status emoji string for a phase row."""
+    if failed > 0:
+        return "\u274c failed"
+    if done == total and total > 0:
+        return "\u2705 complete"
     if done > 0:
-        return "🔨 building"
-    return "⏳ queued"
+        return "\U0001f528 building"
+    return "\u23f3 queued"
 
 
-def _format_runtime(seconds: int) -> str:
-    """Format a duration (seconds) to a human-readable string.
-
-    Negative → "0m 00s".  Hours → "Xh Ym".  Minutes → "Xm YYs".
-    """
+def _format_runtime(seconds: float) -> str:
+    """Format seconds into human-readable duration."""
     if seconds < 0:
         seconds = 0
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    if h:
-        return f"{h}h {m}m"
-    return f"{m}m {s:02d}s"
+    total_secs = int(seconds)
+    minutes = total_secs // 60
+    secs = total_secs % 60
+    if minutes >= 60:
+        hours = minutes // 60
+        mins = minutes % 60
+        return f"{hours}h {mins}m"
+    return f"{minutes}m {secs:02d}s"
 
 
-def _truncate(text: str, width: int) -> str:
-    """Return ``text`` padded to ``width``, or truncated with '…' if too long."""
-    if len(text) > width:
-        return text[: width - 1] + "…"
-    return text.ljust(width)
+def _truncate(text: str, max_len: int = _PHASE_MAX) -> str:
+    """Truncate text to max_len, pad with spaces."""
+    if len(text) > max_len:
+        return text[: max_len - 1] + "\u2026"
+    return text.ljust(max_len)
 
 
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
-
-
-def _fetch_features(port: int) -> list[dict[str, Any]] | None:
-    """Return features list, or None if the service is offline / errored."""
+def _get(url: str) -> httpx.Response | None:
+    """GET with timeout; returns None on connection error."""
     try:
-        resp = httpx.get(f"http://localhost:{port}/features", timeout=2)
-        if not resp.is_success:
-            return None
-        return resp.json()  # type: ignore[no-any-return]
-    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.TimeoutException):
+        return httpx.get(url, timeout=_TIMEOUT)
+    except (httpx.ConnectError, httpx.ConnectTimeout):
         return None
 
 
-def _fetch_agent_status(port: int) -> dict[str, Any]:
-    """Return agent status dict; empty dict (→ IDLE) on 404 or any error."""
-    try:
-        resp = httpx.get(f"http://localhost:{port}/agent/status", timeout=2)
-        if resp.status_code == 404:
-            return {}
-        if resp.is_success:
-            return resp.json()  # type: ignore[no-any-return]
-        return {}
-    except Exception:  # noqa: BLE001
-        return {}
+def _print_offline() -> None:
+    """Print the offline message."""
+    print(
+        "State service offline \u2014 "
+        "run `claw-forge serve` to start it"
+    )
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
-
-
-def run_help(config_path: str = "claw-forge.yaml") -> None:  # noqa: C901, PLR0912, PLR0915
+def run_help(  # noqa: C901, PLR0912, PLR0915
+    config_path: str = "claw-forge.yaml",
+) -> None:
     """Render the claw-forge project status card to stdout."""
-    # ── 1. Load config ──────────────────────────────────────────────────────
-    try:
-        cfg = load_config(config_path)
-    except ConfigError as exc:
-        print(f"❌ {exc}")
-        sys.exit(1)
+    cfg = _load_config(config_path)
+    port: int = cfg.get("port", _DEFAULT_PORT)
+    base = f"http://localhost:{port}"
 
-    port: int = int(cfg.get("port", _DEFAULT_PORT))
-
-    # ── 2. Fetch features ───────────────────────────────────────────────────
-    features = _fetch_features(port)
-    if features is None:
-        print("⚠️  State service offline — start it with `claw-forge serve`.")
+    resp = _get(f"{base}/features")
+    if resp is None or resp.status_code != 200:
+        _print_offline()
         return
 
-    # ── 3. Group by phase ───────────────────────────────────────────────────
-    phase_order: list[str] = []
-    phase_features: dict[str, list[dict[str, Any]]] = {}
-    for f in features:
-        raw_phase: str = f.get("phase") or ""
-        phase = raw_phase if raw_phase else "(no phase)"
-        if phase not in phase_features:
-            phase_features[phase] = []
-            phase_order.append(phase)
-        phase_features[phase].append(f)
+    features: list[dict[str, Any]] = resp.json()
 
-    # ── 4. Fetch agent status ───────────────────────────────────────────────
-    agent = _fetch_agent_status(port)
+    phases: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for feat in features:
+        phase_key = feat.get("phase") or ""
+        phases[phase_key].append(feat)
 
-    # ── 5. Render card ──────────────────────────────────────────────────────
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║  claw-forge · Project Status                         ║")
-    print("╚══════════════════════════════════════════════════════╝")
+    total_features = len(features)
+    total_done = sum(
+        1 for f in features if f.get("status") == "done"
+    )
+    total_failed = sum(
+        1 for f in features if f.get("status") == "failed"
+    )
+    total_queued = sum(
+        1 for f in features if f.get("status") == "queued"
+    )
+    phase_count = sum(1 for k in phases if k)
+
+    agent_resp = _get(f"{base}/agent/status")
+    agent: dict[str, Any] | None = None
+    if agent_resp is not None and agent_resp.status_code == 200:
+        agent = agent_resp.json()
+
+    # Header
+    print(
+        "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2557"
+    )
+    print(
+        "\u2551  claw-forge \u00b7 Project Status"
+        "                         \u2551"
+    )
+    print(
+        "\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
+        "\u255d"
+    )
     print()
 
-    project_name: str = cfg.get("project", "")
+    project_name = cfg.get("project", cfg.get("name", ""))
     if project_name:
-        print(f"📋 Project : {project_name}")
+        print(f"\U0001f4cb Project : {project_name}")
 
-    spec_file: str = cfg.get("spec", "") or ""
-    if spec_file:
-        n_features = len(features)
-        n_phases = len([p for p in phase_order if p != "(no phase)"])
-        print(f"📄 Spec    : {spec_file} ({n_features} features, {n_phases} phases)")
+    spec = cfg.get("spec")
+    if spec:
+        parts = f"{spec}"
+        if total_features > 0:
+            parts += (
+                f" ({total_features} features,"
+                f" {phase_count} phases)"
+            )
+        print(f"\U0001f4c4 Spec    : {parts}")
 
-    model: str = cfg.get("model", "")
+    model = cfg.get("model")
     if model:
-        print(f"🤖 Model   : {model}")
+        print(f"\U0001f916 Model   : {model}")
 
     budget_limit = cfg.get("budget")
-    budget_used = cfg.get("budget_used")
-    if budget_limit is not None and budget_used is not None:
-        print(f"💰 Budget  : ${float(budget_used):.2f} / ${float(budget_limit):.2f} used")
+    budget_used = cfg.get("budget_used", 0.0)
+    if budget_limit is not None:
+        print(
+            f"\U0001f4b0 Budget  : ${float(budget_used):.2f}"
+            f" / ${float(budget_limit):.2f} used"
+        )
 
-    # ── Progress ─────────────────────────────────────────────────────────────
     print()
     print("Progress")
-    print("────────")
+    print("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
-    if not features:
-        print("  No features loaded.")
-    else:
-        for phase in phase_order:
-            feats = phase_features[phase]
-            statuses = [f.get("status", "queued") for f in feats]
-            n_done = sum(1 for s in statuses if s in ("done", "completed"))
-            n_failed = sum(1 for s in statuses if s == "failed")
-            total = len(feats)
-            bar = _progress_bar(n_done, total)
-            icon = _phase_emoji(n_done, total, n_failed)
-            label = _truncate(phase, _PHASE_MAX)
-            print(f"  {label}  {bar}  {n_done}/{total}  {icon}")
+    sorted_phases = sorted(
+        phases.keys(), key=lambda k: (k == "", k),
+    )
 
-    # ── Agent ────────────────────────────────────────────────────────────────
-    agent_status: str = agent.get("status", "IDLE")
+    for phase_key in sorted_phases:
+        feats = phases[phase_key]
+        done = sum(
+            1 for f in feats if f.get("status") == "done"
+        )
+        failed = sum(
+            1 for f in feats if f.get("status") == "failed"
+        )
+        total = len(feats)
+        bar = _progress_bar(done, total)
+        emoji = _phase_emoji(done, total, failed)
+        label = phase_key if phase_key else "(no phase)"
+        label_str = _truncate(label)
+        count_str = f"{done}/{total}".rjust(7)
+        print(f"  {label_str} {bar} {count_str}  {emoji}")
+
     print()
     print("Agent")
-    print("─────")
-    print(f"  Status  : {agent_status}")
-    working: str = agent.get("feature", "")
-    if working:
-        print(f'  Working : "{working}"')
-    runtime_secs: int | None = agent.get("runtime_seconds")
-    if runtime_secs is not None:
-        print(f"  Runtime : {_format_runtime(int(runtime_secs))}")
+    print("\u2500\u2500\u2500\u2500\u2500")
 
-    # ── Next ─────────────────────────────────────────────────────────────────
+    if agent is not None:
+        status = agent.get("status", "IDLE").upper()
+        print(f"  Status  : {status}")
+        if status == "ACTIVE":
+            working = agent.get(
+                "feature", agent.get("working", ""),
+            )
+            if working:
+                print(f'  Working : "{working}"')
+            runtime = agent.get("runtime_seconds")
+            if runtime is not None:
+                print(
+                    "  Runtime : "
+                    f"{_format_runtime(float(runtime))}"
+                )
+    else:
+        print("  Status  : IDLE")
+
     print()
     print("Next")
-    print("────")
+    print("\u2500\u2500\u2500\u2500")
+    _print_next_action(
+        agent=agent,
+        total_features=total_features,
+        total_done=total_done,
+        total_failed=total_failed,
+        total_queued=total_queued,
+        phases=phases,
+    )
 
-    all_statuses = [f.get("status", "queued") for f in features]
-    total_failed = sum(1 for s in all_statuses if s == "failed")
-    total_done = sum(1 for s in all_statuses if s in ("done", "completed"))
-    total_queued = sum(1 for s in all_statuses if s in ("queued", "pending"))
-    total_building = sum(1 for s in all_statuses if s in ("building", "running"))
 
-    agent_active = agent_status.upper() == "ACTIVE"
+def _find_active_phase(
+    phases: dict[str, list[dict[str, Any]]],
+) -> tuple[str, int]:
+    """Find the in-progress phase and remaining count."""
+    sorted_keys = sorted(
+        phases.keys(), key=lambda k: (k == "", k),
+    )
+    for key in sorted_keys:
+        feats = phases[key]
+        done = sum(
+            1 for f in feats if f.get("status") == "done"
+        )
+        if 0 < done < len(feats):
+            remaining = len(feats) - done
+            label = key if key else "(no phase)"
+            return label, remaining
+    for key in sorted_keys:
+        feats = phases[key]
+        done = sum(
+            1 for f in feats if f.get("status") == "done"
+        )
+        if done < len(feats):
+            remaining = len(feats) - done
+            label = key if key else "(no phase)"
+            return label, remaining
+    return "", 0
 
-    if agent_active and (total_building or total_queued):
-        # find active phase
-        active_phase = ""
-        remaining = 0
-        for phase in phase_order:
-            feats = phase_features[phase]
-            ps = [f.get("status", "queued") for f in feats]
-            if any(s in ("building", "running") for s in ps):
-                active_phase = phase
-                remaining = sum(1 for s in ps if s not in ("done", "completed", "failed"))
-                break
-        if active_phase and active_phase != "(no phase)":
-            print(f"  {active_phase} in progress — {remaining} features remaining.")
-        else:
-            print(f"  {remaining} features in progress.")
-        print("  Run `claw-forge pause` to intervene or `claw-forge logs` to follow along.")
-    elif total_failed:
-        print(f"  {total_failed} features failed. Run `claw-forge retry --failed` to retry them.")
-    elif features and total_done == len(features):
-        print("  🎉 All features complete! Run `claw-forge build --summary` for a full report.")
-    elif not agent_active and total_queued:
-        print(f"  Agent idle with {total_queued} features queued. Run `claw-forge run` to start.")
+
+def _print_next_action(
+    *,
+    agent: dict[str, Any] | None,
+    total_features: int,
+    total_done: int,
+    total_failed: int,
+    total_queued: int,
+    phases: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Print the recommended next action."""
+    agent_status = "IDLE"
+    if agent is not None:
+        agent_status = agent.get("status", "IDLE").upper()
+
+    if agent_status == "ACTIVE":
+        phase_label, remaining = _find_active_phase(phases)
+        if phase_label:
+            print(
+                f"  {phase_label} in progress"
+                f" \u2014 {remaining} features remaining."
+            )
+        print(
+            "  Run `claw-forge pause` to intervene"
+            " or `claw-forge logs` to follow along."
+        )
+    elif total_failed > 0:
+        print(
+            f"  {total_failed} features failed."
+            " Run `claw-forge retry --failed`"
+            " to retry them."
+        )
+    elif total_done == total_features and total_features > 0:
+        print(
+            "  \U0001f389 All features complete!"
+            " Run `claw-forge build --summary`"
+            " for a full report."
+        )
+    elif total_queued > 0:
+        print(
+            f"  Agent idle with {total_queued}"
+            " features queued."
+            " Run `claw-forge run` to start."
+        )
     else:
-        print("  Nothing to do.")
+        print(
+            "  No features loaded."
+            " Run `claw-forge init` first."
+        )

@@ -35,7 +35,6 @@ dependencies = [
     "claude-agent-sdk>=0.1.44,<1",
     "openai>=1.50,<2",
     "sse-starlette>=2,<3",
-    "requests>=2.32.5",
 ]
 
 [project.optional-dependencies]

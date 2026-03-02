@@ -40,6 +40,7 @@ async def run_agent(
     use_sdk_mcp: bool = True,
     lsp_plugins: list[SdkPluginConfig] | None = None,
     auto_detect_lsp: bool = True,
+    auto_inject_skills: bool = True,
 ) -> AsyncIterator[claude_agent_sdk.Message]:
     """
     Run a Claude agent via claude-agent-sdk query().
@@ -78,6 +79,8 @@ async def run_agent(
             used as-is (auto-detection is skipped).
         auto_detect_lsp: If True and lsp_plugins is not provided, scan cwd for source
             files and auto-inject matching LSP skill plugins. Defaults to True.
+        auto_inject_skills: If True, automatically inject non-LSP skills based on
+            agent_type and keywords found in the prompt. Defaults to True.
     """
     env: dict[str, str] = {}
 
@@ -124,6 +127,18 @@ async def run_agent(
         resolved_lsp_plugins = detect_lsp_plugins(cwd)
     else:
         resolved_lsp_plugins = []
+
+    # Merge in agent-type + keyword-based skill plugins when requested
+    if auto_inject_skills:
+        from claw_forge.lsp import skills_for_agent
+        task_desc = prompt if isinstance(prompt, str) else ""
+        skill_plugins = skills_for_agent(agent_type, task_desc)
+        # Deduplicate by path — lsp_plugins take precedence (listed first)
+        existing_paths: set[str] = {p["path"] for p in resolved_lsp_plugins}
+        for sp in skill_plugins:
+            if sp["path"] not in existing_paths:
+                existing_paths.add(sp["path"])
+                resolved_lsp_plugins.append(sp)
 
     options = claude_agent_sdk.ClaudeAgentOptions(
         model=model,

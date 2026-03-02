@@ -165,6 +165,7 @@ class TestRunAgentLspIntegration:
                 "hello",
                 cwd=tmp_path,
                 auto_detect_lsp=False,
+                auto_inject_skills=False,
             ):
                 pass
 
@@ -221,6 +222,7 @@ class TestRunAgentLspSimple:
             async for _ in runner_module.run_agent(
                 "hello",
                 auto_detect_lsp=False,
+                auto_inject_skills=False,
             ):
                 pass
 
