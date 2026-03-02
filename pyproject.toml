@@ -67,6 +67,10 @@ Issues = "https://github.com/clawinfra/claw-forge/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["claw_forge"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "claw_forge/skills"
+".claude/commands" = "claw_forge/commands_scaffold"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

@@ -5,7 +5,11 @@ from pathlib import Path
 
 from claude_agent_sdk.types import SdkPluginConfig
 
-SKILLS_DIR = Path(__file__).parent.parent / "skills"
+# After `uv tool install`, skills are bundled at claw_forge/skills/ (force-include).
+# In dev mode, skills live at the repo root (parent.parent).
+_pkg_skills = Path(__file__).parent / "skills"
+_dev_skills = Path(__file__).parent.parent / "skills"
+SKILLS_DIR = _pkg_skills if _pkg_skills.exists() else _dev_skills
 
 # Map file extensions → skill directory names
 EXT_TO_SKILL: dict[str, str] = {

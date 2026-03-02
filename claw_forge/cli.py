@@ -183,6 +183,7 @@ def init(
     """Initialize a project — analyze spec and generate manifest."""
     from claw_forge.plugins.base import PluginContext
     from claw_forge.plugins.initializer import InitializerPlugin
+    from claw_forge.scaffold import scaffold_project
 
     plugin = InitializerPlugin()
     ctx = PluginContext(project_path=project, session_id="init", task_id="init")
@@ -244,6 +245,20 @@ def init(
                     console.print(f"  {k}: {v}")
     else:
         console.print(f"[red]Analysis failed: {result.output}[/red]")
+
+    scaffold = scaffold_project(Path(project))
+    if scaffold["claude_md_written"]:
+        console.print("✓ Generated CLAUDE.md (tailored to your stack)")
+    if scaffold["commands_copied"]:
+        console.print(
+            f"✓ Scaffolded {len(scaffold['commands_copied'])} slash commands → .claude/commands/"
+        )
+        for cmd in scaffold["commands_copied"]:
+            console.print(f"  • /{Path(cmd).stem}")
+    console.print(
+        f"✓ Stack detected: {scaffold['stack'].get('language', 'unknown')} / "
+        f"{scaffold['stack'].get('framework', 'unknown')}"
+    )
 
 
 @app.command()
