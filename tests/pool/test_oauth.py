@@ -286,3 +286,65 @@ class TestRegistryAnthropicOauth:
             return_value=None,
         ), pytest.raises(ValueError, match="no OAuth credentials"):
             create_provider(cfg)
+
+
+# ---------------------------------------------------------------------------
+# create_providers_from_configs — traceback-free oauth skip
+# ---------------------------------------------------------------------------
+
+
+class TestCreateProvidersFromConfigsOauthSkip:
+    """Regression: oauth provider with no credentials must NOT print a traceback."""
+
+    def test_oauth_provider_skipped_silently_no_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When claude-oauth has no credentials and no api_key, it must be
+        silently skipped (DEBUG log only) — no traceback, no WARNING on stderr."""
+        from claw_forge.pool.providers.base import ProviderConfig, ProviderType
+        from claw_forge.pool.providers.registry import create_providers_from_configs
+
+        oauth_cfg = ProviderConfig(
+            name="claude-oauth",
+            provider_type=ProviderType.ANTHROPIC_OAUTH,
+            priority=1,
+        )
+        # Patch out both standard and extra credential paths so no token is found
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            providers = create_providers_from_configs([oauth_cfg])
+
+        # Provider must be skipped (not instantiated)
+        assert len(providers) == 0
+
+        # No traceback must appear on stderr
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err
+        assert "ValueError" not in captured.err
+        assert "Failed to create provider" not in captured.err
+
+    def test_non_oauth_provider_config_error_warns_no_traceback(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A non-oauth provider that raises ValueError on init should log a
+        WARNING (no traceback) — not crash the whole pool."""
+        from unittest.mock import patch
+
+        from claw_forge.pool.providers.base import ProviderConfig, ProviderType
+        from claw_forge.pool.providers.registry import create_providers_from_configs
+
+        bad_cfg = ProviderConfig(
+            name="bad-provider",
+            provider_type=ProviderType.ANTHROPIC,
+            priority=1,
+            api_key="",  # empty key will cause ValueError in AnthropicProvider
+        )
+        with patch(
+            "claw_forge.pool.providers.registry.create_provider",
+            side_effect=ValueError("missing api_key"),
+        ):
+            providers = create_providers_from_configs([bad_cfg])
+
+        assert len(providers) == 0
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err
+        assert "ValueError" not in captured.err  # no raw exception output

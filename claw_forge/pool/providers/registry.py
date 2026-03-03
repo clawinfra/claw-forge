@@ -73,7 +73,12 @@ def create_provider(config: ProviderConfig) -> BaseProvider:
 
 
 def create_providers_from_configs(configs: list[ProviderConfig]) -> list[BaseProvider]:
-    """Create all providers, skipping ones that fail to initialize."""
+    """Create all providers, skipping ones that fail to initialize.
+
+    Configuration errors (missing credentials, invalid type) are logged at
+    WARNING level — no tracebacks printed to the user.  Unexpected errors are
+    logged at ERROR level so they can be investigated.
+    """
     providers: list[BaseProvider] = []
     for cfg in configs:
         if not cfg.enabled:
@@ -81,7 +86,21 @@ def create_providers_from_configs(configs: list[ProviderConfig]) -> list[BasePro
             continue
         try:
             providers.append(create_provider(cfg))
+        except (ValueError, KeyError) as exc:
+            # Config-level problem (missing key, bad type, no credentials).
+            # For oauth auto-detection providers: silently skip at DEBUG level
+            # (it's expected when the user hasn't run `claude login`).
+            # For all other providers: warn so the user knows a provider is
+            # unavailable without printing a full traceback.
+            if cfg.provider_type == ProviderType.ANTHROPIC_OAUTH:
+                logger.debug(
+                    "Skipping optional OAuth provider '%s' (no credentials): %s",
+                    cfg.name, exc,
+                )
+            else:
+                logger.warning("Skipping provider '%s': %s", cfg.name, exc)
         except Exception:
+            # Unexpected error — log with traceback for debugging.
             logger.exception("Failed to create provider '%s'", cfg.name)
     return providers
 
