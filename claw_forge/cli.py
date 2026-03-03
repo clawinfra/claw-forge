@@ -509,12 +509,15 @@ def run(
 
                         # ── Option 2: direct API call via provider pool ───────────────
                         # Used when claude CLI is not installed (API-only mode).
-                        # Note: this sends prompts to the LLM but does NOT write files.
-                        # Install the claude CLI for full autonomous file-writing agents.
+                        # BUG-11 fix: parse code blocks from LLM output and write
+                        # them to the project directory.
                         elif pool is not None:
                             system_prompt = (
                                 "You are an expert software engineer. "
                                 "Implement the requested feature precisely and completely. "
+                                "Return code in fenced blocks with the filename as the "
+                                "info string, e.g.:\n"
+                                "```path/to/file.py\n<code>\n```\n\n"
                                 f"Project directory: {project_path}"
                             )
                             response = await pool.execute(
@@ -524,6 +527,18 @@ def run(
                                 max_tokens=8192,
                             )
                             output = response.content or ""
+
+                            # Write any code blocks to disk (BUG-11)
+                            from claw_forge.output_parser import write_code_blocks
+
+                            written_files = write_code_blocks(
+                                output, project_path
+                            )
+                            if written_files:
+                                output += (
+                                    f"\n\n--- Files written ({len(written_files)}) ---\n"
+                                    + "\n".join(f"  • {f}" for f in written_files)
+                                )
                             success = True
 
                         # ── No executor available ─────────────────────────────────────

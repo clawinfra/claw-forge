@@ -16,6 +16,21 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Page, sync_playwright
 
+
+def _chromium_available() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True)
+            b.close()
+        return True
+    except Exception:
+        return False
+
+_SKIP_UI = not _chromium_available()
+_skip_reason = "playwright chromium not installed (run: playwright install chromium)"
+
+
 UI_DIST = Path(__file__).resolve().parent.parent / "claw_forge" / "ui_dist"
 
 
@@ -158,6 +173,7 @@ def desktop_page(browser_instance: Browser, server: str):
 # ── Test: Responsive layout at 375px ──────────────────────────────────────
 
 
+@pytest.mark.skipif(_SKIP_UI, reason=_skip_reason)
 class TestResponsiveLayout:
     """Tests for responsive/stacked column view at <640px."""
 
@@ -200,6 +216,7 @@ class TestResponsiveLayout:
 # ── Test: FAB visibility ──────────────────────────────────────────────────
 
 
+@pytest.mark.skipif(_SKIP_UI, reason=_skip_reason)
 class TestFAB:
     """Tests for the Floating Action Button on mobile."""
 
@@ -234,6 +251,7 @@ class TestFAB:
 # ── Test: Stacked column view ─────────────────────────────────────────────
 
 
+@pytest.mark.skipif(_SKIP_UI, reason=_skip_reason)
 class TestStackedView:
     """Tests for stacked/single column view at <640px."""
 
@@ -271,6 +289,7 @@ class TestStackedView:
 # ── Test: Feature cards have touch attributes ─────────────────────────────
 
 
+@pytest.mark.skipif(_SKIP_UI, reason=_skip_reason)
 class TestTouchAttributes:
     """Tests for touch-related CSS/attributes on cards."""
 
