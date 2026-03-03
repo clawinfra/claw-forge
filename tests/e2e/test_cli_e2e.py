@@ -6,6 +6,7 @@ All tests are self-contained and clean up after themselves.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 import tempfile
@@ -220,6 +221,119 @@ class TestVersionCommand:
 
 
 class TestRunCommand:
+    def test_run_help_shows_dry_run(self) -> None:
+        """claw-forge run --help shows --dry-run flag."""
+        result = runner.invoke(app, ["run", "--help"])
+        assert result.exit_code == 0
+        assert "--dry-run" in result.output
+
+    def test_run_with_no_db_exits_zero_with_message(self) -> None:
+        """claw-forge run with no DB (no plan yet) exits 0 with helpful message."""
+        with tempfile.TemporaryDirectory(prefix="e2e-run-nodb-") as tmp:
+            result = runner.invoke(app, ["run", "--project", tmp])
+            assert result.exit_code == 0
+            assert "No pending tasks" in result.output or "plan" in result.output.lower()
+
+    def test_run_dry_run_with_prepopulated_db(self) -> None:
+        """claw-forge run --dry-run with a pre-populated DB prints tasks and exits 0."""
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from claw_forge.state.models import Base, Task
+        from claw_forge.state.models import Session as DbSession
+
+        with tempfile.TemporaryDirectory(prefix="e2e-run-dryrun-") as tmp:
+            project_path = Path(tmp)
+            claw_forge_dir = project_path / ".claw-forge"
+            claw_forge_dir.mkdir(parents=True, exist_ok=True)
+            db_path = claw_forge_dir / "state.db"
+            db_url = f"sqlite+aiosqlite:///{db_path}"
+
+            engine = create_async_engine(db_url, echo=False)
+            async_session_maker = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+
+            async def populate_db_and_check() -> tuple[bool, str]:
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+
+                async with async_session_maker() as session:
+                    import uuid
+
+                    # Create a session
+                    db_session = DbSession(
+                        id=str(uuid.uuid4()),
+                        project_path=str(project_path),
+                        status="pending",
+                    )
+                    session.add(db_session)
+                    await session.commit()
+                    await session.refresh(db_session)
+
+                    # Create two tasks
+                    task1 = Task(
+                        id=str(uuid.uuid4()),
+                        session_id=db_session.id,
+                        plugin_name="coding",
+                        description="Implement feature A",
+                        status="pending",
+                        priority=1,
+                        depends_on=[],
+                    )
+                    task2 = Task(
+                        id=str(uuid.uuid4()),
+                        session_id=db_session.id,
+                        plugin_name="coding",
+                        description="Implement feature B",
+                        status="pending",
+                        priority=1,
+                        depends_on=[task1.id],  # task2 depends on task1
+                    )
+                    session.add(task1)
+                    session.add(task2)
+                    await session.commit()
+
+                await engine.dispose()
+
+                # Create minimal config file
+                config_path = project_path / "claw-forge.yaml"
+                config_path.write_text("""
+model_aliases:
+  sonnet: claude-sonnet-4-20250514
+
+pool:
+  strategy: priority
+  max_retries: 3
+  failure_threshold: 5
+  recovery_timeout: 60
+
+providers:
+  test-provider:
+    type: anthropic_oauth
+    priority: 1
+
+agent:
+  default_model: claude-sonnet-4-20250514
+  max_tokens: 8192
+  max_concurrent_agents: 5
+""")
+
+                # Run dry-run
+                result = runner.invoke(
+                    app, ["run", "--project", tmp, "--dry-run", "--config", str(config_path)]
+                )
+                return result.exit_code == 0, result.output
+
+            exit_code, output = asyncio.run(populate_db_and_check())
+            if not exit_code:
+                print(f"Exit code: {exit_code}")
+                print(f"Output length: {len(output)}")
+                print(f"Output preview: {output[:500]}")
+                if "Traceback" in output:
+                    print("Found traceback in output!")
+            assert exit_code, f"Command failed. Output: {output}"
+            assert "Execution plan" in output or "wave" in output.lower()
+
     def test_run_help_shows_config_option(self) -> None:
         result = runner.invoke(app, ["run", "--help"])
         assert result.exit_code == 0
