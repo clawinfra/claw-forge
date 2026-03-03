@@ -22,14 +22,14 @@ Usage::
 """
 from __future__ import annotations
 
-try:
+import contextlib
+
+with contextlib.suppress(ImportError):
     from claude_agent_sdk import (
         ThinkingConfigAdaptive,
         ThinkingConfigDisabled,
         ThinkingConfigEnabled,
     )
-except ImportError:  # pragma: no cover
-    pass
 
 # ThinkingConfig types are TypedDicts (dicts), constructed via dict literal syntax.
 
