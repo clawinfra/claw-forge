@@ -7,10 +7,9 @@ BUG-12: Rate-limit retry has no backoff (exponential backoff with jitter)
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -45,7 +44,7 @@ class TestBug10EventLoopCleanup:
         """AgentStateService supports async with for auto-cleanup."""
         from claw_forge.state.service import AgentStateService
 
-        async with AgentStateService("sqlite+aiosqlite:///:memory:") as svc:
+        async with AgentStateService("sqlite+aiosqlite:///:memory:") as svc:  # noqa: SIM117
             # DB should be initialized
             async with svc._engine.begin() as conn:
                 result = await conn.execute(
@@ -239,8 +238,6 @@ class TestBug12RateLimitBackoff:
 
         pool._providers[0].execute = mock_execute  # type: ignore[attr-defined]
 
-        original_sleep = asyncio.sleep
-
         async def tracking_sleep(duration: float) -> None:
             sleep_durations.append(duration)
             # Don't actually sleep in tests
@@ -338,11 +335,13 @@ class TestBug12RateLimitBackoff:
         async def tracking_sleep(duration: float) -> None:
             sleep_durations.append(duration)
 
-        with patch("claw_forge.pool.manager.asyncio.sleep", side_effect=tracking_sleep):
-            with pytest.raises(ProviderPoolExhausted):
-                await pool.execute(
-                    model="test", messages=[{"role": "user", "content": "hi"}]
-                )
+        with (
+            patch("claw_forge.pool.manager.asyncio.sleep", side_effect=tracking_sleep),
+            pytest.raises(ProviderPoolExhausted),
+        ):
+            await pool.execute(
+                model="test", messages=[{"role": "user", "content": "hi"}]
+            )
 
         # All sleep durations should be capped at backoff_max (5.0) + jitter (up to 2.5)
         for duration in sleep_durations:
@@ -382,11 +381,13 @@ class TestBug12RateLimitBackoff:
             sleep_calls += 1
             assert duration > 0, "Backoff duration must be positive"
 
-        with patch("claw_forge.pool.manager.asyncio.sleep", side_effect=counting_sleep):
-            with pytest.raises(ProviderPoolExhausted):
-                await pool.execute(
-                    model="test", messages=[{"role": "user", "content": "hi"}]
-                )
+        with (
+            patch("claw_forge.pool.manager.asyncio.sleep", side_effect=counting_sleep),
+            pytest.raises(ProviderPoolExhausted),
+        ):
+            await pool.execute(
+                model="test", messages=[{"role": "user", "content": "hi"}]
+            )
 
         # Every rate-limit error should have triggered a sleep
         assert sleep_calls > 0, "Rate-limit errors must trigger backoff sleep"
