@@ -418,22 +418,28 @@ def init(
         for cmd in scaffold["commands_copied"]:
             console.print(f"  • /{Path(cmd).stem}")
 
+    if scaffold["spec_example_written"]:
+        console.print("✓ Created app_spec.example.xml  (reference format for your spec)")
+
     # Guide user to next step
     spec_file = project_path / "app_spec.txt"
     xml_spec_file = project_path / "additions_spec.xml"
     if not spec_file.exists() and not xml_spec_file.exists():
         console.print(
             "\n[bold cyan]Next step:[/bold cyan] create your project spec.\n"
-            "  Open Claude Code in this directory and run:\n\n"
-            "    [bold]/create-spec[/bold]\n\n"
-            "  Claude will walk you through your project and write [bold]app_spec.txt[/bold].\n"
-            "  Then run: [bold]claw-forge plan --spec app_spec.txt[/bold]"
+            "  Option A — use the Claude slash command:\n"
+            "    Open Claude Code here and run [bold]/create-spec[/bold]\n\n"
+            "  Option B — paste your PRD into Claude with this prompt:\n"
+            '    "Convert this PRD to claw-forge XML spec format.\n'
+            "     Use app_spec.example.xml in this directory as the template.\n"
+            '     Write the result to app_spec.txt."\n\n'
+            "  Then run: [bold]claw-forge plan app_spec.txt[/bold]"
         )
     else:
         found = spec_file if spec_file.exists() else xml_spec_file
         console.print(
             f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
-            f"  Run: [bold]claw-forge plan --spec {found.name}[/bold]"
+            f"  Run: [bold]claw-forge plan {found.name}[/bold]"
         )
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 COMMANDS_SCAFFOLD_DIR = Path(__file__).parent / "commands_scaffold"
+SPEC_TEMPLATE = Path(__file__).parent / "spec" / "app_spec.template.xml"
 
 # ---------------------------------------------------------------------------
 # Stack detection
@@ -253,9 +254,10 @@ def scaffold_project(project_path: Path) -> dict[str, Any]:
     """Run full scaffold: generate CLAUDE.md, ensure .claude/, copy commands.
 
     Returns dict:
-      claude_md_written: bool   — True if CLAUDE.md was created
-      dot_claude_created: bool  — True if .claude/ was newly created
+      claude_md_written: bool     — True if CLAUDE.md was created
+      dot_claude_created: bool    — True if .claude/ was newly created
       commands_copied: list[str]
+      spec_example_written: bool  — True if app_spec.example.xml was created
       stack: dict
     """
     stack = detect_stack(project_path)
@@ -269,9 +271,17 @@ def scaffold_project(project_path: Path) -> dict[str, Any]:
     dot_claude_created = scaffold_dot_claude(project_path)
     commands_copied = scaffold_commands(project_path)
 
+    # Copy spec template so users have a concrete XML example to reference
+    spec_example_path = project_path / "app_spec.example.xml"
+    spec_example_written = False
+    if not spec_example_path.exists() and SPEC_TEMPLATE.exists():
+        shutil.copy2(SPEC_TEMPLATE, spec_example_path)
+        spec_example_written = True
+
     return {
         "claude_md_written": claude_md_written,
         "dot_claude_created": dot_claude_created,
         "commands_copied": commands_copied,
+        "spec_example_written": spec_example_written,
         "stack": stack,
     }

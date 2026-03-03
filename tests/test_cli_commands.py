@@ -125,6 +125,7 @@ def test_init_scaffolds_project(tmp_path: Path) -> None:
     mock_scaffold = {
         "claude_md_written": True,
         "dot_claude_created": True,
+        "spec_example_written": True,
         "commands_copied": [".claude/commands/create-spec.md"],
         "stack": {"language": "python", "framework": "unknown"},
     }
@@ -141,6 +142,7 @@ def test_init_shows_next_step_hint(tmp_path: Path) -> None:
     mock_scaffold = {
         "claude_md_written": False,
         "dot_claude_created": False,
+        "spec_example_written": False,
         "commands_copied": [],
         "stack": {"language": "unknown", "framework": "unknown"},
     }

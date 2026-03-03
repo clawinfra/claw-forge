@@ -212,8 +212,25 @@ def test_scaffold_commands_copies_into_correct_subdir(tmp_path: Path) -> None:
 def test_scaffold_project_returns_correct_keys(tmp_path: Path) -> None:
     result = scaffold_project(tmp_path)
     assert "claude_md_written" in result
+    assert "dot_claude_created" in result
     assert "commands_copied" in result
+    assert "spec_example_written" in result
     assert "stack" in result
+
+
+def test_scaffold_project_creates_spec_example(tmp_path: Path) -> None:
+    result = scaffold_project(tmp_path)
+    assert result["spec_example_written"] is True
+    assert (tmp_path / "app_spec.example.xml").exists()
+    content = (tmp_path / "app_spec.example.xml").read_text()
+    assert "<project_specification>" in content
+    assert "<core_features>" in content
+
+
+def test_scaffold_project_spec_example_idempotent(tmp_path: Path) -> None:
+    scaffold_project(tmp_path)
+    result = scaffold_project(tmp_path)
+    assert result["spec_example_written"] is False
 
 
 def test_scaffold_project_writes_claude_md(tmp_path: Path) -> None:

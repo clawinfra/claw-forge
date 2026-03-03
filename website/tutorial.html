@@ -434,11 +434,14 @@ Which AI providers do you have access to? (space-separated)
 
 Next: claw-forge plan app_spec.txt --project task-manager-api</div>
 
-          <h4 style="margin-top:28px">Option C — From an existing document</h4>
-          <p>If you already have a PRD, a Notion export, or a detailed README, paste its contents into Claude and ask:</p>
-          <div class="callout info" style="font-family:monospace;font-size:13px">
-            "Convert this product requirements document into a claw-forge <code>app_spec.txt</code>. Break each requirement into a concrete feature with acceptance criteria and dependencies."
-          </div>
+          <h4 style="margin-top:28px">Option C — Convert an existing PRD</h4>
+          <p>If you already have a PRD, Notion export, or detailed README, <code>claw-forge init</code> copies <code>app_spec.example.xml</code> into your project so Claude knows the exact format. Paste your PRD into Claude and use this prompt:</p>
+          <div class="callout info" style="font-family:monospace;font-size:13px;white-space:pre-wrap">Convert this PRD to claw-forge XML spec format.
+Use <strong>app_spec.example.xml</strong> in this directory as the schema reference.
+Write the result to <strong>app_spec.txt</strong>.
+Break each requirement into a testable bullet: "User can...", "System returns...", "API validates..."
+Aim for 100-300 bullets total.</div>
+          <p style="margin-top:10px;font-size:14px">Because <code>app_spec.example.xml</code> is already in the project directory, Claude Code reads it automatically and produces valid XML — no guessing the format.</p>
         </div>
       </div>
 
