@@ -206,8 +206,18 @@ class ProviderPoolManager:
                     cb.record_failure()
                     self._tracker.record_error(provider.name)
                     errors.append((provider.name, e))
-                    if not e.retryable:
-                        continue
+                    if e.retryable:
+                        # Exponential backoff with jitter for retryable errors
+                        base_wait = min(
+                            self._backoff_base * (2 ** attempt), self._backoff_max
+                        )
+                        jitter = random.uniform(0, 1)  # noqa: S311
+                        wait = base_wait + jitter
+                        logger.info(
+                            "Retryable error backoff on %s: %.1fs (attempt %d)",
+                            provider.name, wait, attempt,
+                        )
+                        await asyncio.sleep(wait)
                     continue
 
                 except Exception as e:

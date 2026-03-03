@@ -2,10 +2,58 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 from claw_forge.agent import collect_result
 from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
+
+logger = logging.getLogger(__name__)
+
+# Regex to extract fenced code blocks with a filename or language hint.
+# Matches:
+#   ```path/to/file.ext\n<code>\n```
+#   ```lang\n<code>\n```
+_CODE_BLOCK_RE = re.compile(
+    r"```(\S+)\n(.*?)```",
+    re.DOTALL,
+)
+
+# Heuristic: if the first line (the "lang" part) looks like a file path, treat
+# it as the target filename.  Otherwise it's just a language tag and we skip.
+_FILE_PATH_RE = re.compile(r"^[\w./-]+\.\w{1,10}$")
+
+
+def extract_code_blocks(text: str) -> list[tuple[str, str]]:
+    """Parse fenced code blocks and return ``(filename, content)`` pairs.
+
+    Only blocks whose tag looks like a file path are returned.  Pure language
+    tags (e.g. ``python``, ``js``) are ignored because we cannot determine a
+    target file name from them alone.
+    """
+    results: list[tuple[str, str]] = []
+    for m in _CODE_BLOCK_RE.finditer(text):
+        tag = m.group(1).strip()
+        code = m.group(2)
+        if _FILE_PATH_RE.match(tag):
+            results.append((tag, code))
+    return results
+
+
+def write_code_blocks(project_path: Path, text: str) -> list[str]:
+    """Extract fenced code blocks from *text* and write them under *project_path*.
+
+    Returns the list of relative file paths that were written.
+    """
+    written: list[str] = []
+    for filename, content in extract_code_blocks(text):
+        target = project_path / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        written.append(filename)
+        logger.info("Wrote code block to %s", target)
+    return written
 
 
 class CodingPlugin(BasePlugin):
@@ -65,13 +113,25 @@ class CodingPlugin(BasePlugin):
 
     async def execute(self, context: PluginContext) -> PluginResult:
         prompt = self._build_prompt(context)
+        project_path = Path(context.project_path)
         result = await collect_result(
             prompt,
-            cwd=Path(context.project_path),
+            cwd=project_path,
             allowed_tools=["Read", "Write", "Edit", "Bash"],
         )
+
+        # API-only mode: the LLM may return code in fenced blocks without
+        # using tool calls to write files.  Parse and materialise them.
+        written_files: list[str] = []
+        if result:
+            written_files = write_code_blocks(project_path, result)
+
         return PluginResult(
             success=True,
             output=result or "Coding task completed",
-            metadata={"plugin": self.name, "task_id": context.task_id},
+            metadata={
+                "plugin": self.name,
+                "task_id": context.task_id,
+                "written_files": written_files,
+            },
         )

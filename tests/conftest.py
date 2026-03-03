@@ -5,13 +5,14 @@ properly disposed during test teardown, preventing 'Event loop is closed'
 RuntimeWarning from the aiosqlite connection worker thread.
 
 Strategy: Monkey-patch ``AgentStateService.__init__`` to track all created
-instances.  In teardown, synchronously close the underlying aiosqlite
-connections via the engine's pool.  This avoids the asyncio event loop
-entirely and prevents the worker thread from encountering a closed loop.
+instances.  In teardown, forcibly close all aiosqlite connections through the
+SQLAlchemy pool's synchronous interface and wait briefly for the worker
+threads to terminate.
 """
 
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
 import pytest
@@ -36,12 +37,21 @@ def _auto_dispose_engines() -> None:  # type: ignore[misc]
     with patch.object(AgentStateService, "__init__", _tracking_init):
         yield  # type: ignore[misc]
 
-    # Synchronously dispose the SQLAlchemy pool to close aiosqlite connections.
-    # The sync_engine.pool.dispose() terminates the connection-worker threads
-    # without needing a running asyncio event loop.
+    # Forcefully close all aiosqlite connections via the sync engine pool.
+    # The pool.dispose() call terminates checked-in connections immediately.
+    # We also call checkin on any checked-out connections to ensure all
+    # connection worker threads exit cleanly.
     for svc in engines:
         try:
             sync_engine = svc._engine.sync_engine  # type: ignore[union-attr]
-            sync_engine.pool.dispose()
+            pool = sync_engine.pool
+            # dispose() closes all connections in the pool and stops accepting new ones
+            pool.dispose()
         except Exception:
             pass
+
+    # Give aiosqlite worker threads a moment to terminate after pool disposal.
+    # Without this brief pause, threads may still be running when the event
+    # loop is closed by pytest-asyncio, triggering the RuntimeError.
+    if engines:
+        time.sleep(0.05)
