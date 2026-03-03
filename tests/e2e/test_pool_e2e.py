@@ -27,7 +27,7 @@ from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 
 def _load_env() -> None:
     """Load .env file into os.environ if vars not already set."""
-    env_file = Path("/tmp/claw-forge/.env")
+    env_file = Path(__file__).parent.parent.parent / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()

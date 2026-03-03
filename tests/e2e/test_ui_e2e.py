@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-UI_DIR = Path("/tmp/claw-forge/ui")
+UI_DIR = Path(__file__).parent.parent.parent / "ui"
 SRC_DIR = UI_DIR / "src"
 
 
