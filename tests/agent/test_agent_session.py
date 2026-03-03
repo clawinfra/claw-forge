@@ -21,6 +21,7 @@ def _make_options(**kwargs) -> ClaudeAgentOptions:
 def _make_user_message(uuid_val: str) -> claude_agent_sdk.UserMessage:
     msg = MagicMock(spec=claude_agent_sdk.UserMessage)
     msg.uuid = uuid_val
+    msg.__class__ = type("UserMessage", (), {})
     return msg
 
 
@@ -29,12 +30,14 @@ def _make_assistant_message(text: str = "hello") -> claude_agent_sdk.AssistantMe
     block.text = text
     msg = MagicMock(spec=claude_agent_sdk.AssistantMessage)
     msg.content = [block]
+    msg.__class__ = type("AssistantMessage", (), {})
     return msg
 
 
 def _make_result_message(result: str = "done") -> claude_agent_sdk.ResultMessage:
     msg = MagicMock(spec=claude_agent_sdk.ResultMessage)
     msg.result = result
+    msg.__class__ = type("ResultMessage", (), {})
     return msg
 
 

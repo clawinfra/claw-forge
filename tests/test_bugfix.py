@@ -356,7 +356,7 @@ async def test_execute_calls_run_agent(tmp_path: Path) -> None:
     )
 
     mock_message = MagicMock()
-    mock_message.__class__.__name__ = "ResultMessage"
+    mock_message.__class__ = type("ResultMessage", (), {})
 
     async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
         yield mock_message

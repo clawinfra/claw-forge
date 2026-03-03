@@ -68,8 +68,8 @@ class AgentSession:
         assert self._client is not None, "AgentSession not connected — use async with"
         await self._client.query(prompt)
         async for msg in self._client.receive_response():
-            if isinstance(msg, claude_agent_sdk.UserMessage) and msg.uuid:
-                self._checkpoints.append(msg.uuid)
+            if msg.__class__.__name__ == "UserMessage" and msg.uuid:  # type: ignore[union-attr]
+                self._checkpoints.append(msg.uuid)  # type: ignore[union-attr]
             yield msg
 
     async def follow_up(self, message: str) -> AsyncIterator[claude_agent_sdk.Message]:

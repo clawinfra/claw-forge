@@ -89,8 +89,6 @@ class BugFixPlugin(BasePlugin):
         files_modified: list[str] = []
 
         try:
-            import claude_agent_sdk
-
             async for message in run_agent(
                 prompt,
                 cwd=project,
@@ -100,12 +98,13 @@ class BugFixPlugin(BasePlugin):
                 thinking=thinking,
                 permission_mode="default",
             ):
-                if isinstance(message, claude_agent_sdk.AssistantMessage):
-                    for block in message.content:
+                msg_type = message.__class__.__name__
+                if msg_type == "AssistantMessage":
+                    for block in message.content:  # type: ignore[union-attr]
                         if hasattr(block, "text"):
                             output_parts.append(block.text)
                 elif (
-                    isinstance(message, claude_agent_sdk.ResultMessage)
+                    msg_type == "ResultMessage"
                     and hasattr(message, "files_modified")
                     and message.files_modified
                 ):

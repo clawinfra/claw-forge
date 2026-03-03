@@ -19,6 +19,7 @@ def _make_assistant_message(text: str) -> claude_agent_sdk.AssistantMessage:
     block.text = text
     msg = MagicMock(spec=claude_agent_sdk.AssistantMessage)
     msg.content = [block]
+    msg.__class__ = type("AssistantMessage", (), {})
     return msg
 
 
@@ -26,6 +27,7 @@ def _make_result_message(result: str) -> claude_agent_sdk.ResultMessage:
     msg = MagicMock(spec=claude_agent_sdk.ResultMessage)
     msg.result = result
     msg.total_cost_usd = 0.001
+    msg.__class__ = type("ResultMessage", (), {})
     return msg
 
 

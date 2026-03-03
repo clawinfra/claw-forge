@@ -40,8 +40,16 @@ _sdk_mock.McpSdkServerConfig = MagicMock
 _sdk_mock.create_sdk_mcp_server = _mock_create_sdk
 
 _sdk_types_mock = MagicMock()
-sys.modules.setdefault("claude_agent_sdk", _sdk_mock)
-sys.modules.setdefault("claude_agent_sdk.types", _sdk_types_mock)
+sys.modules["claude_agent_sdk"] = _sdk_mock
+sys.modules["claude_agent_sdk.types"] = _sdk_types_mock
+
+# Force reimport to pick up our custom mock (not a stale MagicMock from
+# another test module that may have imported first).
+import importlib  # noqa: E402
+
+import claw_forge.mcp.sdk_server as _sdk_server_mod  # noqa: E402
+
+importlib.reload(_sdk_server_mod)
 
 from claw_forge.mcp.sdk_server import (  # noqa: E402
     _get_engine_for_dir,

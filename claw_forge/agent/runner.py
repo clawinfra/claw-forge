@@ -176,8 +176,8 @@ async def collect_result(
     """Run agent and return the final text result."""
     result_text = ""
     async for message in run_agent(prompt, max_turns=max_turns, **kwargs):
-        if isinstance(message, claude_agent_sdk.ResultMessage):
-            result_text = message.result or ""
+        if message.__class__.__name__ == "ResultMessage":
+            result_text = message.result or ""  # type: ignore[union-attr]
     return result_text
 
 
@@ -219,8 +219,8 @@ async def collect_structured_result(
     async for message in run_agent(
         prompt, output_format=output_format, max_turns=max_turns, **kwargs
     ):
-        if isinstance(message, claude_agent_sdk.ResultMessage):
-            result_text = message.result or ""
+        if message.__class__.__name__ == "ResultMessage":
+            result_text = message.result or ""  # type: ignore[union-attr]
 
     if not result_text:
         return None
