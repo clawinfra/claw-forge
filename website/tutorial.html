@@ -432,7 +432,7 @@ Which AI providers do you have access to? (space-separated)
 ✅ Written: claw-forge.yaml
 ✅ Written: .env.example
 
-Next: claw-forge init task-manager-api --spec app_spec.txt</div>
+Next: claw-forge plan app_spec.txt --project task-manager-api</div>
 
           <h4 style="margin-top:28px">Option C — From an existing document</h4>
           <p>If you already have a PRD, a Notion export, or a detailed README, paste its contents into Claude and ask:</p>
@@ -447,9 +447,9 @@ Next: claw-forge init task-manager-api --spec app_spec.txt</div>
         <div class="step-num">6</div>
         <div class="step-body">
           <h3>Initialize with your spec</h3>
-          <p>Now run <code>claw-forge init --spec app_spec.txt</code>. The initializer agent reads your spec, analyzes the project directory, and creates a dependency-ordered task graph in the state database.</p>
+          <p>Now run <code>claw-forge plan app_spec.txt</code>. The initializer agent reads your spec, analyzes the project directory, and creates a dependency-ordered task graph in the state database.</p>
 
-          <pre><code class="language-bash">claw-forge init task-manager-api --spec app_spec.txt</code></pre>
+          <pre><code class="language-bash">claw-forge plan app_spec.txt --project task-manager-api</code></pre>
 
           <div class="output-block">🔍 Running initializer agent…
    Reading spec: app_spec.txt
@@ -624,7 +624,7 @@ Resuming dispatcher…</div>
           <p>Add new entries to the bottom of your spec file and run <code>init</code> again. Only new features (those not already in the DB) will be created.</p>
 
           <pre><code class="language-bash"># Append to app_spec.txt, then:
-claw-forge init task-manager-api --spec app_spec.txt</code></pre>
+claw-forge plan app_spec.txt --project task-manager-api</code></pre>
         </div>
       </div>
 
@@ -714,7 +714,7 @@ Your answer: SENDGRID_API_KEY
 
         <div id="wf-greenfield" class="tab-content active">
           <h4>Greenfield — Build a new app from scratch</h4>
-          <pre><code>claw-forge init → /create-spec → claw-forge init --spec app_spec.txt → claw-forge run → /check-code → /checkpoint → /review-pr</code></pre>
+          <pre><code>claw-forge init → /create-spec → claw-forge plan app_spec.txt → claw-forge run → /check-code → /checkpoint → /review-pr</code></pre>
           <p><strong>Example:</strong> Building "TaskFlow API" (FastAPI + SQLite)</p>
           <pre><code class="language-bash"># 1. Scaffold project
 mkdir taskflow-api && cd taskflow-api && git init
@@ -726,7 +726,7 @@ claw-forge init
 #    Writes: app_spec.txt + claw-forge.yaml
 
 # 3. Initialize with spec
-claw-forge init --spec app_spec.txt --concurrency 5
+claw-forge plan app_spec.txt --concurrency 5
 
 # 4. Run agents (opens 5 parallel coding agents)
 claw-forge state &
@@ -845,7 +845,7 @@ claw-forge run --concurrency 5
 Start here
   │
   ├── Building something new?
-  │     └── claw-forge init → /create-spec → claw-forge init --spec → claw-forge run
+  │     └── claw-forge init → /create-spec → claw-forge plan → claw-forge run
   │
   ├── Adding features to existing code?
   │     └── claw-forge analyze → /create-spec → claw-forge add → claw-forge run

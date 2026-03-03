@@ -232,9 +232,9 @@ class TestRunCommand:
 
 
 class TestModelFormats:
-    def test_init_help_shows_model_formats(self) -> None:
-        """claw-forge init --help output mentions provider/model format."""
-        result = runner.invoke(app, ["init", "--help"])
+    def test_plan_help_shows_model_formats(self) -> None:
+        """claw-forge plan --help output mentions provider/model format."""
+        result = runner.invoke(app, ["plan", "--help"])
         assert result.exit_code == 0
         assert "provider/model" in result.output or "provider" in result.output.lower()
 

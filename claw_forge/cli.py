@@ -372,127 +372,33 @@ def state(
 
 @app.command()
 def init(
-    project: str = typer.Option(".", "--project", "-p", help="Project directory to initialize"),
-    spec: str | None = typer.Option(
-        None, "--spec", "-s",
-        help="Path to app_spec.txt or additions_spec.xml. Parses features and builds DAG.",
-    ),
-    model: str = typer.Option(
-        "claude-opus-4-5", "--model", "-m",
-        help=(
-            "Model to use. Supported formats:\n"
-            "  claude-opus-4-5                      bare model (pool picks provider)\n"
-            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
-            "  opus                                 alias from model_aliases in config\n"
-            "Defaults to Opus for init — the critical planning step."
-        ),
-    ),
-    concurrency: int = typer.Option(
-        5, "--concurrency", "-n",
-        help="Max parallel agents when running. Saved as default in claw-forge.yaml.",
-    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory to bootstrap"),
     config: str = typer.Option(
         "claw-forge.yaml", "--config", "-c",
-        help="Path to claw-forge.yaml config file (created if absent).",
+        help="Path to claw-forge.yaml (created if absent).",
     ),
 ) -> None:
-    """Initialize a project — scaffold .claude/, parse spec, generate manifest.
+    """Bootstrap a project — scaffold .claude/, CLAUDE.md, and claw-forge.yaml.
 
-    Uses the most capable model by default (Opus) because init is the critical
-    planning step: it decomposes the spec into a feature DAG, assigns dependencies,
-    and determines phases. Errors here cascade through every subsequent agent run.
+    Run this once in a new project directory before writing your spec.
+    It installs the /create-spec and other Claude slash commands, then guides
+    you to the next step.
 
     Examples:
 
-        # Basic init (detects stack, scaffolds slash commands)
+        # Bootstrap current directory
         claw-forge init
 
-        # Init with a spec file — Opus parses features and builds DAG
-        claw-forge init --spec app_spec.txt
-
-        # Use Sonnet if cost matters more than planning quality
-        claw-forge init --spec app_spec.txt --model claude-sonnet-4-5 --concurrency 3
-
-        # Init a specific directory
-        claw-forge init --project ~/projects/my-app --spec app_spec.txt
+        # Bootstrap a specific directory
+        claw-forge init --project ~/projects/my-app
     """
-    from claw_forge.plugins.base import PluginContext
-    from claw_forge.plugins.initializer import InitializerPlugin
     from claw_forge.scaffold import scaffold_project
 
-    # Resolve config path relative to project dir when using default name
     project_path = Path(project).resolve()
     if config == "claw-forge.yaml":
         config = str(project_path / "claw-forge.yaml")
 
-    cfg = _load_config(config, auto_scaffold=True)
-    resolved = resolve_model(model, cfg)
-    if resolved.alias_resolved:
-        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
-    if resolved.provider_hint:
-        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
-    model = resolved.model_id
-
-    plugin = InitializerPlugin()
-    ctx = PluginContext(project_path=str(project_path), session_id="init", task_id="init")
-    if spec:
-        ctx.metadata = {"spec_file": spec}
-    result = asyncio.run(plugin.execute(ctx))
-    if result.success:
-        meta = result.metadata
-
-        # If spec was parsed, show detailed summary
-        if "feature_count" in meta:
-            console.print(f"\n[bold green]✅ Spec parsed: {meta['project_name']}[/bold green]")
-            console.print(f"   {result.output}\n")
-
-            # Feature count by category
-            category_counts = meta.get("category_counts", {})
-            if category_counts:
-                cat_table = Table(title="Features by Category")
-                cat_table.add_column("Category", style="cyan")
-                cat_table.add_column("Count", justify="right", style="bold")
-                for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-                    cat_table.add_row(cat, str(count))
-                cat_table.add_row("[bold]Total[/bold]", f"[bold]{meta['feature_count']}[/bold]")
-                console.print(cat_table)
-
-            # Wave count
-            wave_count = meta.get("wave_count", 0)
-            console.print(f"\n   [bold]Dependency waves:[/bold] {wave_count}")
-
-            # Estimated run time
-            feature_count = meta.get("feature_count", 0)
-            if feature_count > 0 and concurrency > 0:
-                # Estimate ~2 min per feature, divided by concurrency
-                est_minutes = (feature_count * 2) / concurrency
-                if est_minutes < 60:
-                    est_str = f"{est_minutes:.0f} minutes"
-                else:
-                    est_str = f"{est_minutes / 60:.1f} hours"
-                console.print(
-                    f"   [bold]Estimated run time:[/bold] ~{est_str} "
-                    f"(at concurrency={concurrency})"
-                )
-
-            # Phases
-            phases = meta.get("phases", [])
-            if phases:
-                console.print(f"\n   [bold]Implementation phases ({len(phases)}):[/bold]")
-                for i, phase in enumerate(phases, 1):
-                    console.print(f"     {i}. {phase}")
-
-            console.print(
-                f"\n   Next: [bold]claw-forge run --spec {spec} --concurrency {concurrency}[/bold]"
-            )
-        else:
-            # Basic project analysis (no spec)
-            console.print("[green]Project analyzed successfully[/green]")
-            for k, v in meta.items():
-                if k != "features":
-                    console.print(f"  {k}: {v}")
-    else:
-        console.print(f"[red]Analysis failed: {result.output}[/red]")
+    _load_config(config, auto_scaffold=True)
 
     scaffold = scaffold_project(project_path)
     console.print(
@@ -512,24 +418,141 @@ def init(
         for cmd in scaffold["commands_copied"]:
             console.print(f"  • /{Path(cmd).stem}")
 
-    # If no spec was provided, guide user to /create-spec next
-    if not spec:
-        spec_file = project_path / "app_spec.txt"
-        xml_spec_file = project_path / "additions_spec.xml"
-        if not spec_file.exists() and not xml_spec_file.exists():
+    # Guide user to next step
+    spec_file = project_path / "app_spec.txt"
+    xml_spec_file = project_path / "additions_spec.xml"
+    if not spec_file.exists() and not xml_spec_file.exists():
+        console.print(
+            "\n[bold cyan]Next step:[/bold cyan] create your project spec.\n"
+            "  Open Claude Code in this directory and run:\n\n"
+            "    [bold]/create-spec[/bold]\n\n"
+            "  Claude will walk you through your project and write [bold]app_spec.txt[/bold].\n"
+            "  Then run: [bold]claw-forge plan --spec app_spec.txt[/bold]"
+        )
+    else:
+        found = spec_file if spec_file.exists() else xml_spec_file
+        console.print(
+            f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
+            f"  Run: [bold]claw-forge plan --spec {found.name}[/bold]"
+        )
+
+
+@app.command()
+def plan(
+    spec: str = typer.Argument(..., help="Path to app_spec.txt or additions_spec.xml."),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    model: str = typer.Option(
+        "claude-opus-4-5", "--model", "-m",
+        help=(
+            "Model to use. Supported formats:\n"
+            "  claude-opus-4-5                      bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  opus                                 alias from model_aliases in config\n"
+            "Defaults to Opus — planning is the most critical step."
+        ),
+    ),
+    concurrency: int = typer.Option(
+        5, "--concurrency", "-n",
+        help="Max parallel agents when running (saved as hint in output).",
+    ),
+    config: str = typer.Option(
+        "claw-forge.yaml", "--config", "-c",
+        help="Path to claw-forge.yaml config file.",
+    ),
+) -> None:
+    """Parse a spec file and generate the feature DAG in the state database.
+
+    Reads app_spec.txt (or additions_spec.xml for brownfield), decomposes it into
+    atomic features, assigns dependencies, and writes the task graph to the DB.
+    Uses Opus by default — errors in planning cascade through every agent run.
+
+    Examples:
+
+        # Parse spec and build feature DAG
+        claw-forge plan app_spec.txt
+
+        # Use Sonnet if cost matters more than planning quality
+        claw-forge plan app_spec.txt --model claude-sonnet-4-5
+
+        # Brownfield additions
+        claw-forge plan additions_spec.xml --concurrency 3
+    """
+    from claw_forge.plugins.base import PluginContext
+    from claw_forge.plugins.initializer import InitializerPlugin
+
+    project_path = Path(project).resolve()
+    if config == "claw-forge.yaml":
+        config = str(project_path / "claw-forge.yaml")
+
+    cfg = _load_config(config)
+    resolved = resolve_model(model, cfg)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    if resolved.provider_hint:
+        console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
+    model = resolved.model_id  # noqa: F841
+
+    spec_path = Path(spec)
+    if not spec_path.is_absolute():
+        spec_path = project_path / spec
+    if not spec_path.exists():
+        console.print(f"[red]Spec file not found: {spec_path}[/red]")
+        raise typer.Exit(1) from None
+
+    plugin = InitializerPlugin()
+    ctx = PluginContext(project_path=str(project_path), session_id="plan", task_id="plan")
+    ctx.metadata = {"spec_file": str(spec_path)}
+    result = asyncio.run(plugin.execute(ctx))
+
+    if result.success:
+        meta = result.metadata
+        if "feature_count" in meta:
+            console.print(f"\n[bold green]✅ Spec parsed: {meta['project_name']}[/bold green]")
+            console.print(f"   {result.output}\n")
+
+            category_counts = meta.get("category_counts", {})
+            if category_counts:
+                cat_table = Table(title="Features by Category")
+                cat_table.add_column("Category", style="cyan")
+                cat_table.add_column("Count", justify="right", style="bold")
+                for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+                    cat_table.add_row(cat, str(count))
+                cat_table.add_row("[bold]Total[/bold]", f"[bold]{meta['feature_count']}[/bold]")
+                console.print(cat_table)
+
+            wave_count = meta.get("wave_count", 0)
+            console.print(f"\n   [bold]Dependency waves:[/bold] {wave_count}")
+
+            feature_count = meta.get("feature_count", 0)
+            if feature_count > 0 and concurrency > 0:
+                est_minutes = (feature_count * 2) / concurrency
+                est_str = (
+                    f"{est_minutes:.0f} minutes"
+                    if est_minutes < 60
+                    else f"{est_minutes / 60:.1f} hours"
+                )
+                console.print(
+                    f"   [bold]Estimated run time:[/bold] ~{est_str} "
+                    f"(at concurrency={concurrency})"
+                )
+
+            phases = meta.get("phases", [])
+            if phases:
+                console.print(f"\n   [bold]Implementation phases ({len(phases)}):[/bold]")
+                for i, phase in enumerate(phases, 1):
+                    console.print(f"     {i}. {phase}")
+
             console.print(
-                "\n[bold cyan]Next step:[/bold cyan] create your project spec.\n"
-                "  Open Claude Code in this directory and run:\n\n"
-                "    [bold]/create-spec[/bold]\n\n"
-                "  Claude will walk you through your project and write [bold]app_spec.txt[/bold].\n"
-                "  Then re-run: [bold]claw-forge init --spec app_spec.txt[/bold]"
+                f"\n   Next: [bold]claw-forge run --concurrency {concurrency}[/bold]"
             )
         else:
-            found = spec_file if spec_file.exists() else xml_spec_file
-            console.print(
-                f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
-                f"  Run: [bold]claw-forge init --spec {found.name}[/bold]"
-            )
+            console.print("[green]Plan complete[/green]")
+            for k, v in meta.items():
+                if k != "features":
+                    console.print(f"  {k}: {v}")
+    else:
+        console.print(f"[red]Planning failed: {result.output}[/red]")
+        raise typer.Exit(1) from None
 
 
 @app.command()

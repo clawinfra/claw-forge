@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -120,32 +120,48 @@ def test_pool_status_with_providers(tmp_path: Path) -> None:
 # ── init ─────────────────────────────────────────────────────────────────────
 
 
-def test_init_missing_spec(tmp_path: Path) -> None:
-    # init with a missing spec will run the plugin which internally handles the missing file
-    # just ensure it doesn't crash hard
-    mock_result = MagicMock()
-    mock_result.success = False
-    mock_result.output = "spec not found"
-    mock_result.metadata = {}
+def test_init_scaffolds_project(tmp_path: Path) -> None:
+    """init (no spec) bootstraps .claude/, CLAUDE.md, and claw-forge.yaml."""
+    mock_scaffold = {
+        "claude_md_written": True,
+        "dot_claude_created": True,
+        "commands_copied": [".claude/commands/create-spec.md"],
+        "stack": {"language": "python", "framework": "unknown"},
+    }
+    with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
+        result = runner.invoke(app, ["init", "--project", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "stack detected" in result.output.lower()
+    out = result.output
+    assert ".claude" in out or "create-spec" in out or "Next step" in out
+
+
+def test_init_shows_next_step_hint(tmp_path: Path) -> None:
+    """init without spec shows /create-spec hint when no spec file exists."""
     mock_scaffold = {
         "claude_md_written": False,
         "dot_claude_created": False,
         "commands_copied": [],
-        "stack": {},
+        "stack": {"language": "unknown", "framework": "unknown"},
     }
-    with (
-        patch("claw_forge.plugins.initializer.InitializerPlugin.execute",
-              new_callable=AsyncMock, return_value=mock_result),
-        patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold),
-    ):
-        result = runner.invoke(
-            app,
-            ["init", "--spec", str(tmp_path / "nonexistent.xml"), "--project", str(tmp_path)],
-        )
-    assert "analysis failed" in result.output.lower() or "failed" in result.output.lower()
+    with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
+        result = runner.invoke(app, ["init", "--project", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "/create-spec" in result.output or "Next step" in result.output
 
 
-def test_init_with_valid_spec(tmp_path: Path) -> None:
+def test_plan_missing_spec(tmp_path: Path) -> None:
+    """plan with a missing spec file exits with error."""
+    cfg = _yaml_config(tmp_path)
+    result = runner.invoke(
+        app, ["plan", str(tmp_path / "nonexistent.xml"), "--config", str(cfg)]
+    )
+    assert result.exit_code != 0
+    assert "not found" in result.output.lower()
+
+
+def test_plan_with_valid_spec(tmp_path: Path) -> None:
+    """plan with a valid spec parses features and prints summary."""
     spec_path = tmp_path / "spec.xml"
     spec_path.write_text(
         """<?xml version="1.0" encoding="UTF-8"?>
@@ -159,24 +175,20 @@ def test_init_with_valid_spec(tmp_path: Path) -> None:
 </project>
 """
     )
+    cfg = _yaml_config(tmp_path)
     mock_result = MagicMock()
     mock_result.success = True
     mock_result.output = "done"
-    mock_result.metadata = {"feature_count": 1, "project_name": "test-project",
-                            "category_counts": {"core": 1}, "wave_count": 1, "phases": []}
-    mock_scaffold = {
-        "claude_md_written": False,
-        "dot_claude_created": False,
-        "commands_copied": [],
-        "stack": {},
+    mock_result.metadata = {
+        "feature_count": 1,
+        "project_name": "test-project",
+        "category_counts": {"core": 1},
+        "wave_count": 1,
+        "phases": [],
     }
-
-    with (
-        patch("claw_forge.cli.asyncio.run", return_value=mock_result),
-        patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold),
-    ):
+    with patch("claw_forge.cli.asyncio.run", return_value=mock_result):
         result = runner.invoke(
-            app, ["init", "--spec", str(spec_path), "--project", str(tmp_path)]
+            app, ["plan", str(spec_path), "--config", str(cfg), "--project", str(tmp_path)]
         )
     assert result.exit_code == 0
     assert "test-project" in result.output
