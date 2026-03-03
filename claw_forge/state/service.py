@@ -278,21 +278,21 @@ class AgentStateService:
                 if not task:
                     raise HTTPException(404, "Task not found")
                 if req.status:
-                    task.status = req.status  # type: ignore[assignment]  # SQLAlchemy instrumented attr
+                    task.status = req.status
                     if req.status == "running" and not task.started_at:
-                        task.started_at = datetime.now(UTC)  # type: ignore[assignment]
+                        task.started_at = datetime.now(UTC)
                     elif req.status in ("completed", "failed"):
-                        task.completed_at = datetime.now(UTC)  # type: ignore[assignment]
+                        task.completed_at = datetime.now(UTC)
                 if req.result is not None:
-                    task.result_json = req.result  # type: ignore[assignment]
+                    task.result_json = req.result
                 if req.error_message is not None:
-                    task.error_message = req.error_message  # type: ignore[assignment]
+                    task.error_message = req.error_message
                 if req.input_tokens is not None:
-                    task.input_tokens = task.input_tokens + req.input_tokens  # type: ignore[assignment]
+                    task.input_tokens = task.input_tokens + req.input_tokens
                 if req.output_tokens is not None:
-                    task.output_tokens = task.output_tokens + req.output_tokens  # type: ignore[assignment]
+                    task.output_tokens = task.output_tokens + req.output_tokens
                 if req.cost_usd is not None:
-                    task.cost_usd = task.cost_usd + req.cost_usd  # type: ignore[assignment]
+                    task.cost_usd = task.cost_usd + req.cost_usd
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id), str(task.id), "task.updated", {"status": str(task.status)}
@@ -380,7 +380,7 @@ class AgentStateService:
                 session = await db.get(Session, session_id)
                 if not session:
                     raise HTTPException(404, "Session not found")
-                session.project_paused = True  # type: ignore[assignment]
+                session.project_paused = True
                 await db.commit()
                 await self._emit_event(session_id, None, "project.paused", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": True}
@@ -393,7 +393,7 @@ class AgentStateService:
                 session = await db.get(Session, session_id)
                 if not session:
                     raise HTTPException(404, "Session not found")
-                session.project_paused = False  # type: ignore[assignment]
+                session.project_paused = False
                 await db.commit()
                 await self._emit_event(session_id, None, "project.resumed", {"session_id": session_id})  # noqa: E501
                 return {"session_id": session_id, "paused": False}
@@ -420,9 +420,9 @@ class AgentStateService:
                 task = await db.get(Task, task_id)
                 if not task:
                     raise HTTPException(404, "Task not found")
-                task.status = "needs_human"  # type: ignore[assignment]
-                task.human_question = req.question  # type: ignore[assignment]
-                task.human_answer = None  # type: ignore[assignment]  # clear any stale answer
+                task.status = "needs_human"
+                task.human_question = req.question
+                task.human_answer = None  # clear any stale answer
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),
@@ -448,8 +448,8 @@ class AgentStateService:
                     raise HTTPException(404, "Task not found")
                 if task.status != "needs_human":
                     raise HTTPException(400, f"Task is not in needs_human status (got: {task.status})")  # noqa: E501
-                task.human_answer = req.answer  # type: ignore[assignment]
-                task.status = "pending"  # type: ignore[assignment]
+                task.human_answer = req.answer
+                task.status = "pending"
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),

@@ -652,8 +652,7 @@ async def _write_plan_to_db(
     """Create .claw-forge/state.db and persist parsed features as pending tasks."""
     import uuid
 
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     from claw_forge.state.models import Base, Task
     from claw_forge.state.models import Session as DbSession
@@ -667,9 +666,7 @@ async def _write_plan_to_db(
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async_session: sessionmaker[AsyncSession] = sessionmaker(  # type: ignore[type-arg]
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
     async with async_session() as db:
         # Create a session row
         session_id = str(uuid.uuid4())
