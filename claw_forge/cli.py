@@ -108,15 +108,41 @@ _DEFAULT_ENV_EXAMPLE = """\
 # Copy this file to .env and fill in your values.
 # Never commit .env to version control.
 
-# Anthropic API key (https://console.anthropic.com)
+# ── Anthropic (direct) ────────────────────────────────────────────────────────
+# API key from https://console.anthropic.com
 ANTHROPIC_API_KEY=sk-ant-...
+# Model to use (default used when no --model flag is passed)
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
-# Optional: Anthropic-compatible proxy
+# ── Anthropic OAuth (Claude.ai / claude CLI) ──────────────────────────────────
+# Run `claude setup-token` to get this token, then paste it here.
+# ANTHROPIC_OAUTH_TOKEN=...
+# ANTHROPIC_OAUTH_MODEL=claude-sonnet-4-6
+
+# ── Anthropic-compatible proxy ────────────────────────────────────────────────
+# Any provider that speaks the Anthropic Messages API (e.g. internal gateways)
 # PROXY_API_KEY=...
-# PROXY_BASE_URL=https://...
+# PROXY_BASE_URL=https://your-proxy.example.com/api/anthropic
 # PROXY_MODEL=claude-sonnet-4-20250514
 
-# Optional: Ollama
+# ── OpenAI ────────────────────────────────────────────────────────────────────
+# OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o
+
+# ── OpenAI-compatible proxy (e.g. Azure, Together, Fireworks) ─────────────────
+# OPENAI_COMPAT_API_KEY=...
+# OPENAI_COMPAT_BASE_URL=https://...
+# OPENAI_COMPAT_MODEL=...
+
+# ── Groq ──────────────────────────────────────────────────────────────────────
+# GROQ_API_KEY=gsk_...
+# GROQ_MODEL=llama-3.3-70b-versatile
+
+# ── Cerebras ──────────────────────────────────────────────────────────────────
+# CEREBRAS_API_KEY=...
+# CEREBRAS_MODEL=llama3.3-70b
+
+# ── Ollama (local) ────────────────────────────────────────────────────────────
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=qwen2.5:32b
 """
@@ -415,63 +441,59 @@ def run(
                             console.print(f"    • {task_id[:8]}…  {desc}")
                 return
 
-            # Build task handler
+            # Build task handler — each invocation gets its own session to
+            # avoid concurrent commit() collisions on a shared session.
             async def task_handler(task_node: TaskNode) -> dict[str, Any]:
-                # Mark task as running
-                stmt_update = (
-                    select(Task)
-                    .where(Task.id == task_node.id)
-                    .with_for_update()
-                )
-                result = await session.execute(stmt_update)
-                db_task = result.scalar_one()
-                db_task.status = "running"
-                db_task.started_at = datetime.now(UTC)
-                await session.commit()
+                async with async_session_maker() as task_session:
+                    # Mark task as running
+                    stmt_update = select(Task).where(Task.id == task_node.id)
+                    result = await task_session.execute(stmt_update)
+                    db_task = result.scalar_one()
+                    db_task.status = "running"
+                    db_task.started_at = datetime.now(UTC)
+                    await task_session.commit()
 
-                output = ""
-                success = False
-
-                try:
-                    # Try to use real Claude SDK
-                    try:
-                        from claude_agent_sdk import ClaudeAgentOptions
-
-                        from claw_forge.agent.session import AgentSession
-
-                        options = ClaudeAgentOptions(model=model)
-                        async with AgentSession(options) as agent_session:
-                            prompt = db_task.description or f"Execute {db_task.plugin_name}"
-                            full_output = []
-                            async for msg in agent_session.run(prompt):
-                                if hasattr(msg, "text"):
-                                    full_output.append(msg.text)
-                            output = "\n".join(full_output)
-                        success = True
-                    except Exception as sdk_error:
-                        # Soft dependency — SDK not available, use mock
-                        console.print(
-                            f"[dim]Claude SDK not available ({sdk_error}), "
-                            f"using mock fallback[/dim]"
-                        )
-                        # Mock execution for testing
-                        desc = db_task.description or db_task.plugin_name
-                        console.print(f"  [dim]→[/dim] {desc}")
-                        output = f"Mock execution: {desc}"
-                        success = True
-
-                except Exception as exc:
-                    output = str(exc)
+                    output = ""
                     success = False
 
-                finally:
-                    # Mark task as completed or failed
-                    await session.refresh(db_task)
-                    db_task.status = "completed" if success else "failed"
-                    db_task.completed_at = datetime.now(UTC)
-                    db_task.error_message = None if success else output
-                    db_task.result_json = {"output": output} if success else None
-                    await session.commit()
+                    try:
+                        # Try to use real Claude SDK
+                        try:
+                            from claude_agent_sdk import ClaudeAgentOptions
+
+                            from claw_forge.agent.session import AgentSession
+
+                            options = ClaudeAgentOptions(model=model)
+                            async with AgentSession(options) as agent_session:
+                                prompt = db_task.description or f"Execute {db_task.plugin_name}"
+                                full_output = []
+                                async for msg in agent_session.run(prompt):
+                                    if hasattr(msg, "text"):
+                                        full_output.append(msg.text)
+                                output = "\n".join(full_output)
+                            success = True
+                        except Exception as sdk_error:
+                            # Soft dependency — SDK not available, use mock
+                            console.print(
+                                f"[dim]Claude SDK unavailable ({type(sdk_error).__name__}), "
+                                f"using mock fallback[/dim]"
+                            )
+                            desc = db_task.description or db_task.plugin_name
+                            console.print(f"  [dim]→[/dim] {desc}")
+                            output = f"Mock execution: {desc}"
+                            success = True
+
+                    except Exception as exc:
+                        output = str(exc)
+                        success = False
+
+                    finally:
+                        # Mark task completed / failed in its own session
+                        db_task.status = "completed" if success else "failed"
+                        db_task.completed_at = datetime.now(UTC)
+                        db_task.error_message = None if success else output
+                        db_task.result_json = {"output": output} if success else None
+                        await task_session.commit()
 
                 return {"success": success, "output": output}
 

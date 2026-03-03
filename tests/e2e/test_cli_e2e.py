@@ -441,8 +441,9 @@ class TestPlanWritesDB:
         """Tasks written by plan are readable and pending."""
         import asyncio
 
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
         from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
         from claw_forge.state.models import Task
 
         with tempfile.TemporaryDirectory(prefix="e2e-plan-tasks-") as tmp:
