@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claw-forge"
-version = "0.1.0a17"
+version = "0.1.0a18"
 description = "Multi-provider autonomous coding agent harness with API rotation pool"
 readme = "README.md"
 license = "Apache-2.0"
@@ -82,7 +82,12 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+    "ignore::ResourceWarning",
+]
 
 [tool.mypy]
 python_version = "3.11"

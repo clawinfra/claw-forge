@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --extra dev
+      - run: uv sync --extra dev --python ${{ matrix.python-version }}
       - run: uv run ruff check claw_forge/ tests/
       - run: uv run mypy claw_forge/ --ignore-missing-imports
       - run: uv run pytest tests/ -q --tb=short

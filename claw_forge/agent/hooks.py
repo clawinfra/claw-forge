@@ -5,7 +5,13 @@ import asyncio
 from collections.abc import Callable
 from typing import Any, cast
 
-from claude_agent_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
+try:
+    from claude_agent_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
+except ImportError:  # pragma: no cover — SDK always installed in production
+    HookContext = Any  # type: ignore[assignment,misc]
+    HookInput = Any  # type: ignore[assignment,misc]
+    HookMatcher = Any  # type: ignore[assignment,misc]
+    SyncHookJSONOutput = Any  # type: ignore[assignment,misc]
 
 from .security import bash_security_hook
 
