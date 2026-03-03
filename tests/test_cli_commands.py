@@ -388,8 +388,6 @@ def test_ui_serves_static_bundle(tmp_path: Path) -> None:
     (fake_dist / "index.html").write_text("<html><head></head><body>UI</body></html>")
     (fake_dist / "assets").mkdir()
 
-    orig_file = cli_mod.__file__
-
     with (
         patch.object(cli_mod, "__file__", str(fake_dist.parent / "cli.py")),
         patch("uvicorn.run"),
@@ -435,6 +433,7 @@ def test_ui_dev_mode_no_source_dir(tmp_path: Path) -> None:
 def test_ui_dev_no_node(tmp_path: Path) -> None:
     """--dev mode fails gracefully when Node.js is absent."""
     import shutil
+
     import claw_forge.cli as cli_mod
 
     # Create a fake ui/ source dir so the path check passes

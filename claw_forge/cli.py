@@ -580,7 +580,7 @@ def run(
                 if "All providers exhausted" in sample_err or "No agent executor" in sample_err:
                     console.print(
                         "\n[yellow]💡 No working providers found.[/yellow]\n"
-                        "  • Run [bold]claw-forge pool-status[/bold] to see which providers are active\n"
+                        "  • Run [bold]claw-forge pool-status[/bold] to see active providers\n"
                         "  • Add a valid API key to claw-forge.yaml (e.g. ANTHROPIC_API_KEY_1)\n"
                         "  • Or install the claude CLI for OAuth-based execution: "
                         "https://claude.ai/download"
@@ -1231,7 +1231,7 @@ def ui(
     try:
         import uvicorn
         from starlette.applications import Starlette
-        from starlette.responses import FileResponse, Response
+        from starlette.responses import Response
         from starlette.routing import Mount, Route
         from starlette.staticfiles import StaticFiles
     except ImportError:
