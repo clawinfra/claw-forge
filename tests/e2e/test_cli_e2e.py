@@ -493,3 +493,119 @@ class TestPlanWritesDB:
             assert "No pending tasks" not in run_result.output, (
                 f"run still reports no tasks after plan:\n{run_result.output}"
             )
+
+
+class TestRunExecutesTasks:
+    """run command must execute tasks (not just dry-run) without crashing.
+
+    This class exists specifically to catch the concurrent-session SQLAlchemy
+    bug where sharing one AsyncSession across concurrent task_handler coroutines
+    causes 'commit() called while _prepare_impl() in progress'.
+    """
+
+    def _make_spec(self, path: Path) -> None:
+        path.write_text(
+            "<project_specification>\n"
+            "  <project_name>ConcurrencyTest</project_name>\n"
+            "  <overview>Test concurrent task execution.</overview>\n"
+            "  <technology_stack>\n"
+            "    <frontend><framework>React</framework><port>3000</port></frontend>\n"
+            "    <backend><runtime>Python</runtime>"
+            "<database>SQLite</database><port>8000</port></backend>\n"
+            "  </technology_stack>\n"
+            "  <core_features>\n"
+            "    <backend>\n"
+            "      - Task one: implement GET /one\n"
+            "      - Task two: implement GET /two\n"
+            "      - Task three: implement GET /three\n"
+            "      - Task four: implement GET /four\n"
+            "      - Task five: implement GET /five\n"
+            "    </backend>\n"
+            "  </core_features>\n"
+            "</project_specification>\n",
+            encoding="utf-8",
+        )
+
+    def _make_config(self, project: Path) -> None:
+        (project / "claw-forge.yaml").write_text(
+            "providers:\n"
+            "  anthropic:\n"
+            "    provider_type: anthropic\n"
+            "    api_key: test-key\n"
+            "    models: [claude-sonnet-4-20250514]\n"
+            "    priority: 1\n"
+            "    enabled: true\n",
+            encoding="utf-8",
+        )
+
+    def test_run_executes_tasks_without_session_crash(self) -> None:
+        """run without --dry-run executes all tasks concurrently without SQLAlchemy crash.
+
+        Regression test for: 'commit() called while _prepare_impl() in progress'
+        caused by multiple coroutines sharing a single AsyncSession.
+        """
+        with tempfile.TemporaryDirectory(prefix="e2e-run-exec-") as tmp:
+            project = Path(tmp)
+            self._make_config(project)
+            spec = project / "app_spec.xml"
+            self._make_spec(spec)
+
+            # plan first — writes tasks to DB
+            plan_result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            assert plan_result.exit_code == 0, plan_result.output
+
+            # run with concurrency=5 (triggers concurrent task_handler coroutines)
+            run_result = runner.invoke(
+                app, ["run", "--project", tmp, "--concurrency", "5"]
+            )
+            # Must not crash with SQLAlchemy session error
+            assert "commit()" not in run_result.output, (
+                f"SQLAlchemy session crash detected:\n{run_result.output}"
+            )
+            assert "_prepare_impl" not in run_result.output, (
+                f"SQLAlchemy session crash detected:\n{run_result.output}"
+            )
+            assert run_result.exit_code == 0, (
+                f"run crashed:\n{run_result.output}"
+            )
+
+    def test_run_marks_tasks_completed_in_db(self) -> None:
+        """After run, tasks in DB must be 'completed' not 'pending'."""
+        import asyncio
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from claw_forge.state.models import Task
+
+        with tempfile.TemporaryDirectory(prefix="e2e-run-complete-") as tmp:
+            project = Path(tmp)
+            self._make_config(project)
+            spec = project / "app_spec.xml"
+            self._make_spec(spec)
+
+            runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            run_result = runner.invoke(app, ["run", "--project", tmp, "--concurrency", "3"])
+            assert run_result.exit_code == 0, run_result.output
+
+            db_path = project / ".claw-forge" / "state.db"
+
+            async def read_statuses() -> list[str]:
+                engine = create_async_engine(
+                    f"sqlite+aiosqlite:///{db_path}", echo=False
+                )
+                maker = async_sessionmaker(
+                    engine, class_=AsyncSession, expire_on_commit=False
+                )
+                async with maker() as sess:
+                    rows = (await sess.execute(select(Task))).scalars().all()
+                await engine.dispose()
+                return [t.status for t in rows]
+
+            statuses = asyncio.run(read_statuses())
+            assert statuses, "No tasks found in DB after run"
+            pending = [s for s in statuses if s == "pending"]
+            assert not pending, (
+                f"Tasks still pending after run: {pending} — "
+                f"all statuses: {statuses}"
+            )
