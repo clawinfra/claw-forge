@@ -1145,70 +1145,135 @@ def ui(
         int(os.environ.get("CLAW_FORGE_UI_PORT", "5173")),
         "--port",
         "-p",
-        help="Port for the Kanban UI dev server",
+        help="Port for the Kanban UI",
     ),
-    state_port: int = typer.Option(  # noqa: E501
+    state_port: int = typer.Option(
         8888, "--state-port", help="Port the state service is running on"
     ),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser automatically"),
     session: str = typer.Option("", "--session", "-s", help="Session UUID to open on the board"),
+    dev: bool = typer.Option(
+        False, "--dev", help="Use Vite dev server from source (requires Node.js)"
+    ),
 ) -> None:
-    """Launch the Kanban UI (React dev server).
+    """Launch the Kanban UI.
 
-    Requires Node.js and the UI dependencies installed:
+    By default serves the pre-built static bundle (no Node.js required).
+    Pass --dev to use the Vite hot-reload dev server from the source tree.
 
-        cd ui && npm install
+    Examples:
 
-    Starts the Vite dev server and optionally opens the board in your browser.
-    The UI connects to the state service at localhost:<state-port>.
+        # Serve pre-built UI (works from pip install)
+        claw-forge ui
+
+        # Use Vite dev server (source checkout only)
+        claw-forge ui --dev
     """
     import shutil
     import subprocess
-
-    ui_dir = Path(__file__).parent.parent / "ui"
-    if not ui_dir.exists():
-        console.print("[red]ui/ directory not found. Is claw-forge installed from source?[/red]")
-        raise typer.Exit(1) from None
-
-    if not shutil.which("node"):
-        console.print("[red]Node.js not found. Install it from https://nodejs.org/[/red]")
-        raise typer.Exit(1) from None
-
-    node_modules = ui_dir / "node_modules"
-    if not node_modules.exists():
-        console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
-        subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
+    import threading
+    import time
+    import webbrowser
 
     url = f"http://localhost:{port}"
     if session:
         url += f"/?session={session}"
 
-    console.print("[bold green]🔥 Starting claw-forge Kanban UI[/bold green]")
-    console.print(f"   UI:           [cyan]{url}[/cyan]")
-    console.print(f"   State API:    [cyan]http://localhost:{state_port}[/cyan]")
+    # ── Dev mode (source checkout) ──────────────────────────────────────────
+    if dev:
+        ui_dir = Path(__file__).parent.parent / "ui"
+        if not ui_dir.exists():
+            console.print(
+                "[red]ui/ source directory not found.[/red]\n"
+                "[dim]--dev requires a source checkout. "
+                "For pip installs run without --dev.[/dim]"
+            )
+            raise typer.Exit(1) from None
+        if not shutil.which("node"):
+            console.print("[red]Node.js not found. Install from https://nodejs.org/[/red]")
+            raise typer.Exit(1) from None
+        node_modules = ui_dir / "node_modules"
+        if not node_modules.exists():
+            console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
+            subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
+
+        console.print("[bold green]🔥 claw-forge Kanban UI (dev)[/bold green]")
+        console.print(f"   UI:        [cyan]{url}[/cyan]")
+        console.print(f"   State API: [cyan]http://localhost:{state_port}[/cyan]")
+        console.print("   Press [bold]Ctrl+C[/bold] to stop\n")
+
+        env = os.environ.copy()
+        env["VITE_API_PORT"] = str(state_port)
+        env["VITE_WS_PORT"] = str(state_port)
+
+        if open_browser:
+            def _open_dev() -> None:
+                time.sleep(2)
+                webbrowser.open(url)
+            threading.Thread(target=_open_dev, daemon=True).start()
+
+        subprocess.run(  # noqa: S603, S607
+            ["npm", "run", "dev", "--", "--port", str(port), "--host"],
+            cwd=ui_dir, env=env, check=False,
+        )
+        return
+
+    # ── Production mode (pre-built static bundle, works from pip install) ───
+    ui_dist = Path(__file__).parent / "ui_dist"
+    if not ui_dist.exists():
+        console.print(
+            "[red]Pre-built UI bundle not found.[/red]\n"
+            "[dim]This should not happen with a normal pip install. "
+            "Try reinstalling: pip install --force-reinstall claw-forge[/dim]"
+        )
+        raise typer.Exit(1) from None
+
+    try:
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.responses import FileResponse, Response
+        from starlette.routing import Mount, Route
+        from starlette.staticfiles import StaticFiles
+    except ImportError:
+        console.print(
+            "[red]uvicorn / starlette not found.[/red]\n"
+            "[dim]Install them: pip install uvicorn starlette[/dim]"
+        )
+        raise typer.Exit(1) from None
+
+    # Inject runtime config so the SPA knows where the state API lives
+    index_html = (ui_dist / "index.html").read_text()
+    runtime_cfg = (
+        f"<script>window.__CLAW_FORGE_STATE_PORT__={state_port};"
+        f"window.__CLAW_FORGE_SESSION__='{session}';</script>"
+    )
+    patched_html = index_html.replace("</head>", runtime_cfg + "</head>", 1)
+
+    async def serve_index(request: object) -> Response:  # type: ignore[override]
+        return Response(patched_html, media_type="text/html")
+
+    static_app = Starlette(
+        routes=[
+            Route("/", serve_index),
+            Route("/index.html", serve_index),
+            Mount("/assets", StaticFiles(directory=str(ui_dist / "assets")), name="assets"),
+            # SPA fallback: any unknown path → index.html
+            Route("/{path:path}", serve_index),
+        ]
+    )
+
+    console.print("[bold green]🔥 claw-forge Kanban UI[/bold green]")
+    console.print(f"   UI:        [cyan]{url}[/cyan]")
+    console.print(f"   State API: [cyan]http://localhost:{state_port}[/cyan]")
     console.print("   Press [bold]Ctrl+C[/bold] to stop\n")
 
-    env = os.environ.copy()
-    env["VITE_API_PORT"] = str(state_port)
-    env["VITE_WS_PORT"] = str(state_port)
-
     if open_browser:
-        import threading
-        import time
-        import webbrowser
-
-        def _open_after_delay() -> None:
-            time.sleep(2)  # wait for Vite to start
+        def _open_static() -> None:
+            time.sleep(1)
             webbrowser.open(url)
+        threading.Thread(target=_open_static, daemon=True).start()
 
-        threading.Thread(target=_open_after_delay, daemon=True).start()
-
-    subprocess.run(  # noqa: S603, S607
-        ["npm", "run", "dev", "--", "--port", str(port), "--host"],
-        cwd=ui_dir,
-        env=env,
-        check=False,
-    )
+    uvicorn.run(static_app, host="0.0.0.0", port=port, log_level="warning")  # noqa: S104
 
 
 @app.command()

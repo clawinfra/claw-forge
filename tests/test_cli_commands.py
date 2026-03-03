@@ -379,28 +379,77 @@ def test_add_with_spec(tmp_path: Path) -> None:
 # ── ui ────────────────────────────────────────────────────────────────────────
 
 
-def test_ui_no_ui_dir(tmp_path: Path) -> None:
-    """Should exit with error if ui/ directory is not found."""
-    with patch("claw_forge.cli.Path.__truediv__", return_value=tmp_path / "ui"):
-        result = runner.invoke(app, ["ui"])
-    # ui dir probably doesn't exist in test env → should exit 1
-    # (If it does exist we can still check for non-crash)
-    assert result.exit_code in (0, 1)
+def test_ui_serves_static_bundle(tmp_path: Path) -> None:
+    """Default ui command (no --dev) serves the pre-built static bundle via uvicorn."""
+    import claw_forge.cli as cli_mod
 
+    fake_dist = tmp_path / "ui_dist"
+    fake_dist.mkdir()
+    (fake_dist / "index.html").write_text("<html><head></head><body>UI</body></html>")
+    (fake_dist / "assets").mkdir()
 
-def test_ui_no_node(tmp_path: Path) -> None:
-    """Should fail gracefully when node.js is absent."""
-    import shutil
-
-    ui_dir = tmp_path / "ui"
-    ui_dir.mkdir()
+    orig_file = cli_mod.__file__
 
     with (
-        patch("claw_forge.cli.Path.__truediv__", return_value=ui_dir),
+        patch.object(cli_mod, "__file__", str(fake_dist.parent / "cli.py")),
+        patch("uvicorn.run"),
+        patch("starlette.staticfiles.StaticFiles.__init__", return_value=None),
+    ):
+        result = runner.invoke(app, ["ui", "--no-open"])
+    assert result.exit_code == 0, result.output
+    assert "Kanban UI" in result.output
+
+
+def test_ui_no_bundle_shows_helpful_error(tmp_path: Path) -> None:
+    """When ui_dist is missing (corrupt install), show actionable error — not 'from source'."""
+    import claw_forge.cli as cli_mod
+
+    # Point cli module to a dir where ui_dist does NOT exist
+    empty_dir = tmp_path / "pkg"
+    empty_dir.mkdir()
+
+    with patch.object(cli_mod, "__file__", str(empty_dir / "cli.py")):
+        result = runner.invoke(app, ["ui", "--no-open"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+    # Must NOT say "installed from source" (old misleading message)
+    assert "installed from source" not in result.output
+
+
+def test_ui_dev_mode_no_source_dir(tmp_path: Path) -> None:
+    """--dev mode exits cleanly when ui/ source dir is absent."""
+    import claw_forge.cli as cli_mod
+
+    # Point parent to a dir with no ui/ subdirectory
+    empty_parent = tmp_path / "pkg"
+    empty_parent.mkdir()
+
+    with patch.object(cli_mod, "__file__", str(empty_parent / "cli.py")):
+        result = runner.invoke(app, ["ui", "--dev", "--no-open"])
+
+    assert result.exit_code == 1
+    assert "source" in result.output.lower() or "not found" in result.output.lower()
+
+
+def test_ui_dev_no_node(tmp_path: Path) -> None:
+    """--dev mode fails gracefully when Node.js is absent."""
+    import shutil
+    import claw_forge.cli as cli_mod
+
+    # Create a fake ui/ source dir so the path check passes
+    fake_pkg = tmp_path / "claw_forge"
+    fake_pkg.mkdir()
+    fake_ui = tmp_path / "ui"
+    fake_ui.mkdir()
+
+    with (
+        patch.object(cli_mod, "__file__", str(fake_pkg / "cli.py")),
         patch.object(shutil, "which", return_value=None),
     ):
-        result = runner.invoke(app, ["ui"])
-    assert result.exit_code in (0, 1)
+        result = runner.invoke(app, ["ui", "--dev", "--no-open"])
+    assert result.exit_code == 1
+    assert "node" in result.output.lower() or "Node" in result.output
 
 
 # ── state ─────────────────────────────────────────────────────────────────────
