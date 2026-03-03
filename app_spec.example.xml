@@ -1,0 +1,194 @@
+<!--
+  claw-forge Project Specification
+  =================================
+  This file drives autonomous agent implementation.
+  Use /create-spec in Claude Code to generate this interactively.
+
+  Features in <core_features> become individual agent tasks (typically 100-300 per project).
+  Write each bullet as a testable behavior: "User can...", "System returns...", "API validates..."
+-->
+<project_specification>
+  <project_name>my-project</project_name>
+
+  <overview>
+    2-3 sentences: what you're building, what problem it solves, who it's for.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>React with Vite</framework>
+      <styling>Tailwind CSS</styling>
+      <state_management>React hooks and context</state_management>
+      <routing>React Router</routing>
+      <port>3000</port>
+    </frontend>
+    <backend>
+      <runtime>Python with FastAPI</runtime>
+      <database>SQLite (dev) / PostgreSQL (prod)</database>
+      <port>8000</port>
+    </backend>
+    <communication>
+      <api>RESTful JSON endpoints</api>
+    </communication>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Python 3.12+ with uv installed
+      - Node.js 18+ for frontend
+      - Any required API keys (list here)
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    <!--
+      Each bullet = one agent task.
+      Start with action verb: "User can...", "System displays...", "API returns..."
+      Group by category. Aim for 100-300 bullets total for a full app.
+    -->
+    <authentication>
+      - User can register with email and password (returns 201 with user_id)
+      - User can login and receive JWT access_token and refresh_token
+      - User can logout and invalidate their refresh token
+      - System rejects login with invalid credentials (returns 401)
+      - User can refresh expired access token using refresh_token
+    </authentication>
+
+    <core_functionality>
+      - User can create a new item with title and description
+      - User can view paginated list of their items (?page=1&amp;per_page=20)
+      - User can update an existing item's title or description
+      - User can delete an item (soft delete — sets deleted_at)
+      - System returns 403 if user tries to access another user's item
+    </core_functionality>
+
+    <user_interface>
+      - UI displays loading skeleton while data is fetching
+      - UI shows success toast notification after create/update/delete
+      - UI shows error message when API request fails
+      - UI is responsive on mobile (375px), tablet (768px), and desktop (1280px)
+    </user_interface>
+
+    <api_layer>
+      - API validates all request bodies and returns 400 for invalid input
+      - API requires valid JWT for all protected routes (returns 401 if missing)
+      - API returns paginated results with total count and next/prev links
+    </api_layer>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <users>
+        - id (PRIMARY KEY, UUID)
+        - email (UNIQUE, NOT NULL)
+        - password_hash (NOT NULL)
+        - name
+        - created_at, updated_at
+      </users>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <authentication>
+      - POST /api/auth/register
+      - POST /api/auth/login
+      - POST /api/auth/logout
+      - POST /api/auth/refresh
+      - GET  /api/auth/me
+    </authentication>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Header with navigation and user menu
+      - Sidebar for navigation (collapsible on mobile)
+      - Main content area with page header and content
+    </main_structure>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Primary: #f97316 (forge orange)
+      - Secondary: #3b82f6 (blue)
+      - Background: #ffffff (light) / #0f172a (dark)
+      - Surface: #f8fafc (light) / #1e293b (dark)
+      - Text: #0f172a (light) / #f1f5f9 (dark)
+      - Error: #ef4444
+      - Success: #22c55e
+      - Warning: #f59e0b
+    </color_palette>
+    <typography>
+      - Font family: Inter, system-ui, sans-serif
+      - Headings: font-semibold
+      - Body: font-normal, leading-relaxed
+      - Code: JetBrains Mono, monospace
+    </typography>
+    <animations>
+      - Transitions: 150-200ms ease
+      - Loading: skeleton screens (not spinners)
+      - Modals: fade + scale in
+    </animations>
+  </design_system>
+
+  <key_interactions>
+    <flow_registration>
+      1. User clicks "Sign up"
+      2. Fills email + password form
+      3. System creates account
+      4. Redirect to dashboard with welcome toast
+    </flow_registration>
+  </key_interactions>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Project Setup and Database</title>
+      <tasks>
+        - Initialize frontend and backend projects
+        - Create database schema and migrations
+        - Set up environment variables and config
+        - Configure CORS and middleware
+      </tasks>
+    </step>
+    <step number="2">
+      <title>Authentication System</title>
+      <tasks>
+        - Implement JWT register/login/logout/refresh
+        - Add session management and protected routes
+      </tasks>
+    </step>
+    <step number="3">
+      <title>Core Features</title>
+      <tasks>
+        - Build primary CRUD operations
+        - Implement list/pagination/filtering
+        - Add form validation and error handling
+      </tasks>
+    </step>
+    <step number="4">
+      <title>UI Polish and Testing</title>
+      <tasks>
+        - Responsive design and dark/light theme
+        - Loading states, toasts, error feedback
+        - Full test suite (≥90% coverage)
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - All features in core_features are implemented and passing
+      - No console errors in browser during normal use
+      - Data persists correctly across sessions
+    </functionality>
+    <user_experience>
+      - Responsive on mobile, tablet, and desktop
+      - All async operations show loading states
+      - Clear feedback for every user action
+    </user_experience>
+    <technical_quality>
+      - Test coverage ≥ 90%
+      - No TypeScript or mypy type errors
+      - Proper error handling throughout
+    </technical_quality>
+  </success_criteria>
+</project_specification>

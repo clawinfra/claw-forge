@@ -375,6 +375,7 @@ def run(
     claw_forge_dir.mkdir(parents=True, exist_ok=True)
     db_path = claw_forge_dir / "state.db"
     db_url = f"sqlite+aiosqlite:///{db_path}"
+    console.print(f"[dim]DB: {db_path}[/dim]")
 
     # Set up async engine
     engine = create_async_engine(db_url, echo=False)
@@ -897,6 +898,9 @@ def plan(
         console.print(f"[red]Spec file not found: {spec_path}[/red]")
         raise typer.Exit(1) from None
 
+    console.print(f"[dim]Project: {project_path}[/dim]")
+    console.print(f"[dim]DB: {project_path / '.claw-forge' / 'state.db'}[/dim]")
+
     plugin = InitializerPlugin()
     ctx = PluginContext(project_path=str(project_path), session_id="plan", task_id="plan")
     ctx.metadata = {"spec_file": str(spec_path)}
@@ -1174,6 +1178,9 @@ def ui(
     ),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser automatically"),
     session: str = typer.Option("", "--session", "-s", help="Session UUID to open on the board"),
+    project: str = typer.Option(
+        ".", "--project", "-P", help="Project directory (to find .claw-forge/state.db)."
+    ),
     dev: bool = typer.Option(
         False, "--dev", help="Use Vite dev server from source (requires Node.js)"
     ),
@@ -1222,7 +1229,7 @@ def ui(
         _session_id_dev = "(none — run `claw-forge run` to create a session)"
         try:
             import sqlite3 as _sqlite3_dev
-            _db_path_dev = Path.cwd() / ".claw-forge" / "state.db"
+            _db_path_dev = Path(project).resolve() / ".claw-forge" / "state.db"
             if _db_path_dev.exists():
                 with _sqlite3_dev.connect(str(_db_path_dev)) as _conn2:
                     _row2 = _conn2.execute(
@@ -1362,7 +1369,7 @@ def ui(
         _session_id_display = "(none — run `claw-forge run` to create a session)"
         try:
             import sqlite3 as _sqlite3
-            _db_path = Path.cwd() / ".claw-forge" / "state.db"
+            _db_path = Path(project).resolve() / ".claw-forge" / "state.db"
             if _db_path.exists():
                 with _sqlite3.connect(str(_db_path)) as _conn:
                     _row = _conn.execute(
