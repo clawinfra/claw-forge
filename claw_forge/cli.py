@@ -1252,11 +1252,67 @@ def ui(
     async def serve_index(request: object) -> Response:
         return Response(patched_html, media_type="text/html")
 
+    # Reverse proxy: forward /api/* and /ws* to the state service
+    import httpx
+    import websockets
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import StreamingResponse
+    from starlette.websockets import WebSocket as StarletteWebSocket
+
+    state_base = f"http://localhost:{state_port}"
+    _proxy_client = httpx.AsyncClient(base_url=state_base, timeout=30.0)
+
+    async def proxy_api(request: StarletteRequest) -> StreamingResponse:
+        path = request.url.path  # e.g. /api/sessions/...
+        backend_path = path[4:] if path.startswith("/api") else path  # strip /api prefix
+        url = httpx.URL(path=backend_path, query=request.url.query.encode())
+        rp_req = _proxy_client.build_request(
+            request.method,
+            url,
+            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            content=await request.body(),
+        )
+        rp_resp = await _proxy_client.send(rp_req, stream=True)
+        return StreamingResponse(
+            rp_resp.aiter_raw(),
+            status_code=rp_resp.status_code,
+            headers=dict(rp_resp.headers),
+            background=None,
+        )
+
+    async def proxy_ws(websocket: StarletteWebSocket) -> None:
+        """Proxy WebSocket /ws and /ws/{session_id} to the state service."""
+        path = websocket.url.path
+        ws_url = f"ws://localhost:{state_port}{path}"
+        await websocket.accept()
+        try:
+            async with websockets.connect(ws_url) as backend_ws:
+                async def _fw() -> None:
+                    async for msg in backend_ws:
+                        await websocket.send_text(msg if isinstance(msg, str) else msg.decode())
+                import asyncio
+                fwd_task = asyncio.create_task(_fw())
+                try:
+                    async for msg in websocket.iter_text():
+                        await backend_ws.send(msg)
+                finally:
+                    fwd_task.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            await websocket.close()
+
+    from starlette.routing import WebSocketRoute
+
     static_app = Starlette(
         routes=[
             Route("/", serve_index),
             Route("/index.html", serve_index),
             Mount("/assets", StaticFiles(directory=str(ui_dist / "assets")), name="assets"),
+            # Proxy API and WebSocket to state service
+            Route("/api/{path:path}", proxy_api, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
+            WebSocketRoute("/ws", proxy_ws),
+            WebSocketRoute("/ws/{session_id}", proxy_ws),
             # SPA fallback: any unknown path → index.html
             Route("/{path:path}", serve_index),
         ]

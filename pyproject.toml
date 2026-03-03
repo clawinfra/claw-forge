@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claw-forge"
-version = "0.1.0a24"
+version = "0.1.0a25"
 description = "Multi-provider autonomous coding agent harness with API rotation pool"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,6 +35,7 @@ dependencies = [
     "claude-agent-sdk>=0.1.44,<1",
     "openai>=1.50,<2",
     "starlette>=0.40,<2",
+    "websockets>=12,<14",
     "sse-starlette>=2,<3",
 ]
 
