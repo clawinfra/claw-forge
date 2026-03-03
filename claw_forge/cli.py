@@ -351,6 +351,17 @@ def run(
     console.print(f"Task: {task}")
     console.print(f"Model: {model}")
     console.print(f"Providers: {len(cfg.get('providers', {}))}")
+    if shutil.which("claude"):
+        console.print("Executor:  claude CLI (autonomous agent — writes files) ✅")
+    else:
+        console.print(
+            "[yellow]Executor:  API-only mode (no claude CLI in PATH — "
+            "LLM responses only, files NOT written)[/yellow]"
+        )
+        console.print(
+            "[dim]  → Install claude CLI for full autonomous coding: "
+            "https://claude.ai/download[/dim]"
+        )
 
     if yolo:
         cpu_count = max(1, os.cpu_count() or 4)
@@ -475,14 +486,12 @@ def run(
                     try:
                         prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
 
-                        # ── Option 1: claude_agent_sdk (full autonomous coding agent) ──
-                        sdk_available = False
-                        try:
-                            import importlib
-                            importlib.import_module("claude_agent_sdk")
-                            sdk_available = True
-                        except ImportError:
-                            pass
+                        # ── Option 1: claude_agent_sdk + claude CLI (full autonomous agent) ──
+                        # claude_agent_sdk is a declared dependency so it's always installed.
+                        # It requires the `claude` CLI in PATH to actually run agents.
+                        sdk_available = (
+                            shutil.which("claude") is not None
+                        )
 
                         if sdk_available:
                             from claude_agent_sdk import ClaudeAgentOptions
@@ -498,28 +507,10 @@ def run(
                                 output = "\n".join(full_output)
                             success = True
 
-                        # ── Option 2: claude CLI subprocess ───────────────────────────
-                        elif shutil.which("claude"):
-                            import subprocess
-
-                            proc = await asyncio.create_subprocess_exec(
-                                "claude",
-                                "--print",
-                                "--model", model,
-                                prompt,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                cwd=str(project_path),
-                            )
-                            stdout, stderr = await proc.communicate()
-                            if proc.returncode == 0:
-                                output = stdout.decode(errors="replace").strip()
-                                success = True
-                            else:
-                                output = stderr.decode(errors="replace").strip()
-                                success = False
-
-                        # ── Option 3: direct API call via provider pool ────────────────
+                        # ── Option 2: direct API call via provider pool ───────────────
+                        # Used when claude CLI is not installed (API-only mode).
+                        # Note: this sends prompts to the LLM but does NOT write files.
+                        # Install the claude CLI for full autonomous file-writing agents.
                         elif pool is not None:
                             system_prompt = (
                                 "You are an expert software engineer. "
@@ -538,9 +529,11 @@ def run(
                         # ── No executor available ─────────────────────────────────────
                         else:
                             output = (
-                                "No agent executor available. Install claude_agent_sdk, "
-                                "add 'claude' CLI to PATH, or configure a provider in "
-                                "claw-forge.yaml with a valid API key."
+                                "No agent executor available.\n"
+                                "  • For full autonomous coding: install the claude CLI "
+                                "(https://claude.ai/download) and ensure it is in PATH\n"
+                                "  • For API-only mode: add a provider with a valid API key "
+                                "to claw-forge.yaml"
                             )
                             success = False
 
