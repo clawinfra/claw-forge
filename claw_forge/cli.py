@@ -694,6 +694,15 @@ def init(
 
     _load_config(config, auto_scaffold=True)
 
+    # Always ensure .env.example exists alongside the config — even when
+    # claw-forge.yaml was already present (so _scaffold_config was skipped).
+    env_example = Path(config).parent / ".env.example"
+    if not env_example.exists():
+        env_example.write_text(_DEFAULT_ENV_EXAMPLE)
+        console.print(
+            f"[green]✓ Created {env_example}[/green]  (copy to .env and fill keys)"
+        )
+
     scaffold = scaffold_project(project_path)
     console.print(
         f"✓ Stack detected: {scaffold['stack'].get('language', 'unknown')} / "

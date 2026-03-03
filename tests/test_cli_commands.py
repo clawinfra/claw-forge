@@ -135,6 +135,39 @@ def test_init_scaffolds_project(tmp_path: Path) -> None:
     assert "stack detected" in result.output.lower()
     out = result.output
     assert ".claude" in out or "create-spec" in out or "Next step" in out
+    # .env.example must always be created by init
+    assert (tmp_path / ".env.example").exists(), ".env.example missing after init"
+
+
+def test_init_creates_env_example_when_yaml_already_exists(tmp_path: Path) -> None:
+    """Regression: .env.example must be created even when claw-forge.yaml already exists.
+
+    Previously, _scaffold_config was only called when the yaml was absent.
+    If the user ran `init` twice (or created claw-forge.yaml manually) the
+    .env.example was silently skipped.
+    """
+    # Pre-create claw-forge.yaml so _scaffold_config is NOT triggered
+    cfg_path = tmp_path / "claw-forge.yaml"
+    cfg_path.write_text(
+        "project: existing\nproviders:\n  - name: p\n    type: anthropic\n    api_key: ${KEY}\n"
+    )
+    assert not (tmp_path / ".env.example").exists()
+
+    mock_scaffold = {
+        "claude_md_written": False,
+        "dot_claude_created": False,
+        "spec_example_written": False,
+        "commands_copied": [],
+        "stack": {"language": "unknown", "framework": "unknown"},
+    }
+    with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
+        result = runner.invoke(app, ["init", "--project", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".env.example").exists(), (
+        ".env.example not created when claw-forge.yaml already existed — regression"
+    )
+    assert ".env.example" in result.output or "env" in result.output.lower()
 
 
 def test_init_shows_next_step_hint(tmp_path: Path) -> None:
