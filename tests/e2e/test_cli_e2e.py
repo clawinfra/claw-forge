@@ -369,3 +369,126 @@ class TestModelFormats:
         result = runner.invoke(app, ["add", "--help"])
         assert result.exit_code == 0
         assert "provider/model" in result.output or "provider" in result.output.lower()
+
+
+class TestPlanWritesDB:
+    """plan command must write tasks to .claw-forge/state.db for run to consume."""
+
+    def _make_minimal_spec(self, path: Path) -> None:
+        """Write a minimal but valid claw-forge XML spec (matches app_spec.template.xml schema)."""
+        path.write_text(
+            "<project_specification>\n"
+            "  <project_name>TestApp</project_name>\n"
+            "  <overview>A simple test app for e2e testing.</overview>\n"
+            "  <technology_stack>\n"
+            "    <frontend><framework>React</framework><port>3000</port></frontend>\n"
+            "    <backend><runtime>Python with FastAPI</runtime>"
+            "<database>SQLite</database><port>8000</port></backend>\n"
+            "  </technology_stack>\n"
+            "  <core_features>\n"
+            "    <backend>\n"
+            "      - GET /hello returns JSON greeting\n"
+            "      - GET /health returns 200 OK with status json\n"
+            "    </backend>\n"
+            "    <frontend>\n"
+            "      - Home page displays welcome message\n"
+            "    </frontend>\n"
+            "  </core_features>\n"
+            "</project_specification>\n",
+            encoding="utf-8",
+        )
+
+    def _make_minimal_config(self, project: Path) -> None:
+        (project / "claw-forge.yaml").write_text(
+            "providers:\n"
+            "  anthropic:\n"
+            "    provider_type: anthropic\n"
+            "    api_key: test-key\n"
+            "    models: [claude-sonnet-4-20250514]\n"
+            "    priority: 1\n"
+            "    enabled: true\n",
+            encoding="utf-8",
+        )
+
+    def test_plan_creates_claw_forge_dir(self) -> None:
+        """claw-forge plan creates .claw-forge/ directory."""
+        with tempfile.TemporaryDirectory(prefix="e2e-plan-db-") as tmp:
+            project = Path(tmp)
+            self._make_minimal_config(project)
+            spec = project / "app_spec.xml"
+            self._make_minimal_spec(spec)
+
+            result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            assert result.exit_code == 0, result.output
+            assert (project / ".claw-forge").is_dir(), (
+                ".claw-forge/ not created by plan"
+            )
+
+    def test_plan_creates_state_db(self) -> None:
+        """claw-forge plan creates .claw-forge/state.db."""
+        with tempfile.TemporaryDirectory(prefix="e2e-plan-db-") as tmp:
+            project = Path(tmp)
+            self._make_minimal_config(project)
+            spec = project / "app_spec.xml"
+            self._make_minimal_spec(spec)
+
+            result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            assert result.exit_code == 0, result.output
+            db = project / ".claw-forge" / "state.db"
+            assert db.exists(), f"state.db not found at {db}"
+
+    def test_plan_writes_pending_tasks(self) -> None:
+        """Tasks written by plan are readable and pending."""
+        import asyncio
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from sqlalchemy import select
+        from claw_forge.state.models import Task
+
+        with tempfile.TemporaryDirectory(prefix="e2e-plan-tasks-") as tmp:
+            project = Path(tmp)
+            self._make_minimal_config(project)
+            spec = project / "app_spec.xml"
+            self._make_minimal_spec(spec)
+
+            result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            assert result.exit_code == 0, result.output
+
+            db_path = project / ".claw-forge" / "state.db"
+            assert db_path.exists()
+
+            async def read_tasks() -> list[Task]:
+                engine = create_async_engine(
+                    f"sqlite+aiosqlite:///{db_path}", echo=False
+                )
+                maker = async_sessionmaker(
+                    engine, class_=AsyncSession, expire_on_commit=False
+                )
+                async with maker() as sess:
+                    rows = (await sess.execute(select(Task))).scalars().all()
+                await engine.dispose()
+                return list(rows)
+
+            tasks = asyncio.run(read_tasks())
+            assert len(tasks) >= 2, f"Expected ≥2 tasks, got {len(tasks)}"
+            statuses = {t.status for t in tasks}
+            assert statuses == {"pending"}, f"Expected all pending, got {statuses}"
+
+    def test_run_after_plan_finds_tasks(self) -> None:
+        """After plan, run reports tasks found (not 'No pending tasks')."""
+        with tempfile.TemporaryDirectory(prefix="e2e-planrun-") as tmp:
+            project = Path(tmp)
+            self._make_minimal_config(project)
+            spec = project / "app_spec.xml"
+            self._make_minimal_spec(spec)
+
+            plan_result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            assert plan_result.exit_code == 0, plan_result.output
+
+            run_result = runner.invoke(
+                app, ["run", "--project", tmp, "--dry-run"]
+            )
+            assert run_result.exit_code == 0, run_result.output
+            assert "No pending tasks" not in run_result.output, (
+                f"run still reports no tasks after plan:\n{run_result.output}"
+            )
