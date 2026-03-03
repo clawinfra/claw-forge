@@ -1212,9 +1212,23 @@ def ui(
             console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
             subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
 
+        _session_id_dev = "(none)"
+        try:
+            import httpx as _httpx_dev
+            _r2 = _httpx_dev.get(f"http://localhost:{state_port}/sessions", timeout=2.0)
+            if _r2.status_code == 200:
+                _sess2 = _r2.json()
+                if isinstance(_sess2, list) and _sess2:
+                    _session_id_dev = _sess2[-1].get("id", "(none)")
+                elif isinstance(_sess2, dict) and _sess2.get("sessions"):
+                    _session_id_dev = _sess2["sessions"][-1].get("id", "(none)")
+        except Exception:  # noqa: BLE001
+            pass
+
         console.print("[bold green]🔥 claw-forge Kanban UI (dev)[/bold green]")
         console.print(f"   UI:        [cyan]{url}[/cyan]")
         console.print(f"   State API: [cyan]http://localhost:{state_port}[/cyan]")
+        console.print(f"   Session:   [yellow]{_session_id_dev}[/yellow]")
         console.print("   Press [bold]Ctrl+C[/bold] to stop\n")
 
         env = os.environ.copy()
@@ -1333,9 +1347,24 @@ def ui(
         ]
     )
 
+    # Fetch the latest session ID from the state service for display
+    _session_id_display = "(none)"
+    try:
+        import httpx as _httpx_info
+        _r = _httpx_info.get(f"http://localhost:{state_port}/sessions", timeout=2.0)
+        if _r.status_code == 200:
+            _sessions = _r.json()
+            if isinstance(_sessions, list) and _sessions:
+                _session_id_display = _sessions[-1].get("id", "(none)")
+            elif isinstance(_sessions, dict) and _sessions.get("sessions"):
+                _session_id_display = _sessions["sessions"][-1].get("id", "(none)")
+    except Exception:  # noqa: BLE001
+        pass
+
     console.print("[bold green]🔥 claw-forge Kanban UI[/bold green]")
     console.print(f"   UI:        [cyan]{url}[/cyan]")
     console.print(f"   State API: [cyan]http://localhost:{state_port}[/cyan]")
+    console.print(f"   Session:   [yellow]{_session_id_display}[/yellow]")
     console.print("   Press [bold]Ctrl+C[/bold] to stop\n")
 
     if open_browser:
