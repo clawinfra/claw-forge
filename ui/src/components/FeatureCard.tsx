@@ -10,11 +10,19 @@
  * - Cost in USD
  * - Agent mascot (if running)
  * - Left border accent by status
+ *
+ * Touch features:
+ * - Tap to expand output on mobile (replaces hover)
+ * - Long-press (500ms) opens task detail modal
+ * - Haptic feedback on status change / drag
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Feature } from "../types";
 import { AgentMascot } from "./AgentMascot";
+import { useLongPress } from "../hooks/useLongPress";
+import { useMobileDetect } from "../hooks/useMobileDetect";
+import { triggerHaptic } from "../utils/haptic";
 
 interface FeatureCardProps {
   feature: Feature;
@@ -25,6 +33,8 @@ interface FeatureCardProps {
   implicatedInRegression?: boolean;
   /** Called when user selects a quick command action */
   onQuickCommand?: (commandId: string, args: Record<string, unknown>) => void;
+  /** Called on long-press — opens task detail modal */
+  onLongPress?: (feature: Feature) => void;
 }
 
 const STATUS_BADGE: Record<Feature["status"], string> = {
@@ -68,8 +78,12 @@ export function FeatureCard({
   implicatedFeatureIds = [],
   implicatedInRegression = false,
   onQuickCommand,
+  onLongPress,
 }: FeatureCardProps) {
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const [tapped, setTapped] = useState(false);
+  const isMobile = useMobileDetect();
+  const prevStatusRef = useRef(feature.status);
   const depCount = feature.depends_on.length;
   const featureNumId = Number(feature.id);
   const isImplicated =
@@ -79,17 +93,46 @@ export function FeatureCard({
     feature as Feature & { is_fixing_regression?: boolean }
   ).is_fixing_regression;
 
+  // Haptic feedback on status change
+  useEffect(() => {
+    if (prevStatusRef.current !== feature.status) {
+      triggerHaptic(50);
+      prevStatusRef.current = feature.status;
+    }
+  }, [feature.status]);
+
+  // Long-press handler
+  const longPressHandlers = useLongPress({
+    duration: 500,
+    onLongPress: () => {
+      if (onLongPress) onLongPress(feature);
+    },
+    onTap: () => {
+      if (isMobile) {
+        // Toggle tap-to-expand on mobile
+        setTapped((v) => !v);
+      }
+      if (onClick) onClick();
+    },
+  });
+
+  // Whether to show expanded info (mobile tap or desktop hover via CSS)
+  const showExpanded = isMobile && tapped;
+
   return (
     <div
-      onClick={onClick}
+      onClick={isMobile ? undefined : onClick}
+      {...(isMobile ? longPressHandlers : {})}
       className={`group rounded-lg border-l-4 border bg-white dark:bg-slate-800 p-3 shadow-sm
-        hover:shadow-md transition-all duration-200 cursor-pointer
+        hover:shadow-md transition-all duration-200 cursor-pointer touch-manipulation
         border-slate-200 dark:border-slate-700
         ${STATUS_BORDER[feature.status]}
         ${feature.status === "failed" ? "border-r-red-200 dark:border-r-red-900" : ""}
         ${feature.status === "running" ? "border-r-blue-200 dark:border-r-blue-900" : ""}
         ${isFixingRegression ? "animate-pulse border-yellow-400 dark:border-yellow-400" : ""}
+        ${showExpanded ? "ring-2 ring-forge-500/50" : ""}
       `}
+      data-testid="feature-card"
     >
       {/* Header: ID + status + quick-action button */}
       <div className="flex items-start justify-between gap-2">
@@ -203,6 +246,27 @@ export function FeatureCard({
         <p className="mt-1.5 text-[10px] text-red-600 dark:text-red-400 line-clamp-2 leading-snug">
           {feature.error_message}
         </p>
+      )}
+
+      {/* Tap-to-expand section (mobile only) */}
+      {showExpanded && (
+        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1.5 animate-fade-in" data-testid="card-expanded">
+          {feature.description && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+              {feature.description}
+            </p>
+          )}
+          {feature.session_id && (
+            <p className="text-[10px] font-mono text-blue-500 dark:text-blue-400 truncate">
+              Agent: {feature.session_id}
+            </p>
+          )}
+          {feature.cost_usd > 0 && (
+            <p className="text-[10px] text-slate-400">
+              Tokens: {feature.input_tokens.toLocaleString()} in / {feature.output_tokens.toLocaleString()} out
+            </p>
+          )}
+        </div>
       )}
 
       {/* Footer: deps + cost */}

@@ -243,26 +243,29 @@ async def test_execute_check_code_streams_output(tmp_path):
 
     service.ws_manager.broadcast = capture_broadcast  # type: ignore[method-assign]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        resp = await ac.post(
-            "/commands/execute",
-            json={"command": "pool-status"},
-        )
-        assert resp.status_code == 200
-        exec_id = resp.json()["execution_id"]
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.post(
+                "/commands/execute",
+                json={"command": "pool-status"},
+            )
+            assert resp.status_code == 200
+            exec_id = resp.json()["execution_id"]
 
-        # Wait for subprocess to finish
-        await asyncio.sleep(1.0)
+            # Wait for subprocess to finish
+            await asyncio.sleep(1.0)
 
-    # Verify command_done was broadcast
-    done_events = [e for e in received_events if e.get("type") == "command_done"]
-    assert len(done_events) >= 1
-    done = done_events[0]
-    assert done["execution_id"] == exec_id
-    assert "exit_code" in done
-    assert "duration_ms" in done
+        # Verify command_done was broadcast
+        done_events = [e for e in received_events if e.get("type") == "command_done"]
+        assert len(done_events) >= 1
+        done = done_events[0]
+        assert done["execution_id"] == exec_id
+        assert "exit_code" in done
+        assert "duration_ms" in done
+    finally:
+        await service.dispose()
 
 
 @pytest.mark.asyncio
@@ -281,17 +284,20 @@ async def test_command_done_event_has_exit_code(tmp_path):
 
     service.ws_manager.broadcast = cap  # type: ignore[method-assign]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        resp = await ac.post("/commands/execute", json={"command": "pool-status"})
-        resp.json()["execution_id"]
-        await asyncio.sleep(1.0)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.post("/commands/execute", json={"command": "pool-status"})
+            resp.json()["execution_id"]
+            await asyncio.sleep(1.0)
 
-    done = next((e for e in received if e.get("type") == "command_done"), None)
-    assert done is not None
-    assert "exit_code" in done
-    assert isinstance(done["exit_code"], int)
+        done = next((e for e in received if e.get("type") == "command_done"), None)
+        assert done is not None
+        assert "exit_code" in done
+        assert isinstance(done["exit_code"], int)
+    finally:
+        await service.dispose()
 
 
 # ── UI component file existence tests ─────────────────────────────────────────

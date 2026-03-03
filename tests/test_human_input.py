@@ -17,11 +17,20 @@ from claw_forge.state.service import AgentStateService
 
 
 async def _make_client() -> tuple[AsyncClient, AgentStateService]:
-    """Create an in-memory AgentStateService with DB initialised."""
+    """Create an in-memory AgentStateService with DB initialised.
+
+    The returned client disposes the engine on close (BUG-10 fix).
+    """
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
     await svc.init_db()
     app = svc.create_app()
-    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    class _CleanupClient(AsyncClient):
+        async def aclose(self) -> None:
+            await super().aclose()
+            await svc.dispose()
+
+    client = _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
     return client, svc
 
 

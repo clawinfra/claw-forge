@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Any, cast
 
 from claw_forge.pool.health import CircuitBreaker, CircuitState
@@ -185,7 +186,19 @@ class ProviderPoolManager:
                     self._tracker.record_error(provider.name)
                     errors.append((provider.name, e))
                     if e.retry_after:
-                        await asyncio.sleep(min(e.retry_after, self._backoff_max))
+                        wait = min(e.retry_after, self._backoff_max)
+                    else:
+                        # Exponential backoff with jitter when no retry-after header
+                        base_wait = min(
+                            self._backoff_base * (2 ** attempt), self._backoff_max
+                        )
+                        jitter = random.uniform(0, base_wait * 0.5)  # noqa: S311
+                        wait = base_wait + jitter
+                    logger.info(
+                        "Rate-limit backoff on %s: %.1fs (attempt %d)",
+                        provider.name, wait, attempt,
+                    )
+                    await asyncio.sleep(wait)
                     continue
 
                 except ProviderError as e:

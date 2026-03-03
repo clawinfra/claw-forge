@@ -27,7 +27,8 @@ async def service() -> AgentStateService:
     """AgentStateService backed by in-memory SQLite."""
     svc = AgentStateService(database_url="sqlite+aiosqlite:///:memory:")
     await svc.init_db()
-    return svc
+    yield svc  # type: ignore[misc]
+    await svc.dispose()
 
 
 @pytest_asyncio.fixture

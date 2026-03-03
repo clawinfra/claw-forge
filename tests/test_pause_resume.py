@@ -169,7 +169,10 @@ class TestPauseResumeAPI:
     """Test the state service REST endpoints for pause/resume."""
 
     async def _make_client(self):  # type: ignore[return]
-        """Create an in-memory service with DB pre-initialized."""
+        """Create an in-memory service with DB pre-initialized.
+
+        The returned client disposes the engine on close (BUG-10 fix).
+        """
         from httpx import ASGITransport, AsyncClient
 
         from claw_forge.state.service import AgentStateService
@@ -177,7 +180,13 @@ class TestPauseResumeAPI:
         svc = AgentStateService("sqlite+aiosqlite:///:memory:")
         await svc.init_db()
         app = svc.create_app()
-        client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+        class _CleanupClient(AsyncClient):
+            async def aclose(self) -> None:
+                await super().aclose()
+                await svc.dispose()
+
+        client = _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
         return client, svc
 
     @pytest.mark.asyncio

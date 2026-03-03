@@ -20,6 +20,7 @@ import {
   QueryClient,
   QueryClientProvider,
   useQuery,
+  useQueryClient,
 } from "@tanstack/react-query";
 import {
   Sun,
@@ -30,6 +31,8 @@ import {
   LayoutGrid,
   Inbox,
   Zap,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { FeatureCard } from "./components/FeatureCard";
 import { RegressionHealthBar } from "./components/RegressionHealthBar";
@@ -47,11 +50,15 @@ import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommandsPanel } from "./components/CommandsPanel";
 import { ExecutionDrawer } from "./components/ExecutionDrawer";
+import { TaskDetailModal } from "./components/TaskDetailModal";
+import { FAB } from "./components/FAB";
 import { useFeatures } from "./hooks/useFeatures";
 import { usePoolStatus } from "./hooks/usePoolStatus";
 import { useDarkMode } from "./hooks/useDarkMode";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { useTouchGestures } from "./hooks/useTouchGestures";
+import { useMobileDetect } from "./hooks/useMobileDetect";
 import { fetchSession, fetchCommands, executeCommand } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
@@ -126,6 +133,7 @@ interface KanbanBoardProps {
 }
 
 function KanbanBoard({ sessionId }: KanbanBoardProps) {
+  const qc = useQueryClient();
   const {
     data: features,
     isLoading: featuresLoading,
@@ -155,7 +163,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   // View mode: kanban | graph
   const [viewMode, setViewMode] = useState<ViewMode>("kanban");
 
-  // Feature detail drawer
+  // Feature detail drawer (desktop)
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(
     null,
   );
@@ -163,6 +171,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     () => (features ?? []).find((f) => f.id === selectedFeatureId) ?? null,
     [features, selectedFeatureId],
   );
+
+  // Task detail modal (long-press, mobile)
+  const [longPressFeature, setLongPressFeature] = useState<Feature | null>(null);
 
   // Filter state
   const [filters, setFilters] = useState<FilterState>({
@@ -201,6 +212,35 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
   // Column refs for scrolling
   const columnRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // ── Touch / Mobile features ─────────────────────────────────────────────
+  const isMobile = useMobileDetect();
+  const [mobileColumnIndex, setMobileColumnIndex] = useState(0);
+
+  // Pinch-to-zoom & swipe detection
+  const { scale, setScale, swipeDirection, clearSwipe, touchHandlers } =
+    useTouchGestures({ minScale: 0.5, maxScale: 2 });
+
+  // Handle swipe to navigate columns on mobile
+  useEffect(() => {
+    if (!isMobile || !swipeDirection) return;
+    setMobileColumnIndex((prev) => {
+      if (swipeDirection === "left") return Math.min(prev + 1, KANBAN_COLUMNS.length - 1);
+      if (swipeDirection === "right") return Math.max(prev - 1, 0);
+      return prev;
+    });
+    clearSwipe();
+  }, [swipeDirection, clearSwipe, isMobile]);
+
+  // FAB handlers
+  const handleRefresh = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["features"] });
+    void qc.invalidateQueries({ queryKey: ["pool-status"] });
+  }, [qc]);
+
+  const handleResetZoom = useCallback(() => {
+    setScale(1);
+  }, [setScale]);
 
   const summary = useSummary(features);
   const projectName = (sessionData as Record<string, unknown>)?.project_path as
@@ -465,8 +505,22 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
       {/* ── Main content ────────────────────────────────────────────────── */}
       {viewMode === "kanban" ? (
-        <main className="flex-1 overflow-x-auto px-4 py-4">
-          <div className="max-w-screen-2xl mx-auto">
+        <main
+          className="flex-1 overflow-x-auto px-4 py-4"
+          style={{
+            touchAction: isMobile ? "pan-y" : "auto",
+          }}
+          {...touchHandlers}
+        >
+          <div
+            className="max-w-screen-2xl mx-auto"
+            style={{
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
+              transition: "transform 0.1s ease-out",
+            }}
+            data-testid="kanban-board"
+          >
             {featuresError && (
               <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
                 ⚠️ Failed to load features — is the state service running on
@@ -474,16 +528,57 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
               </div>
             )}
 
-            <div className="flex gap-4 items-start h-full">
+            {/* Mobile: column navigator header */}
+            {isMobile && (
+              <div className="flex items-center justify-between mb-3 px-1" data-testid="mobile-column-nav">
+                <button
+                  type="button"
+                  onClick={() => setMobileColumnIndex((v) => Math.max(0, v - 1))}
+                  disabled={mobileColumnIndex === 0}
+                  className="p-1 rounded-lg text-slate-500 disabled:text-slate-300 dark:text-slate-400 dark:disabled:text-slate-600"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {KANBAN_COLUMNS.map((col, idx) => (
+                    <button
+                      key={col.id}
+                      type="button"
+                      onClick={() => setMobileColumnIndex(idx)}
+                      className={`h-2 rounded-full transition-all duration-200 ${
+                        idx === mobileColumnIndex
+                          ? "w-6 bg-forge-600"
+                          : "w-2 bg-slate-300 dark:bg-slate-600"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileColumnIndex((v) => Math.min(KANBAN_COLUMNS.length - 1, v + 1))}
+                  disabled={mobileColumnIndex === KANBAN_COLUMNS.length - 1}
+                  className="p-1 rounded-lg text-slate-500 disabled:text-slate-300 dark:text-slate-400 dark:disabled:text-slate-600"
+                >
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
+
+            {/* Columns: flex on desktop, stacked/single on mobile */}
+            <div className={isMobile ? "flex flex-col gap-4" : "flex gap-4 items-start h-full"} data-testid="kanban-columns">
               {KANBAN_COLUMNS.map((col, colIdx) => {
                 const cards = columnFeatures[col.id] ?? [];
+                // On mobile, only show the active column
+                if (isMobile && colIdx !== mobileColumnIndex) return null;
                 return (
                   <div
                     key={col.id}
                     ref={(el) => {
                       columnRefs.current[colIdx] = el;
                     }}
-                    className={`flex flex-col rounded-xl border ${col.colorClass} ${col.darkColorClass} min-w-[240px] w-64 flex-shrink-0 transition-colors duration-200`}
+                    className={`flex flex-col rounded-xl border ${col.colorClass} ${col.darkColorClass} transition-colors duration-200
+                      ${isMobile ? "w-full min-w-0" : "min-w-[240px] w-64 flex-shrink-0"}`}
+                    data-testid={`kanban-column-${col.id}`}
                   >
                     {/* Column header */}
                     <div
@@ -496,7 +591,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                     </div>
 
                     {/* Cards */}
-                    <div className="flex flex-col gap-2 p-2 overflow-y-auto max-h-[calc(100vh-280px)]">
+                    <div className={`flex flex-col gap-2 p-2 overflow-y-auto ${isMobile ? "max-h-[calc(100vh-340px)]" : "max-h-[calc(100vh-280px)]"}`}>
                       {featuresLoading
                         ? Array.from({ length: 3 }, (_, i) => (
                             <div
@@ -509,6 +604,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                               key={feature.id}
                               feature={feature}
                               onClick={() => setSelectedFeatureId(feature.id)}
+                              onLongPress={(f) => setLongPressFeature(f)}
                               implicatedFeatureIds={implicatedFeatureIds}
                             />
                           ))}
@@ -585,6 +681,17 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
       {/* ── Toast notifications ─────────────────────────────────────────── */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* ── Task detail modal (long-press on mobile) ──────────────────── */}
+      <TaskDetailModal
+        feature={longPressFeature}
+        onClose={() => setLongPressFeature(null)}
+      />
+
+      {/* ── FAB (mobile only) ────────────────────────────────────────────── */}
+      {isMobile && (
+        <FAB onRefresh={handleRefresh} onResetZoom={handleResetZoom} />
+      )}
 
       {/* ── Connection status ───────────────────────────────────────────── */}
       <ConnectionIndicator

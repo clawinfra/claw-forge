@@ -155,16 +155,19 @@ class TestParallelReviewer:
     @pytest.mark.asyncio
     async def test_start_stop(self) -> None:
         svc = self._make_service()
-        reviewer = ParallelReviewer(
-            project_dir="/tmp",
-            state_service=svc,
-            interval_features=1,
-        )
-        await reviewer.start()
-        assert reviewer._task is not None
-        assert not reviewer._task.done()
-        await reviewer.stop()
-        assert reviewer._task is None
+        try:
+            reviewer = ParallelReviewer(
+                project_dir="/tmp",
+                state_service=svc,
+                interval_features=1,
+            )
+            await reviewer.start()
+            assert reviewer._task is not None
+            assert not reviewer._task.done()
+            await reviewer.stop()
+            assert reviewer._task is None
+        finally:
+            await svc.dispose()
 
     @pytest.mark.asyncio
     async def test_double_start_is_noop(self) -> None:

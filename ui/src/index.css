@@ -101,3 +101,64 @@
 .animate-celebration-pop {
   animation: celebration-pop 0.5s ease-out;
 }
+
+/* ── Touch / Mobile animations ─────────────────────────────────────────── */
+
+/* Slide up for modal (mobile bottom sheet) */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Fade in for tap-to-expand */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 200px;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* FAB expand animation */
+@keyframes fab-expand {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-fab-expand {
+  animation: fab-expand 0.2s ease-out;
+}
+
+/* Touch manipulation for cards — prevent 300ms tap delay */
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+/* ── Responsive mobile overrides ───────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  /* Hide horizontal scroll on mobile kanban — use swipe instead */
+  main {
+    overflow-x: hidden !important;
+  }
+}

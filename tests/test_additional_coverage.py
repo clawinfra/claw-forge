@@ -181,7 +181,12 @@ class TestRouterUncovered:
 
 
 async def _make_test_client() -> tuple[Any, Any]:
-    """Create an in-memory AgentStateService with DB initialised."""
+    """Create an in-memory AgentStateService with DB initialised.
+
+    Returns (client, svc). The service engine is disposed when the client
+    context manager exits, preventing 'Event loop is closed' warnings from
+    aiosqlite connections that outlive the event loop (BUG-10).
+    """
     from httpx import ASGITransport, AsyncClient
 
     from claw_forge.state.service import AgentStateService
@@ -189,7 +194,14 @@ async def _make_test_client() -> tuple[Any, Any]:
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
     await svc.init_db()
     app = svc.create_app()
-    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    # Wrap AsyncClient so .dispose() is called on __aexit__
+    class _CleanupClient(AsyncClient):
+        async def aclose(self) -> None:
+            await super().aclose()
+            await svc.dispose()
+
+    client = _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
     return client, svc
 
 
@@ -405,19 +417,22 @@ async def test_broadcast_methods() -> None:
     from claw_forge.state.service import AgentStateService
 
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
-    mgr = svc.ws_manager
-    ws = MagicMock()
-    ws.accept = AsyncMock()
-    ws.send_json = AsyncMock()
-    await mgr.connect(ws)
+    try:
+        mgr = svc.ws_manager
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock()
+        await mgr.connect(ws)
 
-    await mgr.broadcast_feature_update({"task_id": "t1", "status": "done"})
-    await mgr.broadcast_pool_update([{"name": "p1", "healthy": True}])
-    await mgr.broadcast_agent_started("sess-1", "task-1")
-    await mgr.broadcast_agent_completed("sess-1", "task-1", passed=True)
-    await mgr.broadcast_cost_update(1.23, 0.05)
+        await mgr.broadcast_feature_update({"task_id": "t1", "status": "done"})
+        await mgr.broadcast_pool_update([{"name": "p1", "healthy": True}])
+        await mgr.broadcast_agent_started("sess-1", "task-1")
+        await mgr.broadcast_agent_completed("sess-1", "task-1", passed=True)
+        await mgr.broadcast_cost_update(1.23, 0.05)
 
-    assert ws.send_json.call_count == 5
+        assert ws.send_json.call_count == 5
+    finally:
+        await svc.dispose()
 
 
 @pytest.mark.asyncio
@@ -1058,15 +1073,18 @@ async def test_emit_event_with_ws_clients() -> None:
     from claw_forge.state.service import AgentStateService
 
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
-    await svc.init_db()
+    try:
+        await svc.init_db()
 
-    dead_ws = MagicMock()
-    dead_ws.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
-    svc._ws_clients.append(dead_ws)
+        dead_ws = MagicMock()
+        dead_ws.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
+        svc._ws_clients.append(dead_ws)
 
-    # Should not raise; dead client should be cleaned up
-    await svc._emit_event("sess-1", None, "test.event", {"key": "value"})
-    assert dead_ws not in svc._ws_clients
+        # Should not raise; dead client should be cleaned up
+        await svc._emit_event("sess-1", None, "test.event", {"key": "value"})
+        assert dead_ws not in svc._ws_clients
+    finally:
+        await svc.dispose()
 
 
 @pytest.mark.asyncio
@@ -1077,18 +1095,21 @@ async def test_service_list_tasks() -> None:
     from claw_forge.state.service import AgentStateService
 
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
-    await svc.init_db()
-    app = svc.create_app()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        sess = await c.post("/sessions", json={"project_path": "/p"})
-        sid = sess.json()["id"]
-        t = await c.post(f"/sessions/{sid}/tasks", json={"plugin_name": "coding"})
-        assert t.status_code == 201
+    try:
+        await svc.init_db()
+        app = svc.create_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            sess = await c.post("/sessions", json={"project_path": "/p"})
+            sid = sess.json()["id"]
+            t = await c.post(f"/sessions/{sid}/tasks", json={"plugin_name": "coding"})
+            assert t.status_code == 201
 
-        list_resp = await c.get(f"/sessions/{sid}/tasks")
-        assert list_resp.status_code == 200
-        tasks = list_resp.json()
-        assert len(tasks) >= 1
+            list_resp = await c.get(f"/sessions/{sid}/tasks")
+            assert list_resp.status_code == 200
+            tasks = list_resp.json()
+            assert len(tasks) >= 1
+    finally:
+        await svc.dispose()
 
 
 @pytest.mark.asyncio
@@ -1098,11 +1119,14 @@ async def test_service_update_task_not_found() -> None:
     from claw_forge.state.service import AgentStateService
 
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
-    await svc.init_db()
-    app = svc.create_app()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.patch("/tasks/ghost-id", json={"status": "running"})
-        assert resp.status_code == 404
+    try:
+        await svc.init_db()
+        app = svc.create_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch("/tasks/ghost-id", json={"status": "running"})
+            assert resp.status_code == 404
+    finally:
+        await svc.dispose()
 
 
 # ---------------------------------------------------------------------------

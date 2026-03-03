@@ -215,6 +215,23 @@ class AgentStateService:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+    async def dispose(self) -> None:
+        """Dispose the async engine, closing all pooled connections.
+
+        Call this during test teardown to prevent 'Event loop is closed'
+        warnings from aiosqlite connections that outlive the event loop.
+        """
+        await self._engine.dispose()
+
+    async def __aenter__(self) -> AgentStateService:
+        """Enter async context — initialise the database."""
+        await self.init_db()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Exit async context — dispose engine to close aiosqlite connections."""
+        await self.dispose()
+
     def create_app(self) -> FastAPI:
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
