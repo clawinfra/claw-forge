@@ -127,7 +127,12 @@ def test_init_missing_spec(tmp_path: Path) -> None:
     mock_result.success = False
     mock_result.output = "spec not found"
     mock_result.metadata = {}
-    mock_scaffold = {"claude_md_written": False, "commands_copied": [], "stack": {}}
+    mock_scaffold = {
+        "claude_md_written": False,
+        "dot_claude_created": False,
+        "commands_copied": [],
+        "stack": {},
+    }
     with (
         patch("claw_forge.plugins.initializer.InitializerPlugin.execute",
               new_callable=AsyncMock, return_value=mock_result),
@@ -159,7 +164,12 @@ def test_init_with_valid_spec(tmp_path: Path) -> None:
     mock_result.output = "done"
     mock_result.metadata = {"feature_count": 1, "project_name": "test-project",
                             "category_counts": {"core": 1}, "wave_count": 1, "phases": []}
-    mock_scaffold = {"claude_md_written": False, "commands_copied": [], "stack": {}}
+    mock_scaffold = {
+        "claude_md_written": False,
+        "dot_claude_created": False,
+        "commands_copied": [],
+        "stack": {},
+    }
 
     with (
         patch("claw_forge.cli.asyncio.run", return_value=mock_result),

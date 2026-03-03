@@ -245,3 +245,110 @@ def test_scaffold_project_python_stack(tmp_path: Path) -> None:
 def test_scaffold_project_commands_copied_is_list(tmp_path: Path) -> None:
     result = scaffold_project(tmp_path)
     assert isinstance(result["commands_copied"], list)
+
+
+# ---------------------------------------------------------------------------
+# scaffold_dot_claude
+# ---------------------------------------------------------------------------
+
+def test_scaffold_dot_claude_creates_directory(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_dot_claude
+    created = scaffold_dot_claude(tmp_path)
+    assert created is True
+    assert (tmp_path / ".claude").is_dir()
+
+
+def test_scaffold_dot_claude_creates_settings_json(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_dot_claude
+    scaffold_dot_claude(tmp_path)
+    settings = tmp_path / ".claude" / "settings.json"
+    assert settings.exists()
+    import json
+    data = json.loads(settings.read_text())
+    assert "enableAllProjectMcpServers" in data
+
+
+def test_scaffold_dot_claude_idempotent(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_dot_claude
+    scaffold_dot_claude(tmp_path)
+    # Second call: directory already exists
+    created = scaffold_dot_claude(tmp_path)
+    assert created is False
+
+
+def test_scaffold_dot_claude_skips_existing_settings(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_dot_claude
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text('{"custom": true}')
+    scaffold_dot_claude(tmp_path)
+    # Should not overwrite
+    import json
+    data = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert data.get("custom") is True
+
+
+def test_scaffold_project_creates_dot_claude(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_project
+    result = scaffold_project(tmp_path)
+    assert (tmp_path / ".claude").is_dir()
+    assert result["dot_claude_created"] is True
+
+
+def test_scaffold_project_dot_claude_idempotent(tmp_path: Path) -> None:
+    from claw_forge.scaffold import scaffold_project
+    scaffold_project(tmp_path)
+    result = scaffold_project(tmp_path)
+    assert result["dot_claude_created"] is False
+
+
+# ---------------------------------------------------------------------------
+# _scaffold_config (via cli)
+# ---------------------------------------------------------------------------
+
+def test_scaffold_config_creates_yaml(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        created = _scaffold_config(cfg)
+    assert created is True
+    assert (tmp_path / "claw-forge.yaml").exists()
+
+
+def test_scaffold_config_yaml_is_valid(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    import yaml
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert "providers" in data
+    assert "pool" in data
+    assert "model_aliases" in data
+
+
+def test_scaffold_config_creates_env_example(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    assert (tmp_path / ".env.example").exists()
+    content = (tmp_path / ".env.example").read_text()
+    assert "ANTHROPIC_API_KEY" in content
+
+
+def test_scaffold_config_idempotent(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+        created = _scaffold_config(cfg)
+    assert created is False

@@ -226,10 +226,37 @@ def scaffold_commands(project_path: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def scaffold_project(project_path: Path) -> dict[str, Any]:
-    """Run full scaffold: generate CLAUDE.md + copy commands.
+_CLAUDE_SETTINGS = """\
+{
+  "enableAllProjectMcpServers": true
+}
+"""
 
-    Returns dict: {claude_md_written: bool, commands_copied: list[str], stack: dict}
+
+def scaffold_dot_claude(project_path: Path) -> bool:
+    """Ensure .claude/ directory exists with a settings.json.
+
+    Returns True if the directory was newly created.
+    """
+    dot_claude = project_path / ".claude"
+    created = not dot_claude.exists()
+    dot_claude.mkdir(parents=True, exist_ok=True)
+
+    settings = dot_claude / "settings.json"
+    if not settings.exists():
+        settings.write_text(_CLAUDE_SETTINGS, encoding="utf-8")
+
+    return created
+
+
+def scaffold_project(project_path: Path) -> dict[str, Any]:
+    """Run full scaffold: generate CLAUDE.md, ensure .claude/, copy commands.
+
+    Returns dict:
+      claude_md_written: bool   — True if CLAUDE.md was created
+      dot_claude_created: bool  — True if .claude/ was newly created
+      commands_copied: list[str]
+      stack: dict
     """
     stack = detect_stack(project_path)
 
@@ -239,10 +266,12 @@ def scaffold_project(project_path: Path) -> dict[str, Any]:
         claude_md_path.write_text(generate_claude_md(project_path), encoding="utf-8")
         claude_md_written = True
 
+    dot_claude_created = scaffold_dot_claude(project_path)
     commands_copied = scaffold_commands(project_path)
 
     return {
         "claude_md_written": claude_md_written,
+        "dot_claude_created": dot_claude_created,
         "commands_copied": commands_copied,
         "stack": stack,
     }
