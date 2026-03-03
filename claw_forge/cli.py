@@ -48,10 +48,10 @@ _DEFAULT_CONFIG_YAML = """\
 # Edit providers below, then copy .env.example → .env and fill in your keys.
 
 model_aliases:
-  opus:   claude-opus-4-5
-  sonnet: claude-sonnet-4-20250514
-  haiku:  claude-haiku-4-5
-  fast:   claude-haiku-4-5
+  opus:   claude-opus-4-6
+  sonnet: claude-sonnet-4-6
+  haiku:  claude-haiku-4-6
+  fast:   claude-haiku-4-6
 
 pool:
   strategy: priority
@@ -92,7 +92,7 @@ providers:
   #   enabled: true
 
 agent:
-  default_model: claude-sonnet-4-20250514
+  default_model: claude-sonnet-4-6
   max_tokens: 8192
   max_concurrent_agents: 5
 
@@ -118,7 +118,7 @@ _DEFAULT_ENV_EXAMPLE = """\
 # API key from https://console.anthropic.com
 ANTHROPIC_API_KEY=sk-ant-...
 # Model to use (default used when no --model flag is passed)
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4-6
 
 # ── Anthropic OAuth (Claude.ai / claude CLI) ──────────────────────────────────
 # Run `claude setup-token` to get this token, then paste it here.
@@ -129,7 +129,7 @@ ANTHROPIC_MODEL=claude-sonnet-4-20250514
 # Any provider that speaks the Anthropic Messages API (e.g. internal gateways)
 # PROXY_API_KEY=...
 # PROXY_BASE_URL=https://your-proxy.example.com/api/anthropic
-# PROXY_MODEL=claude-sonnet-4-20250514
+# PROXY_MODEL=claude-sonnet-4-6
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 # OPENAI_API_KEY=sk-...
@@ -294,11 +294,11 @@ def run(
         help="Agent task type: coding | testing | review.",
     ),
     model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m",
+        "claude-sonnet-4-6", "--model", "-m",
         help=(
             "Model to use. Supported formats:\n"
-            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
-            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  claude-sonnet-4-6             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-6    pin to specific provider\n"
             "  sonnet                               alias from model_aliases in config\n"
             "Defaults to the value in claw-forge.yaml."
         ),
@@ -327,7 +327,7 @@ def run(
         claw-forge run --concurrency 3
 
         # Run with a specific model
-        claw-forge run --model claude-opus-4-5 --concurrency 2
+        claw-forge run --model claude-opus-4-6 --concurrency 2
 
         # YOLO mode — no human-input gates, max speed
         claw-forge run --yolo
@@ -905,11 +905,11 @@ def plan(
     spec: str = typer.Argument(..., help="Path to app_spec.txt or additions_spec.xml."),
     project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     model: str = typer.Option(
-        "claude-opus-4-5", "--model", "-m",
+        "claude-opus-4-6", "--model", "-m",
         help=(
             "Model to use. Supported formats:\n"
-            "  claude-opus-4-5                      bare model (pool picks provider)\n"
-            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  claude-opus-4-6                      bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-6    pin to specific provider\n"
             "  opus                                 alias from model_aliases in config\n"
             "Defaults to Opus — planning is the most critical step."
         ),
@@ -1044,11 +1044,11 @@ def add(
     ),
     project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m",
+        "claude-sonnet-4-6", "--model", "-m",
         help=(
             "Model to use. Supported formats:\n"
-            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
-            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  claude-sonnet-4-6             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-6    pin to specific provider\n"
             "  sonnet                               alias from model_aliases in config"
         ),
     ),
@@ -1082,7 +1082,7 @@ def add(
         claw-forge add 'add rate limiting' --no-branch
 
         # Add with a specific model and concurrency
-        claw-forge add --spec additions_spec.xml --model claude-opus-4-5 --concurrency 2
+        claw-forge add --spec additions_spec.xml --model claude-opus-4-6 --concurrency 2
     """
     import json
 
@@ -1476,11 +1476,11 @@ def fix(
     ),
     project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m",
+        "claude-sonnet-4-6", "--model", "-m",
         help=(
             "Model to use. Supported formats:\n"
-            "  claude-sonnet-4-20250514             bare model (pool picks provider)\n"
-            "  anthropic-proxy-1/claude-opus-4-5    pin to specific provider\n"
+            "  claude-sonnet-4-6             bare model (pool picks provider)\n"
+            "  anthropic-proxy-1/claude-opus-4-6    pin to specific provider\n"
             "  sonnet                               alias from model_aliases in config"
         ),
     ),
@@ -1510,7 +1510,7 @@ def fix(
         claw-forge fix --report bug_report.md --no-branch
 
         # Fix with a specific model
-        claw-forge fix 'search returns empty results' --model claude-opus-4-5
+        claw-forge fix 'search returns empty results' --model claude-opus-4-6
     """
     import re
     import subprocess
