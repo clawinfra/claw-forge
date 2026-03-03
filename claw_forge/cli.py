@@ -212,7 +212,10 @@ def _http_get(url: str) -> dict[str, Any] | list[Any]:
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
     except httpx.ConnectError:
-        console.print(f"[red]State service not reachable at {url}[/red]")
+        console.print(
+            f"[red]State service not reachable at {url}[/red]\n"
+            "[yellow]Tip: start it with `claw-forge state`[/yellow]"
+        )
         raise typer.Exit(1) from None
     except httpx.HTTPStatusError as exc:
         console.print(f"[red]HTTP {exc.response.status_code}: {exc.response.text}[/red]")
@@ -226,7 +229,10 @@ def _http_post(url: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
     except httpx.ConnectError:
-        console.print(f"[red]State service not reachable at {url}[/red]")
+        console.print(
+            f"[red]State service not reachable at {url}[/red]\n"
+            "[yellow]Tip: start it with `claw-forge state`[/yellow]"
+        )
         raise typer.Exit(1) from None
     except httpx.HTTPStatusError as exc:
         console.print(f"[red]HTTP {exc.response.status_code}: {exc.response.text}[/red]")
@@ -259,7 +265,10 @@ def status(
     """
     from claw_forge.commands.help_cmd import run_help
 
-    run_help(config_path=config)
+    project_path = Path(project).resolve()
+    if config == "claw-forge.yaml":
+        config = str(project_path / "claw-forge.yaml")
+    run_help(config_path=config, project_path=str(project_path))
 
 
 @app.command()
