@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -441,6 +442,12 @@ def run(
                             console.print(f"    • {task_id[:8]}…  {desc}")
                 return
 
+            # Build provider pool for direct API fallback
+            from claw_forge.pool.manager import ProviderPoolManager
+
+            configs = load_configs_from_yaml(cfg)
+            pool = ProviderPoolManager(configs) if configs else None
+
             # Build task handler — each invocation gets its own session to
             # avoid concurrent commit() collisions on a shared session.
             async def task_handler(task_node: TaskNode) -> dict[str, Any]:
@@ -457,38 +464,82 @@ def run(
                     success = False
 
                     try:
-                        # Try to use real Claude SDK
+                        prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
+
+                        # ── Option 1: claude_agent_sdk (full autonomous coding agent) ──
+                        sdk_available = False
                         try:
+                            import importlib
+                            importlib.import_module("claude_agent_sdk")
+                            sdk_available = True
+                        except ImportError:
+                            pass
+
+                        if sdk_available:
                             from claude_agent_sdk import ClaudeAgentOptions
 
                             from claw_forge.agent.session import AgentSession
 
                             options = ClaudeAgentOptions(model=model)
                             async with AgentSession(options) as agent_session:
-                                prompt = db_task.description or f"Execute {db_task.plugin_name}"
-                                full_output = []
+                                full_output: list[str] = []
                                 async for msg in agent_session.run(prompt):
                                     if hasattr(msg, "text"):
                                         full_output.append(msg.text)
                                 output = "\n".join(full_output)
                             success = True
-                        except Exception as sdk_error:
-                            # Soft dependency — SDK not available, use mock
-                            console.print(
-                                f"[dim]Claude SDK unavailable ({type(sdk_error).__name__}), "
-                                f"using mock fallback[/dim]"
+
+                        # ── Option 2: claude CLI subprocess ───────────────────────────
+                        elif shutil.which("claude"):
+                            import subprocess
+
+                            proc = await asyncio.create_subprocess_exec(
+                                "claude",
+                                "--print",
+                                "--model", model,
+                                prompt,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                cwd=str(project_path),
                             )
-                            desc = db_task.description or db_task.plugin_name
-                            console.print(f"  [dim]→[/dim] {desc}")
-                            output = f"Mock execution: {desc}"
+                            stdout, stderr = await proc.communicate()
+                            if proc.returncode == 0:
+                                output = stdout.decode(errors="replace").strip()
+                                success = True
+                            else:
+                                output = stderr.decode(errors="replace").strip()
+                                success = False
+
+                        # ── Option 3: direct API call via provider pool ────────────────
+                        elif pool is not None:
+                            system_prompt = (
+                                "You are an expert software engineer. "
+                                "Implement the requested feature precisely and completely. "
+                                f"Project directory: {project_path}"
+                            )
+                            response = await pool.execute(
+                                model=model,
+                                messages=[{"role": "user", "content": prompt}],
+                                system=system_prompt,
+                                max_tokens=8192,
+                            )
+                            output = response.content or ""
                             success = True
+
+                        # ── No executor available ─────────────────────────────────────
+                        else:
+                            output = (
+                                "No agent executor available. Install claude_agent_sdk, "
+                                "add 'claude' CLI to PATH, or configure a provider in "
+                                "claw-forge.yaml with a valid API key."
+                            )
+                            success = False
 
                     except Exception as exc:
                         output = str(exc)
                         success = False
 
                     finally:
-                        # Mark task completed / failed in its own session
                         db_task.status = "completed" if success else "failed"
                         db_task.completed_at = datetime.now(UTC)
                         db_task.error_message = None if success else output
@@ -674,7 +725,7 @@ async def _write_plan_to_db(
     """Create .claw-forge/state.db and persist parsed features as pending tasks."""
     import uuid
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from claw_forge.state.models import Base, Task
     from claw_forge.state.models import Session as DbSession
