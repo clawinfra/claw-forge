@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from claw_forge.commands.registry import COMMAND_IDS, COMMAND_SHELLS, COMMANDS
@@ -239,7 +240,12 @@ class AgentStateService:
         @app.get("/sessions/{session_id}")
         async def get_session(session_id: str) -> dict[str, Any]:
             async with self._session_factory() as db:
-                session = await db.get(Session, session_id)
+                result = await db.execute(
+                    select(Session)
+                    .options(selectinload(Session.tasks))
+                    .where(Session.id == session_id)
+                )
+                session = result.scalar_one_or_none()
                 if not session:
                     raise HTTPException(404, "Session not found")
                 return {
@@ -247,7 +253,7 @@ class AgentStateService:
                     "project_path": session.project_path,
                     "status": session.status,
                     "created_at": str(session.created_at),
-                    "task_count": len(session.tasks) if session.tasks else 0,
+                    "task_count": len(session.tasks),
                 }
 
         @app.post("/sessions/{session_id}/tasks", status_code=201)
@@ -308,9 +314,18 @@ class AgentStateService:
                     {
                         "id": t.id,
                         "plugin_name": t.plugin_name,
+                        "description": t.description,
                         "status": t.status,
                         "priority": t.priority,
                         "depends_on": t.depends_on,
+                        "result_json": t.result_json,
+                        "error_message": t.error_message,
+                        "input_tokens": t.input_tokens,
+                        "output_tokens": t.output_tokens,
+                        "cost_usd": t.cost_usd,
+                        "created_at": str(t.created_at) if t.created_at else None,
+                        "started_at": str(t.started_at) if t.started_at else None,
+                        "completed_at": str(t.completed_at) if t.completed_at else None,
                     }
                     for t in tasks
                 ]
