@@ -26,14 +26,18 @@ console = Console()
 
 
 def _expand_env_vars(obj: object) -> object:
-    """Recursively expand ${VAR} placeholders using os.environ."""
+    """Recursively expand ${VAR} and ${VAR:-default} placeholders using os.environ."""
     import re
     if isinstance(obj, str):
         def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
-            key = m.group(1)
-            val = os.environ.get(key, "")
+            expr = m.group(1)
+            # Support bash-style ${VAR:-default} syntax
+            if ":-" in expr:
+                key, default = expr.split(":-", 1)
+                return os.environ.get(key.strip(), default.strip())
+            val = os.environ.get(expr, "")
             if not val:
-                console.print(f"[yellow]⚠ Env var ${{{key}}} is not set[/yellow]")
+                console.print(f"[yellow]⚠ Env var ${{{expr}}} is not set[/yellow]")
             return val
         return re.sub(r"\$\{([^}]+)\}", _replace, obj)
     if isinstance(obj, dict):
@@ -48,10 +52,10 @@ _DEFAULT_CONFIG_YAML = """\
 # Edit providers below, then copy .env.example → .env and fill in your keys.
 
 model_aliases:
-  opus:   claude-opus-4-6
-  sonnet: claude-sonnet-4-6
-  haiku:  claude-haiku-4-6
-  fast:   claude-haiku-4-6
+  opus:   ${MODEL_OPUS:-claude-opus-4-6}
+  sonnet: ${MODEL_SONNET:-claude-sonnet-4-6}
+  haiku:  ${MODEL_HAIKU:-claude-haiku-4-6}
+  fast:   ${MODEL_FAST:-claude-haiku-4-6}
 
 pool:
   strategy: priority
@@ -92,7 +96,7 @@ providers:
   #   enabled: true
 
 agent:
-  default_model: claude-sonnet-4-6
+  default_model: ${MODEL_DEFAULT:-claude-sonnet-4-6}
   max_tokens: 8192
   max_concurrent_agents: 5
 
@@ -117,8 +121,13 @@ _DEFAULT_ENV_EXAMPLE = """\
 # ── Anthropic (direct) ────────────────────────────────────────────────────────
 # API key from https://console.anthropic.com
 ANTHROPIC_API_KEY=sk-ant-...
-# Model to use (default used when no --model flag is passed)
-ANTHROPIC_MODEL=claude-sonnet-4-6
+
+# ── Model aliases (override defaults without editing claw-forge.yaml) ─────────
+# MODEL_DEFAULT=claude-sonnet-4-6
+# MODEL_OPUS=claude-opus-4-6
+# MODEL_SONNET=claude-sonnet-4-6
+# MODEL_HAIKU=claude-haiku-4-6
+# MODEL_FAST=claude-haiku-4-6
 
 # ── Anthropic OAuth (Claude.ai / claude CLI) ──────────────────────────────────
 # Run `claude setup-token` to get this token, then paste it here.
