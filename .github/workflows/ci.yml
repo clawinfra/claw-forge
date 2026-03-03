@@ -43,6 +43,21 @@ jobs:
         with:
           file: coverage.xml
 
+  build-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI deps
+        run: npm --prefix ui ci
+
+      - name: Build UI
+        run: npm --prefix ui run build
+
   screenshots:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'

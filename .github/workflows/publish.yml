@@ -5,6 +5,7 @@ on:
     types: [published]
 
 jobs:
+  # ── Run full test matrix first — publish is blocked until all green ─────────
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -13,19 +14,34 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-      - uses: actions/setup-python@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --extra dev --python ${{ matrix.python-version }}
-      - run: uv run ruff check claw_forge/ tests/
-      - run: uv run mypy claw_forge/ --ignore-missing-imports
-      - run: uv run pytest tests/ -q --tb=short
 
+      - name: Install dependencies
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Lint
+        run: uv run ruff check claw_forge/ tests/
+
+      - name: Type check
+        run: uv run mypy claw_forge/ --ignore-missing-imports
+
+      - name: Test
+        run: uv run pytest tests/ -q --tb=short
+
+  # ── Build UI and publish — only runs when ALL test matrix jobs pass ─────────
   publish:
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [test]          # hard gate: publish never runs if any test job fails
     environment: pypi
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +49,34 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Build
+      - name: Set up Node.js (for UI build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build UI (Vite → claw_forge/ui_dist/)
+        run: |
+          npm --prefix ui ci
+          npm --prefix ui run build
+          # Copy built assets into the Python package so the wheel ships them
+          rm -rf claw_forge/ui_dist
+          cp -r ui/dist claw_forge/ui_dist
+
+      - name: Sync version from release tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          # Strip leading 'v' if present (v0.1.0a24 → 0.1.0a24)
+          VERSION="${TAG#v}"
+          echo "Release version: $VERSION"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build wheel + sdist
         run: uv build
+
+      - name: Verify wheel contains ui_dist
+        run: |
+          python3 -m zipfile -l dist/*.whl | grep ui_dist | wc -l | xargs -I{} sh -c 'test {} -gt 0 && echo "ui_dist OK ({} files)" || (echo "ERROR: ui_dist missing from wheel" && exit 1)'
 
       - name: Publish to PyPI
         run: uv publish --token ${{ secrets.PYPI_TOKEN }}
