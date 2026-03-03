@@ -402,7 +402,7 @@ class TestPlanWritesDB:
         (project / "claw-forge.yaml").write_text(
             "providers:\n"
             "  anthropic:\n"
-            "    provider_type: anthropic\n"
+            "    type: anthropic\n"
             "    api_key: test-key\n"
             "    models: [claude-sonnet-4-20250514]\n"
             "    priority: 1\n"
@@ -530,7 +530,7 @@ class TestRunExecutesTasks:
         (project / "claw-forge.yaml").write_text(
             "providers:\n"
             "  anthropic:\n"
-            "    provider_type: anthropic\n"
+            "    type: anthropic\n"
             "    api_key: test-key\n"
             "    models: [claude-sonnet-4-20250514]\n"
             "    priority: 1\n"

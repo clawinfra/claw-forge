@@ -87,15 +87,54 @@ def create_providers_from_configs(configs: list[ProviderConfig]) -> list[BasePro
 
 
 def load_configs_from_yaml(data: dict[str, Any]) -> list[ProviderConfig]:
-    """Parse provider configs from YAML dict."""
+    """Parse provider configs from YAML dict.
+
+    Supports two provider formats:
+
+    Dict format (default, keyed by name)::
+
+        providers:
+          my-provider:
+            type: anthropic
+            api_key: sk-...
+
+    List format (alternative)::
+
+        providers:
+          - name: my-provider
+            type: anthropic
+            api_key: sk-...
+    """
     configs: list[ProviderConfig] = []
-    for name, raw in data.get("providers", {}).items():
-        ptype = ProviderType(raw.pop("type", raw.pop("provider_type", "anthropic")))
-        configs.append(
-            ProviderConfig(
-                name=name,
-                provider_type=ptype,
-                **{k: v for k, v in raw.items() if k in ProviderConfig.__dataclass_fields__},
+    raw_providers = data.get("providers", {})
+
+    if isinstance(raw_providers, list):
+        # List format: each item must have a 'name' key
+        items: list[tuple[str, dict[str, Any]]] = []
+        for entry in raw_providers:
+            entry = dict(entry)  # copy so pop() is safe
+            name = entry.pop("name", f"provider-{len(items)}")
+            items.append((name, entry))
+    elif isinstance(raw_providers, dict):
+        items = [(name, dict(raw)) for name, raw in raw_providers.items()]
+    else:
+        return configs
+
+    for name, raw in items:
+        try:
+            ptype = ProviderType(raw.pop("type", raw.pop("provider_type", "anthropic")))
+            configs.append(
+                ProviderConfig(
+                    name=name,
+                    provider_type=ptype,
+                    **{
+                        k: v
+                        for k, v in raw.items()
+                        if k in ProviderConfig.__dataclass_fields__
+                    },
+                )
             )
-        )
+        except Exception:
+            logger.exception("Failed to parse provider config '%s'", name)
+
     return configs

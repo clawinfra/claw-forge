@@ -311,3 +311,78 @@ class TestTogglePersistFlow:
         assert resp2.json()["persisted"] is True
         data = yaml.safe_load(cfg.read_text())
         assert data["providers"]["anthropic-direct"]["enabled"] is False
+
+
+# ── load_configs_from_yaml format tests ──────────────────────────────────────
+
+class TestLoadConfigsFromYaml:
+    """load_configs_from_yaml must handle both dict and list provider formats."""
+
+    def test_dict_format_type_key(self) -> None:
+        """Standard dict format with 'type:' key (default claw-forge.yaml)."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        data = {
+            "providers": {
+                "my-provider": {
+                    "type": "anthropic",
+                    "api_key": "sk-test",
+                    "priority": 1,
+                }
+            }
+        }
+        configs = load_configs_from_yaml(data)
+        assert len(configs) == 1
+        assert configs[0].name == "my-provider"
+
+    def test_dict_format_provider_type_key(self) -> None:
+        """Dict format with legacy 'provider_type:' key still works."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        data = {
+            "providers": {
+                "my-provider": {
+                    "provider_type": "anthropic",
+                    "api_key": "sk-test",
+                }
+            }
+        }
+        configs = load_configs_from_yaml(data)
+        assert len(configs) == 1
+
+    def test_list_format(self) -> None:
+        """List format with 'name:' key works."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        data = {
+            "providers": [
+                {
+                    "name": "my-provider",
+                    "type": "anthropic",
+                    "api_key": "sk-test",
+                }
+            ]
+        }
+        configs = load_configs_from_yaml(data)
+        assert len(configs) == 1
+        assert configs[0].name == "my-provider"
+
+    def test_empty_providers(self) -> None:
+        """Empty providers dict/list returns empty list."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        assert load_configs_from_yaml({"providers": {}}) == []
+        assert load_configs_from_yaml({"providers": []}) == []
+        assert load_configs_from_yaml({}) == []
+
+    def test_none_providers_value(self) -> None:
+        """providers: null in YAML returns empty list without crash."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        assert load_configs_from_yaml({"providers": None}) == []
+
+    def test_default_config_yaml_parses(self) -> None:
+        """The exact _DEFAULT_CONFIG_YAML from cli.py must parse without error."""
+        import yaml
+
+        from claw_forge.cli import _DEFAULT_CONFIG_YAML
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+        data = yaml.safe_load(_DEFAULT_CONFIG_YAML)
+        # Should not raise — even with env vars unset
+        configs = load_configs_from_yaml(data)
+        assert isinstance(configs, list)
