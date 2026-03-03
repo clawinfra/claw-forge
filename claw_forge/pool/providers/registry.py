@@ -62,7 +62,8 @@ def create_provider(config: ProviderConfig) -> BaseProvider:
                 f"anthropic_oauth provider '{config.name}': "
                 "no OAuth credentials file (~/.claude/.credentials.json) found "
                 "and no api_key supplied. "
-                "Run `claude login` first, set oauth_token explicitly, or provide api_key."
+                "Run `claude setup-token` and set ANTHROPIC_OAUTH_TOKEN in .env, "
+                "or set ANTHROPIC_API_KEY."
             )
 
     dotted = _PROVIDER_CLASSES.get(ptype)
@@ -89,7 +90,7 @@ def create_providers_from_configs(configs: list[ProviderConfig]) -> list[BasePro
         except (ValueError, KeyError) as exc:
             # Config-level problem (missing key, bad type, no credentials).
             # For oauth auto-detection providers: silently skip at DEBUG level
-            # (it's expected when the user hasn't run `claude login`).
+            # (it's expected when the user hasn't run `claude setup-token`).
             # For all other providers: warn so the user knows a provider is
             # unavailable without printing a full traceback.
             if cfg.provider_type == ProviderType.ANTHROPIC_OAUTH:

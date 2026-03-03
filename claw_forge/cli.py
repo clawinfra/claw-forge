@@ -60,16 +60,19 @@ pool:
   recovery_timeout: 60
 
 providers:
-  # Claude CLI OAuth — run `claude login` once, works out of the box
+  # Claude OAuth — run `claude setup-token` once, paste token into .env
   claude-oauth:
     type: anthropic_oauth
+    oauth_token: ${ANTHROPIC_OAUTH_TOKEN}   # from `claude setup-token`
     priority: 1
+    enabled: true
 
   # Direct Anthropic API key
   anthropic-direct:
     type: anthropic
     api_key: ${ANTHROPIC_API_KEY}
     priority: 2
+    enabled: true
 
   # Anthropic-compatible proxy (optional)
   # anthropic-proxy:
@@ -78,6 +81,7 @@ providers:
   #   base_url: ${PROXY_BASE_URL}
   #   model: ${PROXY_MODEL}
   #   priority: 3
+  #   enabled: true
 
   # Local Ollama (optional, free)
   # local-ollama:
@@ -85,6 +89,7 @@ providers:
   #   base_url: http://localhost:11434
   #   model: qwen2.5:32b
   #   priority: 10
+  #   enabled: true
 
 agent:
   default_model: claude-sonnet-4-20250514
