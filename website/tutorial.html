@@ -74,8 +74,9 @@
         <li><a href="#install">Install claw-forge</a></li>
         <li><a href="#env">Set up environment variables</a></li>
         <li><a href="#providers">Configure providers</a></li>
+        <li><a href="#bootstrap">Bootstrap your project</a></li>
         <li><a href="#spec">Write your project spec</a></li>
-        <li><a href="#init">Initialize the project</a></li>
+        <li><a href="#init">Initialize with your spec</a></li>
         <li><a href="#run">Run agents</a></li>
         <li><a href="#ui">Open the Kanban UI</a></li>
         <li><a href="#expand">Add more features</a></li>
@@ -277,12 +278,37 @@ providers:
         </div>
       </div>
 
-      <!-- ── 4. Write spec ───────────────────────────────────────────────── -->
-      <div class="step" id="spec">
+      <!-- ── 4. Bootstrap project ───────────────────────────────────────── -->
+      <div class="step" id="bootstrap">
         <div class="step-num">4</div>
         <div class="step-body">
+          <h3>Bootstrap your project</h3>
+          <p>Run <code>claw-forge init</code> <strong>first</strong> — before writing a spec. This scaffolds the <code>.claude/commands/</code> folder (including the <code>/create-spec</code> slash command you'll need in the next step) and creates default config files if they don't exist yet.</p>
+
+          <pre><code class="language-bash">cd my-project
+claw-forge init</code></pre>
+
+          <div class="output-block">✓ Created claw-forge.yaml  (edit providers as needed)
+✓ Created .env.example     (copy to .env and fill keys)
+⚠  No .env found — copy .env.example → .env and add your API keys
+✓ Stack detected: python / unknown
+✓ Generated CLAUDE.md
+✓ Created .claude/ with settings.json
+✓ Scaffolded 8 slash commands → .claude/commands/</div>
+
+          <div class="callout tip" style="margin-top:16px">
+            <strong>💡 Why init first?</strong>
+            The <code>/create-spec</code> slash command lives in <code>.claude/commands/</code> — it only exists after <code>claw-forge init</code> runs. Without bootstrapping first, you'd have no spec template to work from. Think of this step as installing the toolkit.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 5. Write spec ───────────────────────────────────────────────── -->
+      <div class="step" id="spec">
+        <div class="step-num">5</div>
+        <div class="step-body">
           <h3>Write your project spec</h3>
-          <p>The spec is a plain text file that describes what you want to build. The initializer agent reads it and breaks it into atomic, dependency-ordered tasks that agents can implement in parallel.</p>
+          <p>Now that <code>.claude/commands/</code> exists, open Claude Code in your project directory and use the <code>/create-spec</code> command — or write the spec manually. The spec describes what you want to build; the init agent reads it and breaks it into parallel tasks.</p>
 
           <p><strong>You have three ways to create a spec:</strong></p>
 
@@ -416,12 +442,12 @@ Next: claw-forge init task-manager-api --spec app_spec.txt</div>
         </div>
       </div>
 
-      <!-- ── 5. Initialize ──────────────────────────────────────────────── -->
+      <!-- ── 6. Initialize with spec ────────────────────────────────────── -->
       <div class="step" id="init">
-        <div class="step-num">5</div>
+        <div class="step-num">6</div>
         <div class="step-body">
-          <h3>Initialize the project</h3>
-          <p>The <code>init</code> command runs the <strong>initializer agent</strong> — it reads your spec, analyzes the project directory, and creates a dependency-ordered task graph in the state database.</p>
+          <h3>Initialize with your spec</h3>
+          <p>Now run <code>claw-forge init --spec app_spec.txt</code>. The initializer agent reads your spec, analyzes the project directory, and creates a dependency-ordered task graph in the state database.</p>
 
           <pre><code class="language-bash">claw-forge init task-manager-api --spec app_spec.txt</code></pre>
 
@@ -472,7 +498,7 @@ Next: claw-forge init task-manager-api --spec app_spec.txt</div>
 
       <!-- ── 6. Run ──────────────────────────────────────────────────────── -->
       <div class="step" id="run">
-        <div class="step-num">6</div>
+        <div class="step-num">7</div>
         <div class="step-body">
           <h3>Run agents</h3>
           <p>Start the harness. The dispatcher executes features in dependency-ordered waves — features with no unsatisfied dependencies run in parallel up to <code>--concurrency</code>.</p>
@@ -521,7 +547,7 @@ Wave 4/4 — 1 task
 
       <!-- ── 7. Kanban UI ───────────────────────────────────────────────── -->
       <div class="step" id="ui">
-        <div class="step-num">7</div>
+        <div class="step-num">8</div>
         <div class="step-body">
           <h3>Open the Kanban UI</h3>
           <p>claw-forge ships a React Kanban board that shows real-time agent progress, provider health, and cost. Launch it with one command:</p>
@@ -563,7 +589,7 @@ claw-forge ui --state-port 9000  # different state service port</code></pre>
 
       <!-- ── 8. Expand ──────────────────────────────────────────────────── -->
       <div class="step" id="expand">
-        <div class="step-num">8</div>
+        <div class="step-num">9</div>
         <div class="step-body">
           <h3>Add more features</h3>
           <p>Once your first batch of features is running (or done), add more without restarting. There are two ways:</p>
@@ -604,7 +630,7 @@ claw-forge init task-manager-api --spec app_spec.txt</code></pre>
 
       <!-- ── 9. YOLO ────────────────────────────────────────────────────── -->
       <div class="step" id="yolo">
-        <div class="step-num">9</div>
+        <div class="step-num">10</div>
         <div class="step-body">
           <h3>YOLO mode — maximum speed 🚀</h3>
           <p>YOLO mode enables three things at once:</p>
@@ -635,7 +661,7 @@ Wave 1/4 — all 4 tasks running in parallel…</div>
 
       <!-- ── 10. Pause / resume ─────────────────────────────────────────── -->
       <div class="step" id="pause">
-        <div class="step-num">10</div>
+        <div class="step-num">11</div>
         <div class="step-body">
           <h3>Pause &amp; resume</h3>
           <p>Pause a running session gracefully — in-flight agents finish their current task, then no new ones start. Resume picks up exactly where it stopped.</p>
@@ -688,7 +714,7 @@ Your answer: SENDGRID_API_KEY
 
         <div id="wf-greenfield" class="tab-content active">
           <h4>Greenfield — Build a new app from scratch</h4>
-          <pre><code>claw-forge init → /create-spec → claw-forge run → /check-code → /checkpoint → /review-pr</code></pre>
+          <pre><code>claw-forge init → /create-spec → claw-forge init --spec app_spec.txt → claw-forge run → /check-code → /checkpoint → /review-pr</code></pre>
           <p><strong>Example:</strong> Building "TaskFlow API" (FastAPI + SQLite)</p>
           <pre><code class="language-bash"># 1. Scaffold project
 mkdir taskflow-api && cd taskflow-api && git init
@@ -819,7 +845,7 @@ claw-forge run --concurrency 5
 Start here
   │
   ├── Building something new?
-  │     └── claw-forge init → /create-spec → claw-forge run
+  │     └── claw-forge init → /create-spec → claw-forge init --spec → claw-forge run
   │
   ├── Adding features to existing code?
   │     └── claw-forge analyze → /create-spec → claw-forge add → claw-forge run

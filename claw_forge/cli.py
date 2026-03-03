@@ -512,6 +512,25 @@ def init(
         for cmd in scaffold["commands_copied"]:
             console.print(f"  • /{Path(cmd).stem}")
 
+    # If no spec was provided, guide user to /create-spec next
+    if not spec:
+        spec_file = project_path / "app_spec.txt"
+        xml_spec_file = project_path / "additions_spec.xml"
+        if not spec_file.exists() and not xml_spec_file.exists():
+            console.print(
+                "\n[bold cyan]Next step:[/bold cyan] create your project spec.\n"
+                "  Open Claude Code in this directory and run:\n\n"
+                "    [bold]/create-spec[/bold]\n\n"
+                "  Claude will walk you through your project and write [bold]app_spec.txt[/bold].\n"
+                "  Then re-run: [bold]claw-forge init --spec app_spec.txt[/bold]"
+            )
+        else:
+            found = spec_file if spec_file.exists() else xml_spec_file
+            console.print(
+                f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
+                f"  Run: [bold]claw-forge init --spec {found.name}[/bold]"
+            )
+
 
 @app.command()
 def add(
