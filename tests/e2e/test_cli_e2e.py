@@ -263,7 +263,7 @@ class TestRunCommand:
                     # Create a session
                     db_session = DbSession(
                         id=str(uuid.uuid4()),
-                        project_path=str(project_path),
+                        project_path=str(project_path.resolve()),  # Must match CLI query
                         status="pending",
                     )
                     session.add(db_session)
