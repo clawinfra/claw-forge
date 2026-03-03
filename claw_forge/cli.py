@@ -526,8 +526,32 @@ def run(
                             from claude_agent_sdk import ClaudeAgentOptions
 
                             from claw_forge.agent.session import AgentSession
+                            from claw_forge.pool.providers.oauth import (
+                                get_oauth_token_optional,
+                            )
 
-                            options = ClaudeAgentOptions(model=model)
+                            # Resolve auth: prefer ANTHROPIC_API_KEY env, then
+                            # OAuth token from credentials.json, then pool providers.
+                            # Pass as env so the claude CLI subprocess uses our key.
+                            sdk_env: dict[str, str] = {}
+                            _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                            if not _api_key:
+                                _oauth = get_oauth_token_optional()
+                                if _oauth:
+                                    sdk_env["ANTHROPIC_API_KEY"] = _oauth
+                                elif pool is not None:
+                                    # Extract key from first healthy provider
+                                    _prov = pool.get_provider()
+                                    if _prov and hasattr(_prov, "api_key"):
+                                        sdk_env["ANTHROPIC_API_KEY"] = _prov.api_key
+                            else:
+                                sdk_env["ANTHROPIC_API_KEY"] = _api_key
+
+                            options = ClaudeAgentOptions(
+                                model=model,
+                                cwd=str(project_path),
+                                env=sdk_env,
+                            )
                             full_output: list[str] = []
                             try:
                                 async with AgentSession(options) as agent_session:
@@ -539,7 +563,7 @@ def run(
                                 if not output.strip():
                                     raise RuntimeError(
                                         "Agent produced no output — "
-                                        "check claude CLI auth: run `claude login`"
+                                        "check `claude login` or verify API key in .env"
                                     )
                                 success = True
                             except Exception as sdk_exc:

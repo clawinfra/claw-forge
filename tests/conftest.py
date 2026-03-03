@@ -13,6 +13,7 @@ Two-pronged approach:
 
 from __future__ import annotations
 
+import contextlib
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +38,6 @@ def _auto_dispose_engines() -> None:  # type: ignore[misc]
     with patch.object(AgentStateService, "__init__", _tracking_init):
         yield  # type: ignore[misc]
 
-    import contextlib
     for svc in engines:
         with contextlib.suppress(Exception):
             svc._engine.sync_engine.pool.dispose()  # type: ignore[union-attr]
