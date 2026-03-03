@@ -646,6 +646,76 @@ def init(
         )
 
 
+async def _write_plan_to_db(
+    project_path: Path, project_name: str, features: list[dict[str, Any]]
+) -> None:
+    """Create .claw-forge/state.db and persist parsed features as pending tasks."""
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from claw_forge.state.models import Base, Task
+    from claw_forge.state.models import Session as DbSession
+
+    claw_forge_dir = project_path / ".claw-forge"
+    claw_forge_dir.mkdir(parents=True, exist_ok=True)
+    db_path = claw_forge_dir / "state.db"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    engine = create_async_engine(db_url, echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session: sessionmaker[AsyncSession] = sessionmaker(  # type: ignore[type-arg]
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with async_session() as db:
+        # Create a session row
+        session_id = str(uuid.uuid4())
+        db_sess = DbSession(
+            id=session_id,
+            project_path=str(project_path),
+            status="pending",
+        )
+        db.add(db_sess)
+        await db.flush()
+
+        # Map feature index → task UUID for dependency wiring
+        index_to_uuid: dict[int, str] = {}
+        task_objs: list[Task] = []
+        for feat in features:
+            tid = str(uuid.uuid4())
+            index_to_uuid[feat["index"]] = tid
+            task_objs.append(
+                Task(
+                    id=tid,
+                    session_id=session_id,
+                    plugin_name="coding",
+                    description=(
+                        f"[{feat['category']}] {feat['name']}: {feat['description']}"
+                    ),
+                    status="pending",
+                    priority=feat.get("index", 0),
+                    depends_on=[],  # filled below
+                )
+            )
+
+        # Wire depends_on using resolved UUIDs
+        for feat, task in zip(features, task_objs, strict=True):
+            dep_uuids = [
+                index_to_uuid[i]
+                for i in feat.get("depends_on_indices", [])
+                if i in index_to_uuid
+            ]
+            task.depends_on = dep_uuids
+            db.add(task)
+
+        await db.commit()
+
+    await engine.dispose()
+
+
 @app.command()
 def plan(
     spec: str = typer.Argument(..., help="Path to app_spec.txt or additions_spec.xml."),
@@ -715,6 +785,12 @@ def plan(
 
     if result.success:
         meta = result.metadata
+
+        # ── Write tasks to DB so `claw-forge run` can find them ──────────────
+        features = meta.get("features", [])
+        if features:
+            asyncio.run(_write_plan_to_db(project_path, meta["project_name"], features))
+
         if "feature_count" in meta:
             console.print(f"\n[bold green]✅ Spec parsed: {meta['project_name']}[/bold green]")
             console.print(f"   {result.output}\n")
