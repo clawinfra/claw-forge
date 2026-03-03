@@ -1249,7 +1249,7 @@ def ui(
     )
     patched_html = index_html.replace("</head>", runtime_cfg + "</head>", 1)
 
-    async def serve_index(request: object) -> Response:  # type: ignore[override]
+    async def serve_index(request: object) -> Response:
         return Response(patched_html, media_type="text/html")
 
     static_app = Starlette(
