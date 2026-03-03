@@ -223,6 +223,7 @@ class TestVersionCommand:
 class TestRunCommand:
     def test_run_help_shows_dry_run(self) -> None:
         """claw-forge run --help shows --dry-run flag."""
+        import re
         import subprocess
         import sys
         proc = subprocess.run(
@@ -231,9 +232,12 @@ class TestRunCommand:
              "r = CliRunner().invoke(app, ['run', '--help']); "
              "print(r.output); exit(r.exit_code)"],
             capture_output=True, text=True, timeout=10,
+            env={**__import__('os').environ, "NO_COLOR": "1", "TERM": "dumb"},
         )
         assert proc.returncode == 0, proc.stderr
-        assert "--dry-run" in proc.stdout
+        # Strip any remaining ANSI escape codes before asserting
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout)
+        assert "--dry-run" in clean, f"--dry-run not found in help output:\n{clean}"
 
     def test_run_with_no_db_exits_zero_with_message(self) -> None:
         """claw-forge run with no DB (no plan yet) exits 0 with helpful message."""
