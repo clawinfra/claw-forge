@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 _BAR_WIDTH = 12
 _PHASE_MAX = 20
