@@ -1,3 +1,8 @@
 """claw-forge: Multi-provider autonomous coding agent harness."""
 
-__version__ = "0.1.0a1"
+from importlib.metadata import version as _pkg_version
+
+try:
+    __version__ = _pkg_version("claw-forge")
+except Exception:  # package not installed (e.g. editable dev mode without install)
+    __version__ = "0.0.0.dev0"
