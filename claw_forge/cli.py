@@ -528,13 +528,23 @@ def run(
                             from claw_forge.agent.session import AgentSession
 
                             options = ClaudeAgentOptions(model=model)
-                            async with AgentSession(options) as agent_session:
-                                full_output: list[str] = []
-                                async for msg in agent_session.run(prompt):
-                                    if hasattr(msg, "text"):
-                                        full_output.append(msg.text)
+                            full_output: list[str] = []
+                            try:
+                                async with AgentSession(options) as agent_session:
+                                    async for msg in agent_session.run(prompt):
+                                        if hasattr(msg, "text"):
+                                            full_output.append(msg.text)
                                 output = "\n".join(full_output)
-                            success = True
+                                # Verify agent produced meaningful output
+                                if not output.strip():
+                                    raise RuntimeError(
+                                        "Agent produced no output — "
+                                        "check claude CLI auth: run `claude login`"
+                                    )
+                                success = True
+                            except Exception as sdk_exc:
+                                output = str(sdk_exc)
+                                success = False
 
                         # ── Option 2: direct API call via provider pool ───────────────
                         # Used when claude CLI is not installed (API-only mode).
@@ -1206,7 +1216,9 @@ def ui(
         help="Port for the Kanban UI",
     ),
     state_port: int = typer.Option(
-        8888, "--state-port", help="Port the state service is running on"
+        int(os.environ.get("CLAW_FORGE_STATE_PORT", "8420")),
+        "--state-port",
+        help="Port the state service is running on [default: 8420 or $CLAW_FORGE_STATE_PORT]",
     ),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser automatically"),
     session: str = typer.Option("", "--session", "-s", help="Session UUID to open on the board"),
