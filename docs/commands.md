@@ -16,107 +16,146 @@ Run these in your terminal. All CLI commands accept `--config` to point at a non
 ### `claw-forge init`
 
 #### Purpose
-Parses your project spec, generates a feature dependency graph (DAG), and scaffolds the
-`.claude/` directory with slash commands, agent definitions, and a tailored `CLAUDE.md`.
+Bootstrap a new project — scaffold `.claude/`, `CLAUDE.md`, `claw-forge.yaml`,
+`.env.example`, and `app_spec.example.xml`. Run this **once** before writing your spec.
 
 #### When to use
-- Starting a new project after writing `app_spec.txt` or running `/create-spec`
-- After pulling a repo that has a spec but no `.claude/` scaffold
-- Re-running after adding phases to an existing spec (only new features are created)
-- When you want claw-forge to analyse your stack and auto-detect LSP plugins
+- First command in any new project directory
+- After cloning a repo that has no `.claude/` scaffold
+- To get `app_spec.example.xml` as a format reference for your spec
 
 #### Usage
 ```bash
-# Basic — analyze current directory
+# Bootstrap current directory
 claw-forge init
 
-# With a spec file (parses features, builds DAG)
-claw-forge init --spec app_spec.txt
-
-# Point at a different project directory
-claw-forge init --project ~/projects/task-manager --spec app_spec.txt
-
-# Control concurrency estimate in post-parse summary
-claw-forge init --spec app_spec.txt --concurrency 8
+# Bootstrap a specific directory
+claw-forge init --project ~/projects/my-app
 ```
 
 #### Options
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--spec`, `-s` | path | `None` | Path to `app_spec.txt` or XML spec file |
-| `--project`, `-p` | path | `.` | Root directory of the project |
-| `--concurrency`, `-n` | int | `5` | Used to estimate run time in the summary |
-| `--config`, `-c` | path | `claw-forge.yaml` | Path to YAML config |
+| `--project`, `-p` | path | `.` | Root directory to bootstrap |
+| `--config`, `-c` | path | `claw-forge.yaml` | Config file path (created if absent) |
 
 #### What it does internally
-1. Detects language/framework by scanning the project directory for `pyproject.toml`,
-   `package.json`, `go.mod`, `Cargo.toml`, etc.
-2. If `--spec` is given, runs `InitializerPlugin` which parses the XML spec into a feature list.
-3. Builds a dependency DAG from `<phase>` ordering in the spec.
-4. Writes `.claude/commands/` with the 7 slash-command markdown files.
-5. Writes `.claude/agents/` with `coding`, `testing`, `reviewing`, and `initializer` agents.
-6. Generates `CLAUDE.md` tailored to the detected stack (LSP hints, skill list, conventions).
-7. Prints a feature-by-category table, wave count, and estimated run time.
-
-#### Real-world example
-You've written `app_spec.txt` for "TaskFlow API" — a FastAPI + SQLite task manager. You run:
-
-```bash
-cd ~/projects/taskflow-api
-claw-forge init --spec app_spec.txt --concurrency 5
-```
+1. Creates `claw-forge.yaml` with default providers if not present.
+2. Creates `.env.example` documenting all environment variables.
+3. Detects language/framework from `pyproject.toml`, `package.json`, `go.mod`, etc.
+4. Generates `CLAUDE.md` tailored to the detected stack.
+5. Creates `.claude/settings.json` (`enableAllProjectMcpServers: true`).
+6. Copies 8 slash-command `.md` files into `.claude/commands/`.
+7. Copies `app_spec.example.xml` — a full XML format reference for your spec.
+8. Prints a next-step hint pointing to `/create-spec` or `claw-forge plan`.
 
 #### Output example
 ```
-claw-forge v0.2.0b1
+✓ Created claw-forge.yaml  (edit providers as needed)
+✓ Created .env.example     (copy to .env and fill keys)
+⚠  No .env found — copy .env.example → .env and add your API keys
+✓ Stack detected: python / fastapi
+✓ Generated CLAUDE.md
+✓ Created .claude/ with settings.json
+✓ Created app_spec.example.xml  (reference format for your spec)
+✓ Scaffolded 8 slash commands → .claude/commands/
+  • /create-spec
+  • /expand-project
+  • /check-code
+  ...
+
+Next step: create your project spec.
+  Option A — use the Claude slash command:
+    Open Claude Code here and run /create-spec
+
+  Option B — paste your PRD into Claude with this prompt:
+    "Convert this PRD to claw-forge XML spec format.
+     Use app_spec.example.xml in this directory as the template.
+     Write the result to app_spec.txt."
+
+  Then run: claw-forge plan app_spec.txt
+```
+
+#### Related commands
+- **Next:** `/create-spec` (generate spec) → `claw-forge plan` (parse spec → DB)
+
+---
+
+### `claw-forge plan`
+
+#### Purpose
+Parse a spec file (`app_spec.txt` or `additions_spec.xml`) and generate the feature
+dependency DAG in the state database. This is the planning step — run it after writing
+your spec and before `claw-forge run`.
+
+#### When to use
+- After `/create-spec` produces `app_spec.txt`
+- After converting a PRD to `app_spec.txt` using `app_spec.example.xml` as reference
+- Re-running after editing the spec (only new features are added to the DB)
+
+#### Usage
+```bash
+# Parse spec in current directory
+claw-forge plan app_spec.txt
+
+# Brownfield additions
+claw-forge plan additions_spec.xml
+
+# Use Sonnet instead of Opus (faster/cheaper, lower planning quality)
+claw-forge plan app_spec.txt --model claude-sonnet-4-20250514
+
+# Point at a different project
+claw-forge plan app_spec.txt --project ~/projects/task-manager
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `spec` | positional | **required** | Path to `app_spec.txt` or XML spec file |
+| `--project`, `-p` | path | `.` | Root directory of the project |
+| `--model`, `-m` | string | `claude-opus-4-5` | Model for parsing (Opus recommended) |
+| `--concurrency`, `-n` | int | `5` | Used to estimate run time in summary |
+| `--config`, `-c` | path | `claw-forge.yaml` | Path to YAML config |
+
+#### What it does internally
+1. Validates the spec file exists and is valid XML.
+2. Runs `InitializerPlugin` (Opus by default — planning errors cascade through every run).
+3. Parses features from `<core_features>` — each bullet becomes one agent task.
+4. Builds a dependency DAG from `<implementation_steps>` phase ordering.
+5. Writes features to the state DB, printing a category table + wave count + ETA.
+
+#### Output example
+```
 ✅ Spec parsed: TaskFlow API
 
   Features by Category
-  ┌────────────────────────┬───────┐
-  │ Category               │ Count │
-  ├────────────────────────┼───────┤
-  │ Authentication         │    8  │
-  │ Task Management        │   22  │
-  │ Project Management     │   14  │
-  │ Notifications          │    6  │
-  │ API Layer              │    9  │
-  │ Total                  │   59  │
-  └────────────────────────┴───────┘
+  ┌──────────────────────┬───────┐
+  │ Category             │ Count │
+  ├──────────────────────┼───────┤
+  │ Authentication       │    8  │
+  │ Task Management      │   22  │
+  │ API Layer            │    9  │
+  │ Total                │   59  │
+  └──────────────────────┴───────┘
 
   Dependency waves: 4
   Estimated run time: ~24 minutes (at concurrency=5)
 
-  Implementation phases (4):
-    1. Core models + auth
-    2. Task CRUD + project structure
-    3. Notifications + integrations
-    4. Polish + performance
-
-✓ Generated CLAUDE.md (tailored to your stack)
-✓ Scaffolded 7 slash commands → .claude/commands/
-  • /create-spec
-  • /expand-project
-  • /check-code
-  • /checkpoint
-  • /review-pr
-  • /pool-status
-  • /create-bug-report
-✓ Stack detected: python / fastapi
-
-  Next: claw-forge run --spec app_spec.txt --concurrency 5
+  Next: claw-forge run --concurrency 5
 ```
 
 #### Pro tips
-- Run `claw-forge init` without `--spec` on an existing codebase first — it detects your stack
-  and scaffolds commands even before you write a spec.
-- The estimated run time assumes ~2 min per feature. Add more providers to halve that.
-- Re-running `init` on an existing project is safe — it won't duplicate features already in the
-  state DB.
+- **Always use Opus** for planning. It produces better DAGs and catches ambiguous features.
+  Use `--model sonnet` only if you're iterating quickly and cost matters more than quality.
+- Re-running `plan` on an existing project is safe — it won't duplicate features already in
+  the state DB.
+- `app_spec.example.xml` (created by `claw-forge init`) shows the full XML schema.
 
 #### Related commands
-- **Before:** `/create-spec` (generate the spec interactively)
-- **After:** `claw-forge run` (start the agents)
+- **Before:** `claw-forge init` → `/create-spec`
+- **After:** `claw-forge run`
 
 ---
 
@@ -127,7 +166,7 @@ Starts the agent pool, dispatches features from the state DB to coding agents in
 drives the full implementation loop (code → test → review → merge).
 
 #### When to use
-- After `claw-forge init` to begin building a new project
+- After `claw-forge plan` to begin building a new project
 - After `claw-forge add` or `/expand-project` to build newly added features
 - When resuming after an interruption (detects in-progress features automatically)
 - For controlled feature sprints with `--concurrency` tuned to your provider tier
@@ -213,7 +252,7 @@ Progress: 12/59 passing · 3 in-flight · $0.61 spent
 - Open `claw-forge ui` in a separate terminal while `run` is active to watch the Kanban board.
 
 #### Related commands
-- **Before:** `claw-forge init`, `claw-forge state`
+- **Before:** `claw-forge plan`, `claw-forge state`
 - **During:** `claw-forge status`, `claw-forge ui`, `claw-forge pause`
 - **After:** `/check-code`, `/checkpoint`, `/review-pr`
 
@@ -262,7 +301,7 @@ claw-forge add --spec additions_spec.xml --project ~/projects/myapp
 3. Runs `InitializerPlugin` to parse the new features and append them to the state DB.
 4. Prints integration points and constraints from the spec.
 5. Suggests a git branch name based on the spec's `<project_name>`.
-6. Shows the next command: `claw-forge run --spec additions_spec.xml`.
+6. Shows the next command: `claw-forge run`.
 
 #### Real-world example
 Your TaskFlow API is live. Product wants Stripe payments. You've run `/create-spec` (brownfield)
@@ -292,7 +331,7 @@ Agent context:
 
   Suggested git branch: feature/stripe-payments
 
-  Next: claw-forge run --spec additions_spec.xml --project .
+  Next: claw-forge run --project .
 ```
 
 #### Pro tips
@@ -686,7 +725,7 @@ They are automatically scaffolded by `claw-forge init` into your project directo
 #### Purpose
 Guides you through an interactive conversation to generate a precise, claw-forge-compatible XML
 project spec — either for a new app (greenfield) or for adding features to an existing one
-(brownfield). The output becomes the input to `claw-forge init` or `claw-forge add`.
+(brownfield). The output becomes the input to `claw-forge plan` (greenfield) or `claw-forge add` (brownfield).
 
 #### When to use
 - Starting a brand-new project and you want to think through features systematically
@@ -769,7 +808,7 @@ Files written:
 
 Next steps:
   1. Review app_spec.txt — add/remove features as needed
-  2. Run: claw-forge init --spec app_spec.txt
+  2. Run: claw-forge plan app_spec.txt
   3. Run: claw-forge run --concurrency 5
 
 💡 Tip: Each feature bullet = one agent task. More specific = better output.
@@ -785,7 +824,7 @@ Next steps:
 
 #### Related commands
 - **Before:** `claw-forge analyze` (brownfield)
-- **After:** `claw-forge init` (greenfield) or `claw-forge add` (brownfield)
+- **After:** `claw-forge plan` (greenfield) or `claw-forge add` (brownfield)
 
 ---
 

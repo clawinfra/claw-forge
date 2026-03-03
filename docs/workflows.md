@@ -9,7 +9,7 @@ For individual command details, see [docs/commands.md](commands.md).
 
 ## Workflow 1: Greenfield — Build a New App from Scratch
 
-**Pipeline:** `claw-forge init` → `/create-spec` → `claw-forge run` → `/check-code` →
+**Pipeline:** `claw-forge init` → `/create-spec` → `claw-forge plan` → `claw-forge run` → `/check-code` →
 `/checkpoint` → `/review-pr`
 
 **Scenario:** You're building "TaskFlow API" — a FastAPI + SQLite REST API for personal
@@ -25,13 +25,19 @@ git init
 claw-forge init
 ```
 
-**What happens:** claw-forge scans the (empty) directory, detects no stack yet, and scaffolds
-`.claude/commands/` with 7 slash commands and `.claude/agents/` with 4 agent definitions.
+**What happens:** claw-forge scaffolds `.claude/commands/` with 8 slash commands,
+creates `claw-forge.yaml`, `.env.example`, and `app_spec.example.xml` (XML format reference).
 
 **You see:**
 ```
+✓ Created claw-forge.yaml  (edit providers as needed)
+✓ Created .env.example     (copy to .env and fill keys)
+⚠  No .env found — copy .env.example → .env and add your API keys
+✓ Stack detected: unknown / unknown
 ✓ Generated CLAUDE.md (tailored to your stack)
-✓ Scaffolded 7 slash commands → .claude/commands/
+✓ Created .claude/ with settings.json
+✓ Created app_spec.example.xml  (reference format for your spec)
+✓ Scaffolded 8 slash commands → .claude/commands/
   • /create-spec
   • /expand-project
   • /check-code
@@ -39,7 +45,12 @@ claw-forge init
   • /review-pr
   • /pool-status
   • /create-bug-report
-✓ Stack detected: unknown / unknown
+  • /claw-forge-status
+
+Next step: create your project spec.
+  Option A — run /create-spec in Claude Code
+  Option B — convert your PRD using app_spec.example.xml as the template
+  Then run: claw-forge plan app_spec.txt
 ```
 
 ### Step 2: Create the spec interactively
@@ -86,7 +97,7 @@ Task Management (22 bullets)
 ### Step 3: Initialize with spec
 
 ```bash
-claw-forge init --spec app_spec.txt --concurrency 5
+claw-forge plan app_spec.txt --concurrency 5
 ```
 
 **What happens:** The `InitializerPlugin` parses all 59 features from the XML spec, builds
@@ -571,7 +582,7 @@ to run 5 agents in parallel to finish the whole thing in one sitting.
 
 ### Step 1: Start the sprint
 
-You've already run `claw-forge init --spec saas_spec.txt`. The spec has 50 features in 6
+You've already run `claw-forge plan saas_spec.txt`. The spec has 50 features in 6
 waves. Time to go:
 
 ```bash
@@ -807,7 +818,7 @@ network drops, accidental Ctrl+C — are handled automatically. Just `claw-forge
 Start here
   │
   ├── Building something new?
-  │     └── claw-forge init → /create-spec → claw-forge run
+  │     └── claw-forge init → /create-spec → claw-forge plan → claw-forge run
   │
   ├── Adding features to existing code?
   │     └── claw-forge analyze → /create-spec → claw-forge add → claw-forge run

@@ -25,50 +25,45 @@ It is built on the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/
 
 ```bash
 # 1. Install
-pip install uv
-uv tool install claw-forge
+pip install --pre claw-forge   # or: uv tool install claw-forge --prerelease allow
 
-# 2. Set up credentials
-cp .env.example .env   # fill in at least one provider key
-
-# 3. Write your spec (plain text or XML — or use /create-spec in Claude Code)
-cat > app_spec.txt << 'EOF'
-Project: my-api
-Stack: Python, FastAPI, pytest
-
-Features:
-1. User authentication
-   Description: JWT register/login/logout with bcrypt passwords.
-   Acceptance criteria:
-   - POST /auth/register returns 201 with user_id
-   - POST /auth/login returns {access_token, refresh_token}
-   - Passwords hashed with bcrypt (cost factor 12)
-   - 10+ unit tests
-
-2. Task CRUD
-   Description: Create/read/update/delete tasks with title, status, priority.
-   Acceptance criteria:
-   - Full REST API at /tasks
-   - Pagination on GET /tasks (?page=1&per_page=20)
-   - Auth required (401 if no token)
-   Depends on: 1
-EOF
-
-# Or use XML format for richer specs with phases, DB schema, API summary:
-# claw-forge init my-api --spec app_spec.xml
-
-# 4. Initialize (runs the initializer agent + scaffolds the project)
-claw-forge init my-api --spec app_spec.txt
+# 2. Bootstrap your project (scaffolds .claude/, CLAUDE.md, config, and app_spec.example.xml)
+mkdir my-api && cd my-api
+claw-forge init
 # Output:
-# ✅ Stack detected: Python / FastAPI / uv / pytest
-# ✅ .claude/commands/ scaffolded (7 commands copied)
-# ✅ CLAUDE.md generated (tailored to your stack)
-# ✅ 3 features created from spec
+# ✓ Created claw-forge.yaml   (edit providers/API keys)
+# ✓ Created .env.example      (copy to .env and fill keys)
+# ✓ Created .claude/ with settings.json
+# ✓ Created app_spec.example.xml  (XML format reference)
+# ✓ Scaffolded 8 slash commands → .claude/commands/
 
-# 5. Run agents
-claw-forge run my-api --concurrency 3
+# 3. Add your API key
+cp .env.example .env
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
 
-# 6. Open the Kanban board
+# 4. Create your spec — two options:
+#   Option A: Open Claude Code in this dir and run /create-spec
+#   Option B: Paste your PRD into Claude with this prompt:
+#     "Convert this PRD to claw-forge XML. Use app_spec.example.xml as the template.
+#      Write the result to app_spec.txt."
+
+# 5. Parse spec → feature DAG (uses Opus for accurate planning)
+claw-forge plan app_spec.txt
+# Output:
+# ✅ Spec parsed: my-api
+# ┌──────────────────────┬───────┐
+# │ Authentication       │    8  │
+# │ Task Management      │   22  │
+# │ Total                │   30  │
+# └──────────────────────┴───────┘
+# Dependency waves: 3
+# Estimated run time: ~12 minutes (at concurrency=5)
+# Next: claw-forge run --concurrency 5
+
+# 6. Run agents
+claw-forge run --concurrency 5
+
+# 7. Open the Kanban board
 claw-forge ui
 ```
 
@@ -86,8 +81,8 @@ claw-forge supports **two spec formats**:
 
 | Format | When to use | Command |
 |--------|-------------|---------|
-| Plain text (`app_spec.txt`) | Quick greenfield projects | `claw-forge init --spec app_spec.txt` |
-| XML (`app_spec.xml`) | Richer greenfield specs with phases, DB schema, API summary | `claw-forge init --spec app_spec.xml` |
+| Plain text (`app_spec.txt`) | Quick greenfield projects | `claw-forge plan app_spec.txt` |
+| XML (`app_spec.xml`) | Richer greenfield specs with phases, DB schema, API summary | `claw-forge plan app_spec.xml` |
 | Brownfield XML (`additions_spec.xml`) | Adding features to an existing codebase | `claw-forge add --spec additions_spec.xml` |
 
 The `/create-spec` slash command generates whichever format is appropriate — it **auto-detects**
@@ -178,11 +173,10 @@ system, and success criteria. The parser generates 100–400 granular features a
 ```
 
 ```bash
-claw-forge init my-api --spec app_spec.xml
+claw-forge plan app_spec.xml
 ```
 
-Use `skills/app_spec.template.xml` as a starting point (copied to your project by
-`claw-forge init`).
+Use `app_spec.example.xml` as your starting point — `claw-forge init` copies it into your project automatically.
 
 **Option 3 — Brownfield XML spec** (adding features to an existing project)
 
@@ -325,7 +319,7 @@ echo "
    - Emails only sent once per task per due date
    Depends on: 2
 " >> app_spec.txt
-claw-forge init my-api --spec app_spec.txt
+claw-forge plan app_spec.txt --project my-api
 ```
 
 ---
@@ -519,7 +513,8 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `claw-forge init` | Parse spec, build feature DAG, scaffold `.claude/` | `--spec`, `--project`, `--concurrency` |
+| `claw-forge init` | Bootstrap project — scaffold `.claude/`, config, `app_spec.example.xml` | `--project`, `--config` |
+| `claw-forge plan` | Parse spec → feature DAG in state DB | `spec` (positional), `--model`, `--concurrency` |
 | `claw-forge run` | Start agent pool, dispatch features in parallel | `--concurrency`, `--model`, `--yolo` |
 | `claw-forge add` | Add features to existing project (single or brownfield spec) | `--spec`, `--branch/--no-branch` |
 | `claw-forge fix` | TDD bug-fix: write failing test → fix → regression suite | `--report`, `--branch/--no-branch` |
@@ -553,7 +548,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 
 **New project:**
 ```
-claw-forge init → /create-spec → claw-forge run
+claw-forge init → /create-spec → claw-forge plan → claw-forge run
 ```
 
 **Add features to existing app:**
@@ -649,7 +644,7 @@ Four agent definitions in `.claude/agents/`:
 
 | Goal | Command chain |
 |------|--------------|
-| **New project** | `claw-forge init` → `/create-spec` → `claw-forge run` |
+| **New project** | `claw-forge init` → `/create-spec` → `claw-forge plan` → `claw-forge run` |
 | **Add features to existing app** | `claw-forge analyze` → `/create-spec` → `claw-forge add` |
 | **Fix a bug (TDD)** | `/create-bug-report` → `claw-forge fix` → `/review-pr` |
 | **Quality check** | `/check-code` → `/review-pr` |

@@ -158,7 +158,7 @@ Create `app_spec.xml` (or `app_spec.txt` for plain format):
 ### 4. Initialize claw-forge
 
 ```bash
-claw-forge init --spec app_spec.xml
+claw-forge plan app_spec.xml
 claw-forge run
 ```
 
