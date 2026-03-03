@@ -377,6 +377,30 @@ def run(
     db_url = f"sqlite+aiosqlite:///{db_path}"
     console.print(f"[dim]DB: {db_path}[/dim]")
 
+    # Auto-start state service if nothing is already listening on the state port
+    _state_port = cfg.get("state", {}).get("port", 8420)
+    _state_auto_started = False
+    try:
+        import socket as _socket
+        with _socket.create_connection(("127.0.0.1", _state_port), timeout=1):
+            pass  # already running
+    except OSError:
+        import subprocess as _subprocess
+        _state_cmd = [
+            "claw-forge", "state",
+            "--project", str(project_path),
+            "--port", str(_state_port),
+        ]
+        _subprocess.Popen(  # noqa: S603
+            _state_cmd,
+            stdout=open(project_path / ".claw-forge" / "state.log", "w"),  # noqa: SIM115, WPS515
+            stderr=_subprocess.STDOUT,
+        )
+        import time as _time
+        _time.sleep(1.5)  # give it a moment to bind
+        _state_auto_started = True
+        console.print(f"[dim]State service auto-started on port {_state_port}[/dim]")
+
     # Set up async engine
     engine = create_async_engine(db_url, echo=False)
     async_session_maker = async_sessionmaker(
@@ -461,6 +485,10 @@ def run(
                         if task:
                             desc = task.description or task.plugin_name
                             console.print(f"    • {task_id[:8]}…  {desc}")
+                console.print(
+                    f"\n[dim]To run: claw-forge run --project {project_path}[/dim]\n"
+                    f"[dim]Board:  claw-forge ui  --project {project_path}[/dim]"
+                )
                 return
 
             # Build provider pool for direct API fallback
@@ -951,7 +979,11 @@ def plan(
                     console.print(f"     {i}. {phase}")
 
             console.print(
-                f"\n   Next: [bold]claw-forge run --concurrency {concurrency}[/bold]"
+                f"\n   Next steps:"
+                f"\n     1. [bold]claw-forge run --project {project_path}"
+                f" --concurrency {concurrency}[/bold]"
+                f"\n     2. [bold]claw-forge ui  --project {project_path}[/bold]"
+                f"  ← open Kanban board"
             )
         else:
             console.print("[green]Plan complete[/green]")
