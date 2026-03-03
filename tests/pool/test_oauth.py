@@ -53,31 +53,50 @@ class TestReadClaudeOauthToken:
         token = read_claude_oauth_token(extra_paths=[cred_path])
         assert token == "tok-camel"
 
+    def test_reads_nested_claudeAiOauth_format(self, tmp_path: Path) -> None:
+        """Current Claude CLI (v1.x+) nests the token under claudeAiOauth key."""
+        cred_path = _write_creds(tmp_path, {
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-nested",
+                "refreshToken": "refresh-xyz",
+                "expiresAt": "2099-01-01T00:00:00Z",
+            },
+            "organizationUuid": "org-123",
+        })
+        token = read_claude_oauth_token(extra_paths=[cred_path])
+        assert token == "sk-ant-oat01-nested"
+
     def test_returns_none_when_file_missing(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "does_not_exist.json"
-        token = read_claude_oauth_token(extra_paths=[nonexistent])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = read_claude_oauth_token(extra_paths=[nonexistent])
         assert token is None
 
     def test_returns_none_when_json_malformed(self, tmp_path: Path) -> None:
         p = tmp_path / ".credentials.json"
         p.write_text("{ this is not valid json }")
-        token = read_claude_oauth_token(extra_paths=[p])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = read_claude_oauth_token(extra_paths=[p])
         assert token is None
 
     def test_returns_none_when_token_field_missing(self, tmp_path: Path) -> None:
         cred_path = _write_creds(tmp_path, {"expiresAt": "2099-01-01T00:00:00Z"})
-        token = read_claude_oauth_token(extra_paths=[cred_path])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = read_claude_oauth_token(extra_paths=[cred_path])
         assert token is None
 
     def test_returns_none_when_token_is_empty_string(self, tmp_path: Path) -> None:
         cred_path = _write_creds(tmp_path, {"accessToken": ""})
-        token = read_claude_oauth_token(extra_paths=[cred_path])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = read_claude_oauth_token(extra_paths=[cred_path])
         assert token is None
 
     def test_returns_none_when_no_standard_paths_exist(self) -> None:
         """When no standard credential paths exist, returns None gracefully."""
-        non_paths = [Path("/tmp/__no_such_path_xyz__/.credentials.json")]
-        token = read_claude_oauth_token(extra_paths=non_paths)
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = read_claude_oauth_token(
+                extra_paths=[Path("/tmp/__no_such_path_xyz__/.credentials.json")]
+            )
         assert token is None
 
     def test_extra_paths_checked_before_standard_paths(self, tmp_path: Path) -> None:
@@ -155,7 +174,8 @@ class TestGetOauthProviderConfig:
 
     def test_returns_none_when_no_token_found(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "missing.json"
-        cfg = get_oauth_provider_config(extra_paths=[nonexistent])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            cfg = get_oauth_provider_config(extra_paths=[nonexistent])
         assert cfg is None
 
 

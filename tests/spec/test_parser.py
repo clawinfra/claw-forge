@@ -330,6 +330,67 @@ class TestPlainTextParsing:
         spec = ProjectSpec._parse_plain_text("1. Some feature\n   Description: does stuff\n")
         assert spec.project_name == "project"
 
+    # ── Bullet-list format ───────────────────────────────────────────────────
+
+    def test_bullet_list_under_features_header(self) -> None:
+        """'Features:\\n- item' format should produce features, not 0."""
+        spec = ProjectSpec._parse_plain_text(
+            "Project: Todo CLI App\n"
+            "Stack: Python, Click, SQLite\n\n"
+            "Features:\n"
+            "- Add todo item\n"
+            "- List all todos\n"
+            "- Mark todo as complete\n"
+            "- Delete todo\n"
+            "- Persistent storage with SQLite\n"
+        )
+        assert spec.project_name == "Todo CLI App"
+        assert len(spec.features) == 5
+        names = [f.name for f in spec.features]
+        assert "Add todo item" in names
+        assert "Persistent storage with SQLite" in names
+
+    def test_bullet_list_category_assigned(self) -> None:
+        """Features under a section header get that header as category."""
+        spec = ProjectSpec._parse_plain_text(
+            "Project: API\n\n"
+            "Authentication:\n"
+            "- Login endpoint\n"
+            "- JWT token generation\n\n"
+            "Data:\n"
+            "- User model\n"
+            "- Post model\n"
+        )
+        cats = {f.category for f in spec.features}
+        assert "Authentication" in cats
+        assert "Data" in cats
+        assert len(spec.features) == 4
+
+    def test_bullet_list_no_section_header(self) -> None:
+        """Bare bullet items with no section header still produce features."""
+        spec = ProjectSpec._parse_plain_text(
+            "Project: Simple\n\n"
+            "- Feature A\n"
+            "- Feature B\n"
+        )
+        assert len(spec.features) == 2
+        assert spec.features[0].name == "Feature A"
+
+    def test_mixed_numbered_and_bullet(self) -> None:
+        """Numbered features and bullet sections can coexist."""
+        spec = ProjectSpec._parse_plain_text(
+            "Project: Mixed\n"
+            "Stack: Python\n\n"
+            "1. Core setup\n"
+            "   Description: Bootstrap the project\n\n"
+            "Extras:\n"
+            "- Nice-to-have feature\n"
+        )
+        assert len(spec.features) == 2
+        names = [f.name for f in spec.features]
+        assert "Core setup" in names
+        assert "Nice-to-have feature" in names
+
 
 # ── Test from_file dispatch ──────────────────────────────────────────────────
 

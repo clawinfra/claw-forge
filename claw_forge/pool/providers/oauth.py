@@ -70,9 +70,16 @@ def read_claude_oauth_token(
             logger.debug("Failed to parse Claude credentials at %s: %s", path, exc)
             continue
 
-        # Claude CLI uses "accessToken" (camelCase) in recent versions.
-        # Older builds may use "access_token" (snake_case).
-        token: str | None = data.get("accessToken") or data.get("access_token")
+        # Claude CLI stores the token in one of several formats depending on version:
+        # - Top-level "accessToken" (camelCase) — older CLI versions
+        # - Top-level "access_token" (snake_case) — some builds
+        # - Nested "claudeAiOauth.accessToken" — current CLI versions (v1.x+)
+        token: str | None = (
+            data.get("accessToken")
+            or data.get("access_token")
+            or (data.get("claudeAiOauth") or {}).get("accessToken")
+            or (data.get("claudeAiOauth") or {}).get("access_token")
+        )
         if token:
             logger.debug("Loaded Claude OAuth token from %s", path)
             return token

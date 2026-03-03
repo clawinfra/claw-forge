@@ -34,26 +34,46 @@ class TestGetOauthTokenOptional:
 
     def test_returns_none_when_file_missing(self, tmp_path: Path) -> None:
         missing = tmp_path / "not_here.json"
-        token = get_oauth_token_optional(extra_paths=[missing])
+        # Patch standard paths so the real ~/.claude/.credentials.json is not used
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = get_oauth_token_optional(extra_paths=[missing])
         assert token is None
 
     def test_returns_none_when_json_malformed(self, tmp_path: Path) -> None:
         bad = tmp_path / ".credentials.json"
         bad.write_text("{ this is not valid json }")
-        token = get_oauth_token_optional(extra_paths=[bad])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = get_oauth_token_optional(extra_paths=[bad])
         assert token is None
 
     def test_returns_none_when_token_field_absent(self, tmp_path: Path) -> None:
         cred = tmp_path / ".credentials.json"
         cred.write_text(json.dumps({"expiresAt": "2099-01-01T00:00:00Z"}))
-        token = get_oauth_token_optional(extra_paths=[cred])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = get_oauth_token_optional(extra_paths=[cred])
         assert token is None
 
     def test_returns_none_when_token_is_empty_string(self, tmp_path: Path) -> None:
         cred = tmp_path / ".credentials.json"
         cred.write_text(json.dumps({"accessToken": ""}))
-        token = get_oauth_token_optional(extra_paths=[cred])
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = get_oauth_token_optional(extra_paths=[cred])
         assert token is None
+
+    def test_reads_nested_claudeAiOauth_format(self, tmp_path: Path) -> None:
+        """Current Claude CLI (v1.x+) stores token nested under claudeAiOauth key."""
+        cred = tmp_path / ".credentials.json"
+        cred.write_text(json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-nested-token",
+                "refreshToken": "refresh-xyz",
+                "expiresAt": "2099-01-01T00:00:00Z",
+            },
+            "organizationUuid": "org-123",
+        }))
+        with patch("claw_forge.pool.providers.oauth.CLAUDE_CREDENTIALS_PATHS", []):
+            token = get_oauth_token_optional(extra_paths=[cred])
+        assert token == "sk-ant-oat01-nested-token"
 
     def test_never_raises(self) -> None:
         """get_oauth_token_optional must never raise, even on unexpected errors."""

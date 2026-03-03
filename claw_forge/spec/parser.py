@@ -158,7 +158,9 @@ class ProjectSpec:
 
         # Parse features from <core_features> or <features_to_add> — each bullet = one feature
         features: list[FeatureItem] = []
-        feature_root_el = root.find("core_features") or root.find("features_to_add")
+        _cf = root.find("core_features")
+        _fta = root.find("features_to_add")
+        feature_root_el = _cf if _cf is not None else _fta
         if feature_root_el is not None:
             for category_el in feature_root_el:
                 category = category_el.tag.replace("_", " ").title()
@@ -309,23 +311,59 @@ class ProjectSpec:
 
     @classmethod
     def _parse_plain_text(cls, content: str) -> ProjectSpec:
-        """Parse claw-forge plain text spec (numbered features format)."""
+        """Parse claw-forge plain text spec.
+
+        Supports two feature formats:
+        1. Numbered list::
+
+              1. Feature name
+                 Description: ...
+                 Depends on: 1
+
+        2. Bullet list under a ``Features:`` (or ``Features`` / category) header::
+
+              Features:
+              - Feature one
+              - Feature two
+
+              Authentication:
+              - Login endpoint
+              - JWT token generation
+        """
         lines = content.splitlines()
         name = ""
         stack = ""
         features: list[FeatureItem] = []
         current_feature: dict[str, Any] | None = None
+        # Track whether we're inside a bullet-list section and its category name
+        _bullet_section: str | None = None
+
+        # Regex patterns
+        _numbered = re.compile(r"^\d+\.\s+\S")
+        # Section header: "Features:" or "Authentication:" etc. — a non-blank line
+        # ending in ":" that is NOT a known key:value field
+        _KNOWN_KV = {"project", "stack", "description", "depends on", "version"}
+        _section_header = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]*):\s*$")
 
         for line in lines:
             stripped = line.strip()
+            if not stripped:
+                continue
+
             if stripped.startswith("Project:"):
                 name = stripped.split(":", 1)[1].strip()
-            elif stripped.startswith("Stack:"):
+                _bullet_section = None
+                continue
+            if stripped.startswith("Stack:"):
                 stack = stripped.split(":", 1)[1].strip()
-            elif re.match(r"^\d+\.\s+\S", stripped):
-                # New feature: "1. Feature name"
+                _bullet_section = None
+                continue
+
+            # Numbered feature: "1. Feature name"
+            if _numbered.match(stripped):
                 if current_feature:
                     features.append(_dict_to_feature(current_feature))
+                _bullet_section = None
                 current_feature = {
                     "name": re.sub(r"^\d+\.\s+", "", stripped),
                     "category": "Feature",
@@ -333,15 +371,57 @@ class ProjectSpec:
                     "steps": [],
                     "depends_on": [],
                 }
-            elif stripped.startswith("Description:") and current_feature:
+                continue
+
+            if stripped.startswith("Description:") and current_feature:
                 current_feature["description"] = stripped.split(":", 1)[1].strip()
-            elif stripped.startswith("Depends on:") and current_feature:
+                continue
+            if stripped.startswith("Depends on:") and current_feature:
                 raw = stripped.split(":", 1)[1].strip()
                 current_feature["depends_on"] = [
                     int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()
                 ]
-            elif stripped.startswith("- ") and current_feature:
-                current_feature["steps"].append(stripped[2:].strip())
+                continue
+
+            # Bullet item: "-" or "*" prefix
+            if stripped.startswith("- ") or stripped.startswith("* "):
+                bullet = stripped[2:].strip()
+                if not bullet:
+                    continue
+                if _bullet_section is not None:
+                    # Top-level feature under a section header
+                    if current_feature:
+                        features.append(_dict_to_feature(current_feature))
+                        current_feature = None
+                    features.append(FeatureItem(
+                        category=_bullet_section,
+                        name=bullet[:60].rstrip(".,:;"),
+                        description=bullet,
+                    ))
+                elif current_feature is not None:
+                    # Step/detail line inside a numbered feature
+                    current_feature["steps"].append(bullet)
+                else:
+                    # Bare bullet with no section — treat as a feature
+                    features.append(FeatureItem(
+                        category="Feature",
+                        name=bullet[:60].rstrip(".,:;"),
+                        description=bullet,
+                    ))
+                continue
+
+            # Section header: "Features:" / "Authentication:" / "Core:" etc.
+            m = _section_header.match(stripped)
+            if m and m.group(1).lower() not in _KNOWN_KV:
+                if current_feature:
+                    features.append(_dict_to_feature(current_feature))
+                    current_feature = None
+                _bullet_section = m.group(1).strip()
+                continue
+
+            # Any other line inside a numbered feature is treated as a description
+            if current_feature and not current_feature.get("description"):
+                current_feature["description"] = stripped
 
         if current_feature:
             features.append(_dict_to_feature(current_feature))

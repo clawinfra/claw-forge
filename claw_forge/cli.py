@@ -569,6 +569,22 @@ def run(
             console.print(f"  ✅ Completed: {completed}")
             if failed > 0:
                 console.print(f"  ❌ Failed: {failed}")
+                # Show a concise per-task failure reason (first line only)
+                for task_id, err in list(dispatch_result.failed.items())[:5]:
+                    short = err.splitlines()[0][:120] if err else "unknown error"
+                    console.print(f"     [dim]{task_id[:8]}…[/dim] {short}")
+                if len(dispatch_result.failed) > 5:
+                    console.print(f"     [dim]… and {len(dispatch_result.failed) - 5} more[/dim]")
+                # Give an actionable hint when the error is provider exhaustion
+                sample_err = next(iter(dispatch_result.failed.values()), "")
+                if "All providers exhausted" in sample_err or "No agent executor" in sample_err:
+                    console.print(
+                        "\n[yellow]💡 No working providers found.[/yellow]\n"
+                        "  • Run [bold]claw-forge pool-status[/bold] to see which providers are active\n"
+                        "  • Add a valid API key to claw-forge.yaml (e.g. ANTHROPIC_API_KEY_1)\n"
+                        "  • Or install the claude CLI for OAuth-based execution: "
+                        "https://claude.ai/download"
+                    )
             else:
                 console.print("  🎉 All tasks succeeded!")
 
