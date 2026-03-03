@@ -313,6 +313,7 @@ class AgentStateService:
                 return [
                     {
                         "id": t.id,
+                        "name": t.description,
                         "plugin_name": t.plugin_name,
                         "description": t.description,
                         "status": t.status,
@@ -516,6 +517,15 @@ class AgentStateService:
                 "run_count": reviewer.run_count,
                 "last_result": last.to_dict() if last else None,
             }
+
+        @app.get("/pool/status")
+        async def pool_status() -> dict[str, Any]:
+            """Return pool provider status. Returns empty list when no run is active."""
+            pm = self._pool_manager
+            if pm is None:
+                return {"providers": [], "active": False}
+            status = await pm.get_pool_status()
+            return {**status, "active": True}
 
         # ── Provider toggle endpoints ─────────────────────────────────────
 
