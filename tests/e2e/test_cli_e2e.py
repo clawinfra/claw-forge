@@ -223,9 +223,17 @@ class TestVersionCommand:
 class TestRunCommand:
     def test_run_help_shows_dry_run(self) -> None:
         """claw-forge run --help shows --dry-run flag."""
-        result = runner.invoke(app, ["run", "--help"])
-        assert result.exit_code == 0
-        assert "--dry-run" in result.output
+        import subprocess
+        import sys
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "from claw_forge.cli import app; from typer.testing import CliRunner; "
+             "r = CliRunner().invoke(app, ['run', '--help']); "
+             "print(r.output); exit(r.exit_code)"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "--dry-run" in proc.stdout
 
     def test_run_with_no_db_exits_zero_with_message(self) -> None:
         """claw-forge run with no DB (no plan yet) exits 0 with helpful message."""
@@ -495,7 +503,7 @@ class TestPlanWritesDB:
             )
 
 
-class TestRunExecutesTasks:
+class TestZRunExecutesTasks:
     """run command must execute tasks (not just dry-run) without crashing.
 
     This class exists specifically to catch the concurrent-session SQLAlchemy
