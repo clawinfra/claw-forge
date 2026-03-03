@@ -1212,16 +1212,17 @@ def ui(
             console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
             subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
 
-        _session_id_dev = "(none)"
+        _session_id_dev = "(none — run `claw-forge run` to create a session)"
         try:
-            import httpx as _httpx_dev
-            _r2 = _httpx_dev.get(f"http://localhost:{state_port}/sessions", timeout=2.0)
-            if _r2.status_code == 200:
-                _sess2 = _r2.json()
-                if isinstance(_sess2, list) and _sess2:
-                    _session_id_dev = _sess2[-1].get("id", "(none)")
-                elif isinstance(_sess2, dict) and _sess2.get("sessions"):
-                    _session_id_dev = _sess2["sessions"][-1].get("id", "(none)")
+            import sqlite3 as _sqlite3_dev
+            _db_path_dev = Path.cwd() / ".claw-forge" / "state.db"
+            if _db_path_dev.exists():
+                with _sqlite3_dev.connect(str(_db_path_dev)) as _conn2:
+                    _row2 = _conn2.execute(
+                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                    ).fetchone()
+                    if _row2:
+                        _session_id_dev = _row2[0]
         except Exception:  # noqa: BLE001
             pass
 
@@ -1347,17 +1348,18 @@ def ui(
         ]
     )
 
-    # Fetch the latest session ID from the state service for display
-    _session_id_display = "(none)"
+    # Fetch the latest session ID from the DB for display
+    _session_id_display = "(none — run `claw-forge run` to create a session)"
     try:
-        import httpx as _httpx_info
-        _r = _httpx_info.get(f"http://localhost:{state_port}/sessions", timeout=2.0)
-        if _r.status_code == 200:
-            _sessions = _r.json()
-            if isinstance(_sessions, list) and _sessions:
-                _session_id_display = _sessions[-1].get("id", "(none)")
-            elif isinstance(_sessions, dict) and _sessions.get("sessions"):
-                _session_id_display = _sessions["sessions"][-1].get("id", "(none)")
+        import sqlite3 as _sqlite3
+        _db_path = Path.cwd() / ".claw-forge" / "state.db"
+        if _db_path.exists():
+            with _sqlite3.connect(str(_db_path)) as _conn:
+                _row = _conn.execute(
+                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if _row:
+                    _session_id_display = _row[0]
     except Exception:  # noqa: BLE001
         pass
 
