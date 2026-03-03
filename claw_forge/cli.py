@@ -546,9 +546,9 @@ def run(
                             _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
                             if not _api_key and pool is not None:
                                 # Extract key from first healthy provider
-                                _prov = pool.get_provider()
-                                if _prov and hasattr(_prov, "api_key"):
-                                    _api_key = _prov.api_key
+                                _provs = pool.providers
+                                if _provs and hasattr(_provs[0], "config"):
+                                    _api_key = _provs[0].config.api_key or ""
                             if _api_key:
                                 sdk_env["ANTHROPIC_API_KEY"] = _api_key
                             else:
