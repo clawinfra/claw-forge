@@ -120,9 +120,23 @@ def load_configs_from_yaml(data: dict[str, Any]) -> list[ProviderConfig]:
     else:
         return configs
 
+    # Short-form type aliases for user convenience
+    # e.g. type: oauth → anthropic_oauth, type: openai → openai_compat
+    _TYPE_ALIASES: dict[str, str] = {
+        "oauth": "anthropic_oauth",
+        "anthropic-oauth": "anthropic_oauth",
+        "anthropic_oauth_short": "anthropic_oauth",
+        "openai": "openai_compat",
+        "openai-compat": "openai_compat",
+        "anthropic-compat": "anthropic_compat",
+        "ollama": "openai_compat",  # Ollama speaks OpenAI API
+    }
+
     for name, raw in items:
         try:
-            ptype = ProviderType(raw.pop("type", raw.pop("provider_type", "anthropic")))
+            raw_type = raw.pop("type", raw.pop("provider_type", "anthropic"))
+            raw_type = _TYPE_ALIASES.get(raw_type, raw_type)
+            ptype = ProviderType(raw_type)
             configs.append(
                 ProviderConfig(
                     name=name,
