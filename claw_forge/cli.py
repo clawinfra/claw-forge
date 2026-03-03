@@ -526,26 +526,23 @@ def run(
                             from claude_agent_sdk import ClaudeAgentOptions
 
                             from claw_forge.agent.session import AgentSession
-                            from claw_forge.pool.providers.oauth import (
-                                get_oauth_token_optional,
-                            )
-
-                            # Resolve auth: prefer ANTHROPIC_API_KEY env, then
-                            # OAuth token from credentials.json, then pool providers.
+                            # Resolve auth: ANTHROPIC_API_KEY env → pool provider key.
                             # Pass as env so the claude CLI subprocess uses our key.
                             sdk_env: dict[str, str] = {}
                             _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-                            if not _api_key:
-                                _oauth = get_oauth_token_optional()
-                                if _oauth:
-                                    sdk_env["ANTHROPIC_API_KEY"] = _oauth
-                                elif pool is not None:
-                                    # Extract key from first healthy provider
-                                    _prov = pool.get_provider()
-                                    if _prov and hasattr(_prov, "api_key"):
-                                        sdk_env["ANTHROPIC_API_KEY"] = _prov.api_key
-                            else:
+                            if not _api_key and pool is not None:
+                                # Extract key from first healthy provider
+                                _prov = pool.get_provider()
+                                if _prov and hasattr(_prov, "api_key"):
+                                    _api_key = _prov.api_key
+                            if _api_key:
                                 sdk_env["ANTHROPIC_API_KEY"] = _api_key
+                            else:
+                                raise RuntimeError(
+                                    "No Anthropic API key found.\n"
+                                    "  Run: claude setup-token\n"
+                                    "  Or add ANTHROPIC_API_KEY to your .env file"
+                                )
 
                             options = ClaudeAgentOptions(
                                 model=model,
