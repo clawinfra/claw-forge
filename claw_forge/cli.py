@@ -650,6 +650,7 @@ def state(
         "0.0.0.0", "--host",
         help="Host to bind (use 127.0.0.1 for local-only).",
     ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
     config: str = typer.Option(
         "claw-forge.yaml", "--config", "-c",
         help="Path to claw-forge.yaml (used for provider config and project metadata).",
@@ -675,7 +676,13 @@ def state(
 
     from claw_forge.state.service import AgentStateService
 
-    svc = AgentStateService()
+    project_path = Path(project).resolve()
+    db_path = project_path / ".claw-forge" / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    console.print(f"[dim]Database: {db_path}[/dim]")
+
+    svc = AgentStateService(database_url=db_url)
     uvicorn.run(svc.create_app(), host=host, port=port)
 
 
@@ -1348,20 +1355,23 @@ def ui(
         ]
     )
 
-    # Fetch the latest session ID from the DB for display
-    _session_id_display = "(none — run `claw-forge run` to create a session)"
-    try:
-        import sqlite3 as _sqlite3
-        _db_path = Path.cwd() / ".claw-forge" / "state.db"
-        if _db_path.exists():
-            with _sqlite3.connect(str(_db_path)) as _conn:
-                _row = _conn.execute(
-                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                ).fetchone()
-                if _row:
-                    _session_id_display = _row[0]
-    except Exception:  # noqa: BLE001
-        pass
+    # Prefer --session arg; otherwise read latest from DB
+    if session:
+        _session_id_display = session
+    else:
+        _session_id_display = "(none — run `claw-forge run` to create a session)"
+        try:
+            import sqlite3 as _sqlite3
+            _db_path = Path.cwd() / ".claw-forge" / "state.db"
+            if _db_path.exists():
+                with _sqlite3.connect(str(_db_path)) as _conn:
+                    _row = _conn.execute(
+                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                    ).fetchone()
+                    if _row:
+                        _session_id_display = _row[0]
+        except Exception:  # noqa: BLE001
+            pass
 
     console.print("[bold green]🔥 claw-forge Kanban UI[/bold green]")
     console.print(f"   UI:        [cyan]{url}[/cyan]")
