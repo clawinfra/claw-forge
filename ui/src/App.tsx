@@ -524,7 +524,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
             {featuresError && (
               <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
                 ⚠️ Failed to load features — is the state service running on
-                port 8888?
+                port {(window as Window & typeof globalThis & { __CLAW_FORGE_STATE_PORT__?: number }).__CLAW_FORGE_STATE_PORT__ ?? 8420}?
               </div>
             )}
 

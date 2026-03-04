@@ -1327,8 +1327,7 @@ def _ensure_state_service(project_path: Path, port: int) -> bool:
             return False  # correct project, nothing to do
         # Wrong project — kill it and restart
         console.print(
-            f"[yellow]State service is serving a different project "
-            f"({svc_project}), restarting for {want_project}[/yellow]"
+            f"[dim]State service switching project → {want_project}[/dim]"
         )
         try:
             with _req.urlopen(  # noqa: S310
