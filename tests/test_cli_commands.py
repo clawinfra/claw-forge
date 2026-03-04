@@ -762,17 +762,58 @@ class TestBuildSessionRedirectJs:
 
 class TestEnsureStateService:
     def test_returns_false_when_already_running(self, tmp_path: Path) -> None:
-        """If port is already bound, returns False (no auto-start)."""
+        """If port is bound and /info confirms same project, returns False (no restart)."""
+        import json
         import socket
+        from unittest.mock import MagicMock, patch
 
         from claw_forge.cli import _ensure_state_service
-        # Bind a real port to simulate running service
+
+        # Simulate /info returning the same project path
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = json.dumps(
+            {"project_path": str(tmp_path.resolve())}
+        ).encode()
+
         with socket.socket() as srv:
             srv.bind(("127.0.0.1", 0))
             srv.listen(1)
             port = srv.getsockname()[1]
-            result = _ensure_state_service(tmp_path, port)
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                result = _ensure_state_service(tmp_path, port)
         assert result is False
+
+    def test_restarts_when_wrong_project(self, tmp_path: Path) -> None:
+        """If /info returns a different project, the service is restarted."""
+        import json
+        import socket
+        from unittest.mock import MagicMock, patch
+
+        from claw_forge.cli import _ensure_state_service
+
+        wrong_project = "/some/other/project"
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = json.dumps(
+            {"project_path": wrong_project}
+        ).encode()
+
+        mock_popen = MagicMock()
+        with socket.socket() as srv:
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            port = srv.getsockname()[1]
+            with (
+                patch("urllib.request.urlopen", return_value=mock_resp),
+                patch("subprocess.Popen", mock_popen),
+                patch("time.sleep"),
+            ):
+                result = _ensure_state_service(tmp_path, port)
+        assert result is True
+        mock_popen.assert_called_once()
 
     def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
         """When port is free, Popen is called and returns True."""

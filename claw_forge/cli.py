@@ -1303,27 +1303,62 @@ def _build_session_redirect_js(session_id: str) -> str:
 
 
 def _ensure_state_service(project_path: Path, port: int) -> bool:
-    """Start state service on *port* if nothing is already listening.
+    """Start state service on *port* if not running or serving the wrong project.
 
-    Returns True if auto-started, False if already running.
+    Returns True if (re)started, False if already running for this project.
     """
     import socket as _sock
-    try:
-        with _sock.create_connection(("127.0.0.1", port), timeout=1):
-            return False  # already running
-    except OSError:
-        pass
     import subprocess as _sp
     import time as _st
-    project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
-    log_f = open(project_path / ".claw-forge" / "state.log", "w")  # noqa: SIM115
-    _sp.Popen(  # noqa: S603
-        ["claw-forge", "state", "--project", str(project_path), "--port", str(port)],
-        stdout=log_f,
-        stderr=_sp.STDOUT,
-        start_new_session=True,
-    )
-    _st.sleep(1.5)
+
+    def _start() -> None:
+        project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
+        log_f = open(project_path / ".claw-forge" / "state.log", "w")  # noqa: SIM115
+        _sp.Popen(  # noqa: S603
+            ["claw-forge", "state", "--project", str(project_path), "--port", str(port)],
+            stdout=log_f,
+            stderr=_sp.STDOUT,
+            start_new_session=True,
+        )
+        _st.sleep(1.5)
+
+    # Check if anything is already listening on the port
+    try:
+        with _sock.create_connection(("127.0.0.1", port), timeout=1):
+            pass  # something is listening
+    except OSError:
+        _start()
+        return True
+
+    # Something is running — verify it serves the right project via /info
+    try:
+        import json as _json
+        import urllib.request as _req
+        with _req.urlopen(f"http://127.0.0.1:{port}/info", timeout=2) as resp:  # noqa: S310
+            info = _json.loads(resp.read())
+        svc_project = str(Path(info.get("project_path", "")).resolve())
+        want_project = str(project_path.resolve())
+        if svc_project == want_project:
+            return False  # correct project, nothing to do
+        # Wrong project — kill it and restart
+        console.print(
+            f"[yellow]State service is serving a different project "
+            f"({svc_project}), restarting for {want_project}[/yellow]"
+        )
+        try:
+            with _req.urlopen(  # noqa: S310
+                _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),
+                timeout=2,
+            ):
+                pass
+        except Exception:  # noqa: BLE001
+            pass
+        _st.sleep(0.5)
+    except Exception:  # noqa: BLE001
+        # /info not available (old version) or service is unhealthy — restart anyway
+        pass
+
+    _start()
     return True
 
 

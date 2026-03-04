@@ -244,6 +244,35 @@ class AgentStateService:
         return app
 
     def _register_routes(self, app: FastAPI) -> None:
+        # Normalise DB URL to a canonical project path for the /info endpoint.
+        # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
+        _db_url_str = str(self._engine.url)
+        try:
+            from pathlib import Path as _Path
+            _db_file = _db_url_str.split("///")[-1]
+            _svc_project = str(_Path(_db_file).resolve().parent.parent)
+        except Exception:  # noqa: BLE001
+            _svc_project = ""
+
+        @app.get("/info")
+        async def service_info() -> dict[str, str]:
+            """Return which project this state service instance is serving."""
+            return {"project_path": _svc_project, "database_url": _db_url_str}
+
+        @app.post("/shutdown", status_code=200)
+        async def shutdown() -> dict[str, str]:
+            """Gracefully shut down this service instance (used for restart on project change)."""
+            import os
+            import signal
+            import threading
+            # Shut down after a brief delay so the HTTP response can be sent
+            def _kill() -> None:
+                import time
+                time.sleep(0.2)
+                os.kill(os.getpid(), signal.SIGTERM)
+            threading.Thread(target=_kill, daemon=True).start()
+            return {"status": "shutting down"}
+
         @app.post("/sessions", status_code=201)
         async def create_session(req: CreateSessionRequest) -> dict[str, Any]:
             async with self._session_factory() as db:

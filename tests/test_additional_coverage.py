@@ -1152,3 +1152,30 @@ def test_scaffold_project_existing_files(tmp_path: Path) -> None:
     assert isinstance(result, dict)
 
 
+
+
+@pytest.mark.asyncio
+async def test_info_endpoint_returns_project_path() -> None:
+    """GET /info returns the project path derived from the database URL."""
+    client, _ = await _make_test_client()
+    async with client:
+        resp = await client.get("/info")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "project_path" in data
+        assert "database_url" in data
+
+
+@pytest.mark.asyncio
+async def test_shutdown_endpoint_returns_status() -> None:
+    """POST /shutdown returns shutting down status (but doesn't kill in test)."""
+    import signal
+    from unittest.mock import patch
+
+    client, _ = await _make_test_client()
+    async with client:
+        # Patch os.kill so we don't actually terminate the test process
+        with patch("os.kill") as mock_kill:
+            resp = await client.post("/shutdown")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "shutting down"

@@ -104,19 +104,12 @@ concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 fail_under = 90
-# Per-file minimums — aggregate 90% can hide badly-covered critical paths
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "@(abc\\.)?abstractmethod",
 ]
-
-[tool.coverage.report.exclude_also]
-# CLI integration paths that require a live server/subprocess are tested via e2e, not unit tests
-
-[[tool.coverage.paths]]
-source = ["claw_forge"]
 
 [dependency-groups]
 dev = [
