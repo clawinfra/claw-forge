@@ -69,7 +69,8 @@ def test_status_with_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_run_with_config(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path, providers={"p1": {"type": "anthropic", "api_key": "k"}})
-    result = runner.invoke(app, ["run", "--config", str(cfg)])
+    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+        result = runner.invoke(app, ["run", "--config", str(cfg)])
     assert result.exit_code == 0
     assert "claw-forge" in result.output
 
@@ -81,7 +82,8 @@ def test_run_missing_config(tmp_path: Path) -> None:
 
 def test_run_yolo_mode(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path)
-    result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo"])
+    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+        result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo"])
     assert result.exit_code == 0
     assert "YOLO" in result.output
 
@@ -394,6 +396,7 @@ def test_ui_serves_static_bundle(tmp_path: Path) -> None:
         patch.object(cli_mod, "__file__", str(fake_dist.parent / "cli.py")),
         patch("uvicorn.run"),
         patch("starlette.staticfiles.StaticFiles.__init__", return_value=None),
+        patch("claw_forge.cli._ensure_state_service", return_value=False),
     ):
         result = runner.invoke(app, ["ui", "--no-open"])
     assert result.exit_code == 0, result.output
@@ -479,7 +482,8 @@ def test_load_config_with_env_file(tmp_path: Path) -> None:
     env_file.write_text("MY_KEY=abc123\n")
     cfg_path = tmp_path / "claw-forge.yaml"
     cfg_path.write_text(yaml.dump({"providers": {}, "key": "${MY_KEY}"}))
-    result = runner.invoke(app, ["run", "--config", str(cfg_path)])
+    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+        result = runner.invoke(app, ["run", "--config", str(cfg_path)])
     assert result.exit_code == 0
 
 
@@ -828,6 +832,7 @@ class TestEnsureStateService:
 
     def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
         """When port is free, Popen is called and returns True."""
+        import json
         from unittest.mock import MagicMock, patch
 
         from claw_forge.cli import _ensure_state_service
@@ -835,6 +840,11 @@ class TestEnsureStateService:
         mock_conn = MagicMock()
         mock_conn.__enter__ = lambda s: s
         mock_conn.__exit__ = MagicMock(return_value=False)
+        # Mock /info response so _verify_info succeeds after startup
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"project_path": str(tmp_path)}).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
         # First call: port free (OSError). Second call: port ready after start.
         with (
             patch("subprocess.Popen", mock_popen),
@@ -843,6 +853,7 @@ class TestEnsureStateService:
             # call 1: initial check (port free), call 2: _wait_for_port (ready)
             patch("socket.create_connection",
                   side_effect=[OSError("port free"), mock_conn]),
+            patch("urllib.request.urlopen", return_value=mock_resp),
         ):
             result = _ensure_state_service(tmp_path, 19999)
         assert result is True

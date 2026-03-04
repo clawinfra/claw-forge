@@ -1317,6 +1317,19 @@ def _ensure_state_service(project_path: Path, port: int) -> bool:
         # Port still held after timeout — proceed anyway (Popen will fail to bind,
         # which is surfaced via _wait_for_port returning False below)
 
+    def _verify_info(timeout: float = 2.0) -> bool:
+        """Return True if /info responds with a claw-forge project_path field."""
+        import json as _json
+        import urllib.request as _req
+        try:
+            with _req.urlopen(  # noqa: S310
+                f"http://127.0.0.1:{port}/info", timeout=timeout
+            ) as resp:
+                info = _json.loads(resp.read())
+            return bool(info.get("project_path") is not None)
+        except Exception:  # noqa: BLE001
+            return False
+
     def _start() -> None:
         project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
         log_path = project_path / ".claw-forge" / "state.log"
@@ -1338,6 +1351,22 @@ def _ensure_state_service(project_path: Path, port: int) -> bool:
                 log_tail = log_path.read_text()[-500:]
             msg = (
                 f"State service failed to start on port {port} within 10s.\n"
+                f"Log: {log_path}\n{log_tail}"
+            )
+            raise RuntimeError(msg)
+        # Verify that the process answering on the port is actually the
+        # claw-forge state service and not another program (e.g. an IDE that
+        # happened to bind the same loopback port with higher TCP priority).
+        if not _verify_info(timeout=3.0):
+            import contextlib as _ctx
+            log_tail = ""
+            with _ctx.suppress(OSError):
+                log_tail = log_path.read_text()[-500:]
+            msg = (
+                f"Port {port} is occupied by another process that does not "
+                f"respond to the claw-forge /info endpoint.\n"
+                f"Fix: run `claw-forge ui --state-port <other_port>` to use "
+                f"a different port.\n"
                 f"Log: {log_path}\n{log_tail}"
             )
             raise RuntimeError(msg)
