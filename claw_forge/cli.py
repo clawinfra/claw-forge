@@ -1485,6 +1485,8 @@ def ui(
     async def proxy_ws(websocket: StarletteWebSocket) -> None:
         """Proxy WebSocket /ws and /ws/{session_id} to the state service."""
         import asyncio
+        import contextlib
+
         from starlette.websockets import WebSocketState
 
         path = websocket.url.path
@@ -1504,18 +1506,14 @@ def ui(
                         await backend_ws.send(msg)
                 finally:
                     fwd_task.cancel()
-                    try:
+                    with contextlib.suppress(asyncio.CancelledError):
                         await fwd_task
-                    except asyncio.CancelledError:
-                        pass
         except Exception:  # noqa: BLE001
             pass
         finally:
             if websocket.client_state == WebSocketState.CONNECTED:
-                try:
+                with contextlib.suppress(Exception):
                     await websocket.close()
-                except Exception:  # noqa: BLE001
-                    pass
 
     from starlette.routing import WebSocketRoute
 
