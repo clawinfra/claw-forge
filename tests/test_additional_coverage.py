@@ -1183,3 +1183,64 @@ async def test_shutdown_endpoint_returns_status() -> None:
             # Wait for the daemon thread to fire (and hit the mock)
             import time
             time.sleep(0.5)
+
+
+# ---------------------------------------------------------------------------
+# output_parser — uncovered branches
+# ---------------------------------------------------------------------------
+
+
+class TestParseFilename:
+    """Unit tests for _parse_filename edge cases."""
+
+    def test_colon_format_candidate_no_path_chars_returns_none(self):
+        """lang:word where word has no / or . falls through without returning."""
+        from claw_forge.output_parser import _parse_filename
+
+        # "python:nodot" — candidate "nodot" has no "/" or "."
+        assert _parse_filename("python:nodot") is None
+
+    def test_space_format_candidate_no_path_chars_returns_none(self):
+        """lang word where word has no / or . falls through without returning."""
+        from claw_forge.output_parser import _parse_filename
+
+        assert _parse_filename("python nodot") is None
+
+    def test_plain_word_not_in_lang_only_no_slash_or_dot_returns_none(self):
+        """Info string that's not a known lang tag and has no / or . → None."""
+        from claw_forge.output_parser import _parse_filename
+
+        # "foobar" is not in _LANG_ONLY and has no / or . → falls to final return None
+        assert _parse_filename("foobar") is None
+
+
+class TestWriteCodeBlocksSecurity:
+    """Tests for security checks in write_code_blocks."""
+
+    def test_absolute_path_is_skipped(self, tmp_path: Path) -> None:
+        from claw_forge.output_parser import write_code_blocks
+
+        text = "```/absolute/path/file.py\ncontent\n```"
+        result = write_code_blocks(text, tmp_path)
+        assert result == []
+        # File must not have been created
+        assert not (tmp_path / "file.py").exists()
+
+    def test_path_traversal_is_blocked(self, tmp_path: Path) -> None:
+        from claw_forge.output_parser import write_code_blocks
+
+        # ../sibling.py traverses outside the project dir
+        text = "```../sibling.py\ncontent\n```"
+        result = write_code_blocks(text, tmp_path)
+        assert result == []
+
+    def test_resolve_oserror_is_caught(self, tmp_path: Path) -> None:
+        from pathlib import Path as _Path
+        from unittest.mock import patch
+
+        from claw_forge.output_parser import write_code_blocks
+
+        text = "```src/valid.py\ncontent\n```"
+        with patch.object(_Path, "resolve", side_effect=OSError("disk error")):
+            result = write_code_blocks(text, tmp_path)
+        assert result == []

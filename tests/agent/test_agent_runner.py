@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import claude_agent_sdk
 import pytest
 
-from claw_forge.agent.runner import collect_result, run_agent
+from claw_forge.agent.runner import collect_result, collect_structured_result, run_agent
 from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 
 # ---------------------------------------------------------------------------
@@ -340,3 +340,125 @@ class TestCollectResult:
             output = await collect_result("prompt")
 
         assert output == "second result"
+
+
+# ---------------------------------------------------------------------------
+# collect_structured_result tests
+# ---------------------------------------------------------------------------
+
+
+class TestCollectStructuredResult:
+    @pytest.mark.asyncio
+    async def test_returns_parsed_dict_on_valid_json(self):
+        result_msg = _make_result_message('{"status": "ok", "count": 3}')
+
+        with patch("claw_forge.agent.runner.query") as mock_query:
+            mock_query.return_value = _async_gen(result_msg)
+            result = await collect_structured_result(
+                "prompt", output_format={"type": "object"}
+            )
+
+        assert result == {"status": "ok", "count": 3}
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_invalid_json(self):
+        result_msg = _make_result_message("not valid json at all")
+
+        with patch("claw_forge.agent.runner.query") as mock_query:
+            mock_query.return_value = _async_gen(result_msg)
+            result = await collect_structured_result(
+                "prompt", output_format={"type": "object"}
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_result_message(self):
+        assistant = _make_assistant_message("thinking...")
+
+        with patch("claw_forge.agent.runner.query") as mock_query:
+            mock_query.return_value = _async_gen(assistant)
+            result = await collect_structured_result(
+                "prompt", output_format={"type": "object"}
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_result_is_none(self):
+        result_msg = _make_result_message(None)  # type: ignore[arg-type]
+        result_msg.result = None
+
+        with patch("claw_forge.agent.runner.query") as mock_query:
+            mock_query.return_value = _async_gen(result_msg)
+            result = await collect_structured_result(
+                "prompt", output_format={"type": "object"}
+            )
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# run_agent: project_dir and hooks branches
+# ---------------------------------------------------------------------------
+
+
+class TestRunAgentProjectDir:
+    @pytest.mark.asyncio
+    async def test_project_dir_injects_sdk_mcp(self):
+        """With project_dir and use_sdk_mcp=True, SDK MCP server is injected."""
+        from unittest.mock import MagicMock
+
+        fake_mcp = MagicMock()
+
+        with (
+            patch("claw_forge.agent.runner.query") as mock_query,
+            patch(
+                "claw_forge.mcp.sdk_server.create_feature_mcp_server",
+                return_value=fake_mcp,
+            ),
+        ):
+            mock_query.return_value = _async_gen()
+            async for _ in run_agent(
+                "prompt", project_dir=Path("/some/project"), use_sdk_mcp=True
+            ):
+                pass
+
+        _, kwargs = mock_query.call_args
+        assert "features" in kwargs["options"].mcp_servers
+
+    @pytest.mark.asyncio
+    async def test_project_dir_uses_legacy_mcp_when_sdk_disabled(self):
+        """With use_sdk_mcp=False, falls back to subprocess MCP config."""
+        legacy_cfg = {"features": {"command": "python", "args": ["-m", "mcp"]}}
+
+        with (
+            patch("claw_forge.agent.runner.query") as mock_query,
+            patch(
+                "claw_forge.mcp.feature_mcp.mcp_server_config",
+                return_value=legacy_cfg,
+            ),
+        ):
+            mock_query.return_value = _async_gen()
+            async for _ in run_agent(
+                "prompt",
+                project_dir=Path("/some/project"),
+                use_sdk_mcp=False,
+            ):
+                pass
+
+        _, kwargs = mock_query.call_args
+        assert "features" in kwargs["options"].mcp_servers
+
+    @pytest.mark.asyncio
+    async def test_explicit_hooks_skips_default_hooks(self):
+        """When hooks dict is passed explicitly, get_default_hooks is not called."""
+        with (
+            patch("claw_forge.agent.runner.query") as mock_query,
+            patch("claw_forge.agent.runner.get_default_hooks") as mock_defaults,
+        ):
+            mock_query.return_value = _async_gen()
+            async for _ in run_agent("prompt", hooks={}):
+                pass
+
+        mock_defaults.assert_not_called()
