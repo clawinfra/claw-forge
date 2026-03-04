@@ -405,10 +405,14 @@ def run(
             "--project", str(project_path),
             "--port", str(_state_port),
         ]
+        _state_log = open(project_path / ".claw-forge" / "state.log", "w")  # noqa: SIM115, WPS515
+        # Use start_new_session=True so the child is in its own process group and
+        # asyncio's SIGCHLD watcher won't see it as an "Unknown child process".
         _subprocess.Popen(  # noqa: S603
             _state_cmd,
-            stdout=open(project_path / ".claw-forge" / "state.log", "w"),  # noqa: SIM115, WPS515
+            stdout=_state_log,
             stderr=_subprocess.STDOUT,
+            start_new_session=True,
         )
         import time as _time
         _time.sleep(1.5)  # give it a moment to bind

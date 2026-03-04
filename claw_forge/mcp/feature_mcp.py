@@ -119,9 +119,12 @@ class FeatureDependency(FeatureBase):
 
 
 def _get_db_path() -> Path:
-    """Resolve the features database path from PROJECT_DIR env var."""
+    """Resolve the database path from PROJECT_DIR env var.
+
+    Uses the same state.db as the main CLI to avoid duplicate DB files.
+    """
     project_dir = os.environ.get("PROJECT_DIR", ".")
-    return Path(project_dir) / ".claw-forge" / "features.db"
+    return Path(project_dir) / ".claw-forge" / "state.db"
 
 
 def _get_engine() -> Engine:
