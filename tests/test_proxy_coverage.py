@@ -7,30 +7,24 @@ Targets the code that was responsible for recurring 500 errors:
 from __future__ import annotations
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from httpx import Request, Response
-from starlette.testclient import TestClient
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _make_proxy_app(state_port: int = 9999):
     """Build just the ASGI proxy app (without starting the state service)."""
-    import importlib
-    import types
 
     # Import the _build_ui_app function indirectly by inspecting cli internals
     # We patch the state service and build only the proxy Starlette app.
+    from collections.abc import AsyncGenerator
+
     from starlette.applications import Starlette
     from starlette.requests import Request as StarletteRequest
     from starlette.responses import StreamingResponse
     from starlette.routing import Route
-
-    from collections.abc import AsyncGenerator
 
     state_base = f"http://localhost:{state_port}"
     _proxy_client = httpx.AsyncClient(
@@ -82,7 +76,18 @@ def _make_proxy_app(state_port: int = 9999):
             background=None,
         )
 
-    return Starlette(routes=[Route("/api/{path:path}", proxy_api, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])]), _proxy_client
+    return (
+        Starlette(
+            routes=[
+                Route(
+                    "/api/{path:path}",
+                    proxy_api,
+                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                )
+            ]
+        ),
+        _proxy_client,
+    )
 
 
 # ── proxy_api: ConnectError → 503 ────────────────────────────────────────────
@@ -268,8 +273,9 @@ async def test_update_task_accumulates_tokens():
         )
         task_id = task_resp.json()["id"]
 
-        await ac.patch(f"/tasks/{task_id}", json={"input_tokens": 50, "output_tokens": 100, "cost_usd": 0.001})
-        await ac.patch(f"/tasks/{task_id}", json={"input_tokens": 50, "output_tokens": 100, "cost_usd": 0.001})
+        tok = {"input_tokens": 50, "output_tokens": 100, "cost_usd": 0.001}
+        await ac.patch(f"/tasks/{task_id}", json=tok)
+        await ac.patch(f"/tasks/{task_id}", json=tok)
 
         tasks = (await ac.get(f"/sessions/{session_id}/tasks")).json()
         assert tasks[0]["input_tokens"] == 100
