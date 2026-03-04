@@ -802,6 +802,9 @@ class TestEnsureStateService:
         ).encode()
 
         mock_popen = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = lambda s: s
+        mock_conn.__exit__ = MagicMock(return_value=False)
         with socket.socket() as srv:
             srv.bind(("127.0.0.1", 0))
             srv.listen(1)
@@ -810,6 +813,14 @@ class TestEnsureStateService:
                 patch("urllib.request.urlopen", return_value=mock_resp),
                 patch("subprocess.Popen", mock_popen),
                 patch("time.sleep"),
+                # monotonic: always return 0 so loops never time out
+                patch("time.monotonic", return_value=0.0),
+                # call 1: initial check (port busy by srv socket above)
+                # call 2: _wait_for_port_free (OSError = port freed)
+                # call 3: _wait_for_port in _start (success = new service ready)
+                patch("socket.create_connection",
+                      side_effect=[mock_conn, OSError("free"), mock_conn]),
+
             ):
                 result = _ensure_state_service(tmp_path, port)
         assert result is True
@@ -821,13 +832,20 @@ class TestEnsureStateService:
 
         from claw_forge.cli import _ensure_state_service
         mock_popen = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = lambda s: s
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        # First call: port free (OSError). Second call: port ready after start.
         with (
             patch("subprocess.Popen", mock_popen),
             patch("time.sleep"),
+            patch("time.monotonic", return_value=0.0),
+            # call 1: initial check (port free), call 2: _wait_for_port (ready)
+            patch("socket.create_connection",
+                  side_effect=[OSError("port free"), mock_conn]),
         ):
             result = _ensure_state_service(tmp_path, 19999)
         assert result is True
         mock_popen.assert_called_once()
-        # Verify start_new_session=True is passed
         call_kwargs = mock_popen.call_args.kwargs
         assert call_kwargs.get("start_new_session") is True
