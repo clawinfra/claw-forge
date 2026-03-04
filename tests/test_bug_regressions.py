@@ -107,6 +107,19 @@ class TestBug11ExtractCodeBlocks:
         assert extract_code_blocks("Just some text without code.") == []
 
 
+    def test_ignores_shell_command_paths(self) -> None:
+        """Regression: shell command paths like path/to/check must not become files."""
+        text = "```path/to/check\nls /tmp\n```\n"
+        blocks = extract_code_blocks(text)
+        assert blocks == [], f"Expected no blocks, got: {blocks}"
+
+    def test_accepts_extensioned_nested_paths(self) -> None:
+        """Files like src/hello/cli.py must still be recognised."""
+        text = "```src/hello/cli.py\nprint('hi')\n```"
+        blocks = extract_code_blocks(text)
+        assert len(blocks) == 1
+        assert blocks[0][0] == "src/hello/cli.py"
+
 class TestBug11WriteCodeBlocks:
     """Test that code blocks are actually written to disk."""
 

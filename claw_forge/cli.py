@@ -353,6 +353,12 @@ def run(
     from claw_forge.state.models import Session as DbSession
     from claw_forge.state.scheduler import TaskNode
 
+    # Resolve config path: prefer project-relative if config is a bare filename
+    _config_path = Path(config)
+    if not _config_path.is_absolute() and not _config_path.exists():
+        _project_config = Path(project) / config
+        if _project_config.exists():
+            config = str(_project_config)
     cfg = _load_config(config)
     resolved = resolve_model(model, cfg)
     if resolved.alias_resolved:
@@ -1478,6 +1484,9 @@ def ui(
 
     async def proxy_ws(websocket: StarletteWebSocket) -> None:
         """Proxy WebSocket /ws and /ws/{session_id} to the state service."""
+        import asyncio
+        from starlette.websockets import WebSocketState
+
         path = websocket.url.path
         ws_url = f"ws://localhost:{state_port}{path}"
         await websocket.accept()
@@ -1485,18 +1494,28 @@ def ui(
             async with websockets.connect(ws_url) as backend_ws:
                 async def _fw() -> None:
                     async for msg in backend_ws:
-                        await websocket.send_text(msg if isinstance(msg, str) else msg.decode())
-                import asyncio
+                        if websocket.client_state == WebSocketState.CONNECTED:
+                            await websocket.send_text(
+                                msg if isinstance(msg, str) else msg.decode()
+                            )
                 fwd_task = asyncio.create_task(_fw())
                 try:
                     async for msg in websocket.iter_text():
                         await backend_ws.send(msg)
                 finally:
                     fwd_task.cancel()
+                    try:
+                        await fwd_task
+                    except asyncio.CancelledError:
+                        pass
         except Exception:  # noqa: BLE001
             pass
         finally:
-            await websocket.close()
+            if websocket.client_state == WebSocketState.CONNECTED:
+                try:
+                    await websocket.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     from starlette.routing import WebSocketRoute
 

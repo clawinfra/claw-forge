@@ -90,6 +90,12 @@ def _parse_filename(info_string: str) -> str | None:
         return None
 
     if "/" in info or "." in info:
+        # Must have a file extension (e.g. .py, .ts) or explicit path separator
+        # Reject bare shell commands like "path/to/check" or "path/to/file"
+        stem = info.rsplit("/", 1)[-1]  # last component
+        if "/" in info and "." not in stem:
+            # Looks like a shell command path, not a source file — skip
+            return None
         return info
 
     return None
