@@ -1298,7 +1298,14 @@ def _ensure_state_service(project_path: Path, port: int) -> bool:
             stderr=_sp.STDOUT,
             start_new_session=True,
         )
-        _st.sleep(1.5)
+        # Wait until the port is actually accepting connections (up to 10s)
+        for _ in range(20):
+            _st.sleep(0.5)
+            try:
+                with _sock.create_connection(("127.0.0.1", port), timeout=1):
+                    return  # ready
+            except OSError:
+                pass
 
     # Check if anything is already listening on the port
     try:
@@ -1502,7 +1509,14 @@ def ui(
             headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
             content=await request.body(),
         )
-        rp_resp = await _proxy_client.send(rp_req, stream=True)
+        try:
+            rp_resp = await _proxy_client.send(rp_req, stream=True)
+        except httpx.ConnectError:
+            from starlette.responses import JSONResponse
+            return JSONResponse(  # type: ignore[return-value]
+                {"error": "State service unavailable — still starting. Retry in a moment."},
+                status_code=503,
+            )
         return StreamingResponse(
             rp_resp.aiter_raw(),
             status_code=rp_resp.status_code,
