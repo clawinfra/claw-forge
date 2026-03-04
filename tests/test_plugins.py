@@ -237,14 +237,13 @@ class TestInitializerWaveCompute:
 
     def test_name_description_properties(self):
         from claw_forge.plugins.initializer import InitializerPlugin
-        from claw_forge.plugins.base import PluginContext
         plugin = InitializerPlugin()
         assert plugin.name == "initializer"
         assert "project structure" in plugin.description.lower()
 
     def test_build_prompt_contains_path(self, tmp_path):
-        from claw_forge.plugins.initializer import InitializerPlugin
         from claw_forge.plugins.base import PluginContext
+        from claw_forge.plugins.initializer import InitializerPlugin
         plugin = InitializerPlugin()
         ctx = PluginContext(
             project_path=str(tmp_path),
