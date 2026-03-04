@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
 from claw_forge.cli import app
-from claw_forge.output_parser import _parse_filename, extract_code_blocks
+from claw_forge.output_parser import _parse_filename
 
 runner = CliRunner()
 
