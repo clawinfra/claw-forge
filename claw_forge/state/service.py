@@ -340,11 +340,11 @@ class AgentStateService:
                 if req.error_message is not None:
                     task.error_message = req.error_message
                 if req.input_tokens is not None:
-                    task.input_tokens = task.input_tokens + req.input_tokens
+                    task.input_tokens = (task.input_tokens or 0) + req.input_tokens
                 if req.output_tokens is not None:
-                    task.output_tokens = task.output_tokens + req.output_tokens
+                    task.output_tokens = (task.output_tokens or 0) + req.output_tokens
                 if req.cost_usd is not None:
-                    task.cost_usd = task.cost_usd + req.cost_usd
+                    task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id), str(task.id), "task.updated", {"status": str(task.status)}
@@ -389,7 +389,8 @@ class AgentStateService:
                         if event.get("session_id") == session_id:
                             yield {"event": event["type"], "data": json.dumps(event["payload"])}
                 finally:
-                    self._event_queues.remove(queue)
+                    with suppress(ValueError):
+                        self._event_queues.remove(queue)
 
             return EventSourceResponse(event_generator())
 

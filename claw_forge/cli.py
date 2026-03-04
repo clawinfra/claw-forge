@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -1534,28 +1535,50 @@ def ui(
     from starlette.websockets import WebSocket as StarletteWebSocket
 
     state_base = f"http://localhost:{state_port}"
-    _proxy_client = httpx.AsyncClient(base_url=state_base, timeout=30.0)
+    # Use no read timeout for SSE streams; connect/write timeouts still apply.
+    _proxy_client = httpx.AsyncClient(
+        base_url=state_base,
+        timeout=httpx.Timeout(connect=10.0, write=10.0, read=None, pool=10.0),
+    )
 
     async def proxy_api(request: StarletteRequest) -> StreamingResponse:
+        from starlette.responses import JSONResponse
+
         path = request.url.path  # e.g. /api/sessions/...
         backend_path = path[4:] if path.startswith("/api") else path  # strip /api prefix
         url = httpx.URL(path=backend_path, query=request.url.query.encode())
+        try:
+            body = await request.body()
+        except Exception:  # noqa: BLE001 — client disconnected before body arrived
+            return JSONResponse({"error": "Client disconnected"}, status_code=499)  # type: ignore[return-value]
         rp_req = _proxy_client.build_request(
             request.method,
             url,
             headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
-            content=await request.body(),
+            content=body,
         )
         try:
             rp_resp = await _proxy_client.send(rp_req, stream=True)
         except httpx.ConnectError:
-            from starlette.responses import JSONResponse
             return JSONResponse(  # type: ignore[return-value]
                 {"error": "State service unavailable — still starting. Retry in a moment."},
                 status_code=503,
             )
+        except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+            return JSONResponse(  # type: ignore[return-value]
+                {"error": f"State service error: {exc.__class__.__name__}"},
+                status_code=502,
+            )
+
+        async def _stream_with_close() -> AsyncGenerator[bytes, None]:
+            try:
+                async for chunk in rp_resp.aiter_raw():
+                    yield chunk
+            finally:
+                await rp_resp.aclose()
+
         return StreamingResponse(
-            rp_resp.aiter_raw(),
+            _stream_with_close(),
             status_code=rp_resp.status_code,
             headers=dict(rp_resp.headers),
             background=None,
