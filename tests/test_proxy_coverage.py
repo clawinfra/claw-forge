@@ -368,3 +368,233 @@ async def test_list_sessions_ordered_newest_first():
     data = resp.json()
     assert data[0]["id"] == r2.json()["id"]  # newest first
     assert data[1]["id"] == r1.json()["id"]
+
+
+# ── Full proxy→state service integration ──────────────────────────────────────
+#
+# These tests replicate the exact failure mode the user saw:
+#   "⚠️ Failed to load features — is the state service running on port 8420?"
+# They verify that the production Starlette proxy correctly routes /api/* to the
+# state service and that the data flows end-to-end.  No real ports are used:
+# httpx.ASGITransport routes requests directly to the in-process ASGI app.
+
+
+def _make_proxy_app_for_svc(svc_app: object) -> object:
+    """Build a proxy Starlette app whose httpx client targets *svc_app* in-process."""
+    from collections.abc import AsyncGenerator
+
+    import httpx
+    from starlette.applications import Starlette
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import JSONResponse, StreamingResponse
+    from starlette.routing import Route
+
+    # Route httpx calls to the ASGI state-service app instead of a real port
+    proxy_client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=svc_app),  # type: ignore[arg-type]
+        base_url="http://state-service",
+    )
+
+    async def proxy_api(request: StarletteRequest) -> StreamingResponse:
+        path = request.url.path
+        backend_path = path[4:] if path.startswith("/api") else path
+        url = httpx.URL(path=backend_path, query=request.url.query.encode())
+        try:
+            body = await request.body()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "Client disconnected"}, status_code=499)  # type: ignore[return-value]
+        rp_req = proxy_client.build_request(
+            request.method,
+            url,
+            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            content=body,
+        )
+        try:
+            rp_resp = await proxy_client.send(rp_req, stream=True)
+        except httpx.ConnectError:
+            return JSONResponse(  # type: ignore[return-value]
+                {"error": "State service unavailable — still starting. Retry in a moment."},
+                status_code=503,
+            )
+        except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+            return JSONResponse(  # type: ignore[return-value]
+                {"error": f"State service error: {exc.__class__.__name__}"},
+                status_code=502,
+            )
+
+        async def _stream_with_close() -> AsyncGenerator[bytes, None]:
+            try:
+                async for chunk in rp_resp.aiter_raw():
+                    yield chunk
+            finally:
+                await rp_resp.aclose()
+
+        return StreamingResponse(
+            _stream_with_close(),
+            status_code=rp_resp.status_code,
+            headers=dict(rp_resp.headers),
+            background=None,
+        )
+
+    app = Starlette(
+        routes=[
+            Route(
+                "/api/{path:path}",
+                proxy_api,
+                methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            )
+        ]
+    )
+    return app, proxy_client
+
+
+@pytest.mark.anyio
+async def test_proxy_routes_list_tasks_through_state_service():
+    """Full integration: GET /api/sessions/{id}/tasks flows proxy → state service."""
+    from claw_forge.state.service import AgentStateService
+
+    svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+    await svc.init_db()
+    svc_app = svc.create_app()
+
+    proxy_app, proxy_client = _make_proxy_app_for_svc(svc_app)
+
+    # Seed data: create a session and a task in the state service
+    svc_client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=svc_app),
+        base_url="http://state-service",
+    )
+    r = await svc_client.post("/sessions", json={"project_path": "/proj/test"})
+    assert r.status_code == 201
+    session_id = r.json()["id"]
+    await svc_client.post(
+        f"/sessions/{session_id}/tasks",
+        json={"plugin_name": "coding", "description": "Build X", "priority": 0, "depends_on": []},
+    )
+
+    # Verify the proxy surfaces the task
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy_app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get(f"/api/sessions/{session_id}/tasks")
+
+    assert resp.status_code == 200
+    tasks = resp.json()
+    assert len(tasks) == 1
+    assert tasks[0]["description"] == "Build X"
+
+    await svc_client.aclose()
+    await proxy_client.aclose()
+    await svc.dispose()
+
+
+@pytest.mark.anyio
+async def test_proxy_routes_get_session_through_state_service():
+    """Full integration: GET /api/sessions/{id} flows proxy → state service."""
+    from claw_forge.state.service import AgentStateService
+
+    svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+    await svc.init_db()
+    svc_app = svc.create_app()
+
+    proxy_app, proxy_client = _make_proxy_app_for_svc(svc_app)
+
+    svc_client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=svc_app),
+        base_url="http://state-service",
+    )
+    r = await svc_client.post("/sessions", json={"project_path": "/myproject"})
+    session_id = r.json()["id"]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy_app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get(f"/api/sessions/{session_id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["project_path"] == "/myproject"
+    assert data["id"] == session_id
+
+    await svc_client.aclose()
+    await proxy_client.aclose()
+    await svc.dispose()
+
+
+@pytest.mark.anyio
+async def test_proxy_routes_list_sessions_through_state_service():
+    """Full integration: GET /api/sessions flows proxy → state service."""
+    from claw_forge.state.service import AgentStateService
+
+    svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+    await svc.init_db()
+    svc_app = svc.create_app()
+
+    proxy_app, proxy_client = _make_proxy_app_for_svc(svc_app)
+
+    svc_client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=svc_app),
+        base_url="http://state-service",
+    )
+    await svc_client.post("/sessions", json={"project_path": "/proj/a"})
+    await svc_client.post("/sessions", json={"project_path": "/proj/b"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy_app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get("/api/sessions")
+
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) == 2
+    paths = {s["project_path"] for s in sessions}
+    assert paths == {"/proj/a", "/proj/b"}
+
+    await svc_client.aclose()
+    await proxy_client.aclose()
+    await svc.dispose()
+
+
+@pytest.mark.anyio
+async def test_proxy_returns_503_when_state_service_down_integration():
+    """Integration: proxy returns 503 when state service is unavailable (live ConnectError)."""
+    import httpx as _httpx
+    from starlette.applications import Starlette
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import JSONResponse, StreamingResponse
+    from starlette.routing import Route
+
+    # Client pointing to a port that is definitely not listening
+    dead_client = _httpx.AsyncClient(
+        base_url="http://localhost:19999",
+        timeout=_httpx.Timeout(connect=1.0, write=1.0, read=1.0, pool=1.0),
+    )
+
+    async def proxy_api(request: StarletteRequest) -> StreamingResponse:
+        path = request.url.path
+        backend_path = path[4:] if path.startswith("/api") else path
+        url = _httpx.URL(path=backend_path, query=request.url.query.encode())
+        body = await request.body()
+        rp_req = dead_client.build_request(request.method, url, content=body)
+        try:
+            rp_resp = await dead_client.send(rp_req, stream=True)
+            _ = rp_resp  # unused if ConnectError
+        except _httpx.ConnectError:
+            return JSONResponse(  # type: ignore[return-value]
+                {"error": "State service unavailable — still starting. Retry in a moment."},
+                status_code=503,
+            )
+        return JSONResponse({"error": "unexpected"}, status_code=500)  # type: ignore[return-value]
+
+    proxy_app = Starlette(
+        routes=[Route("/api/{path:path}", proxy_api, methods=["GET"])]
+    )
+
+    async with _httpx.AsyncClient(
+        transport=_httpx.ASGITransport(app=proxy_app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get("/api/sessions")
+
+    assert resp.status_code == 503
+    assert "unavailable" in resp.json()["error"]
+    await dead_client.aclose()

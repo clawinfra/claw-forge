@@ -262,6 +262,44 @@ class TestNpmBuild:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Vite config correctness
+# ---------------------------------------------------------------------------
+
+
+class TestViteConfig:
+    """Verify vite.config.ts is configured to read VITE_API_PORT from env.
+
+    This prevents regressions where the dev-mode proxy reverts to a hardcoded
+    port (e.g. 8888) instead of using the port injected by `claw-forge ui --dev`.
+    """
+
+    def test_vite_config_uses_env_port(self) -> None:
+        """vite.config.ts must read VITE_API_PORT from process.env."""
+        content = (UI_DIR / "vite.config.ts").read_text()
+        assert "VITE_API_PORT" in content, (
+            "vite.config.ts does not reference VITE_API_PORT; "
+            "the dev proxy will always point to a hardcoded port instead of "
+            "the port injected by `claw-forge ui --dev`"
+        )
+
+    def test_vite_config_no_hardcoded_8888(self) -> None:
+        """vite.config.ts must not hardcode port 8888 as a proxy target."""
+        content = (UI_DIR / "vite.config.ts").read_text()
+        # 8888 is the old incorrect default; the correct default is 8420
+        assert "localhost:8888" not in content, (
+            "vite.config.ts still hardcodes localhost:8888 — "
+            "this breaks dev mode when the state service runs on port 8420"
+        )
+
+    def test_vite_config_uses_state_port_default(self) -> None:
+        """vite.config.ts must default to 8420 (matching state service default)."""
+        content = (UI_DIR / "vite.config.ts").read_text()
+        assert "8420" in content, (
+            "vite.config.ts does not reference 8420 as the default state port"
+        )
+
+
 class TestTypeScript:
     def test_tsc_no_emit_succeeds(self) -> None:
         """tsc --noEmit must exit 0 (no TypeScript errors)."""
