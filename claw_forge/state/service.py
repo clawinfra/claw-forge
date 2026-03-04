@@ -283,6 +283,21 @@ class AgentStateService:
                 await self._emit_event(str(session.id), None, "session.created", {"session_id": str(session.id)})  # noqa: E501
                 return {"id": session.id, "status": session.status}
 
+        @app.get("/sessions")
+        async def list_sessions() -> list[dict[str, Any]]:
+            async with self._session_factory() as db:
+                result = await db.execute(select(Session).order_by(Session.created_at.desc()))
+                sessions = result.scalars().all()
+                return [
+                    {
+                        "id": s.id,
+                        "project_path": s.project_path,
+                        "status": s.status,
+                        "created_at": str(s.created_at),
+                    }
+                    for s in sessions
+                ]
+
         @app.get("/sessions/{session_id}")
         async def get_session(session_id: str) -> dict[str, Any]:
             async with self._session_factory() as db:

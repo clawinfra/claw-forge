@@ -59,7 +59,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchCommands, executeCommand } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -706,35 +706,89 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 // ── Session selector (shown when no session in URL) ───────────────────────────
 
 function SessionSelector({ onSelect }: { onSelect: (id: string) => void }) {
-  const [input, setInput] = useState("");
+  const { data: sessions, isLoading, error, refetch } = useQuery({
+    queryKey: ["sessions"],
+    queryFn: fetchSessions,
+    refetchInterval: 5000,
+  });
+
+  const fmt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const statusColor: Record<string, string> = {
+    pending: "text-yellow-500",
+    running: "text-blue-500",
+    completed: "text-green-500",
+    failed: "text-red-500",
+  };
 
   return (
     <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-900">
-      <div className="rounded-2xl bg-white dark:bg-slate-800 shadow-xl p-8 w-full max-w-md border-t-4 border-orange-500">
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">
+      <div className="rounded-2xl bg-white dark:bg-slate-800 shadow-xl p-8 w-full max-w-lg border-t-4 border-orange-500">
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-1">
           ⚒ claw-forge
         </h1>
-        <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
-          Enter a session ID to open the Kanban board.
+        <p className="text-slate-500 dark:text-slate-400 text-sm mb-5">
+          Select a session to open the Kanban board.
         </p>
-        <input
-          type="text"
-          className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm font-mono
-            bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200
-            focus:outline-none focus:ring-2 focus:ring-forge-500 mb-3
-            placeholder:text-slate-400 dark:placeholder:text-slate-500"
-          placeholder="Session UUID…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && input && onSelect(input.trim())}
-        />
+
+        {isLoading && (
+          <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">Loading sessions…</p>
+        )}
+        {error && (
+          <p className="text-sm text-red-500 text-center py-4">
+            ⚠️ Could not load sessions — is the state service running?
+          </p>
+        )}
+        {sessions && sessions.length === 0 && (
+          <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">
+            No sessions yet. Run <code className="font-mono text-xs bg-slate-100 dark:bg-slate-700 px-1 rounded">claw-forge run</code> to start one.
+          </p>
+        )}
+        {sessions && sessions.length > 0 && (
+          <ul className="space-y-2 max-h-80 overflow-y-auto mb-4">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(s.id)}
+                  className="w-full text-left rounded-lg border border-slate-200 dark:border-slate-600
+                    hover:border-forge-400 dark:hover:border-forge-500
+                    hover:bg-forge-50 dark:hover:bg-slate-700
+                    px-4 py-3 transition-colors group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold uppercase tracking-wide ${statusColor[s.status] ?? "text-slate-400"}`}>
+                      {s.status}
+                    </span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500">{fmt(s.created_at)}</span>
+                  </div>
+                  <div className="text-xs font-mono text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                    {s.project_path}
+                  </div>
+                  <div className="text-xs font-mono text-slate-300 dark:text-slate-600 mt-0.5 truncate group-hover:text-slate-400">
+                    {s.id}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <button
           type="button"
-          className="w-full bg-forge-600 hover:bg-forge-700 text-white font-semibold py-2 rounded-lg transition-colors disabled:opacity-50"
-          disabled={!input.trim()}
-          onClick={() => onSelect(input.trim())}
+          onClick={() => void refetch()}
+          className="w-full text-sm text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors py-1"
         >
-          Open Board
+          ↻ Refresh
         </button>
       </div>
     </div>

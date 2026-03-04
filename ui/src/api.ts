@@ -22,6 +22,13 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── Sessions / Features ───────────────────────────────────────────────────────
 
+/** List all sessions for the current project. */
+export async function fetchSessions(): Promise<
+  { id: string; project_path: string; status: string; created_at: string }[]
+> {
+  return fetchJSON("/sessions");
+}
+
 /** List all tasks for the given session, mapped as features. */
 export async function fetchFeatures(sessionId: string): Promise<Feature[]> {
   return fetchJSON<Feature[]>(`/sessions/${sessionId}/tasks`);

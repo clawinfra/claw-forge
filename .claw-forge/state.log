@@ -1,14 +1,14 @@
 Database: /tmp/claw-forge/.claw-forge/state.db
-INFO:     Started server process [94252]
+INFO:     Started server process [155035]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8420 (Press CTRL+C to quit)
-INFO:     127.0.0.1:53690 - "GET /info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53710 - "GET /info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53728 - "GET /info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53754 - "GET /info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53766 - "POST /shutdown HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57712 - "GET /info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57736 - "GET /info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57756 - "GET /info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57796 - "GET /info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57804 - "POST /shutdown HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [94252]
+INFO:     Finished server process [155035]
