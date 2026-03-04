@@ -1,7 +1,0 @@
-Database: /Users/bowenli/development/claw-forge/.claw-forge/state.db
-INFO:     Started server process [5709]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-ERROR:    [Errno 48] error while attempting to bind on address ('0.0.0.0', 8420): address already in use
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
