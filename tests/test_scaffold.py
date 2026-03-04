@@ -369,3 +369,73 @@ def test_scaffold_config_idempotent(tmp_path: Path) -> None:
         _scaffold_config(cfg)
         created = _scaffold_config(cfg)
     assert created is False
+
+
+def test_detect_stack_python_no_framework_indicator(tmp_path: Path) -> None:
+    """Line 68: stack indicator with empty framework string (setup.py)."""
+    from claw_forge.scaffold import detect_stack
+    (tmp_path / "setup.py").write_text("from setuptools import setup\nsetup(name='x')\n")
+    result = detect_stack(tmp_path)
+    assert result["language"] == "python"
+    # framework stays 'unknown' since setup.py has no framework tag
+
+
+def test_detect_stack_framework_indicator_fallback(tmp_path: Path) -> None:
+    """Lines 73-80: _FRAMEWORK_INDICATORS fires when language known but framework unknown."""
+    from claw_forge.scaffold import detect_stack
+    # Write pyproject.toml (python) + manage.py (django indicator)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    result = detect_stack(tmp_path)
+    assert result["language"] == "python"
+    # manage.py → django framework via _FRAMEWORK_INDICATORS
+    assert result["framework"] == "django"
+
+
+def test_detect_stack_node_no_vitest_or_jest(tmp_path: Path) -> None:
+    """Line 93: node package.json without vitest/jest → default 'jest'."""
+    from claw_forge.scaffold import detect_stack
+    (tmp_path / "package.json").write_text('{"name": "test", "scripts": {"test": "mocha"}}')
+    result = detect_stack(tmp_path)
+    assert result["language"] == "node"
+    assert result["test_runner"] == "jest"
+
+
+def test_generate_claude_md_with_extras(tmp_path: Path) -> None:
+    """Line 186: generate_claude_md includes extras line when solidity/docker detected."""
+    from claw_forge.scaffold import generate_claude_md
+    (tmp_path / "Dockerfile").write_text("FROM python:3.11\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    md = generate_claude_md(tmp_path)
+    assert "Extras:" in md
+    assert "docker" in md
+
+
+def test_scaffold_commands_skips_existing(tmp_path: Path) -> None:
+    """Lines 215-222: scaffold_commands copies .md files and skips existing."""
+    from unittest.mock import patch
+    from pathlib import Path as P
+    from claw_forge.scaffold import scaffold_commands
+
+    # Create a fake COMMANDS_SCAFFOLD_DIR with .md files
+    fake_scaffold = tmp_path / "fake_scaffold"
+    fake_scaffold.mkdir()
+    (fake_scaffold / "cmd1.md").write_text("# Command 1\n")
+    (fake_scaffold / "cmd2.md").write_text("# Command 2\n")
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    # Pre-create cmd1.md so it gets skipped
+    dest_dir = project / ".claude" / "commands"
+    dest_dir.mkdir(parents=True)
+    (dest_dir / "cmd1.md").write_text("existing content")
+
+    with patch("claw_forge.scaffold.COMMANDS_SCAFFOLD_DIR", fake_scaffold):
+        copied = scaffold_commands(project)
+
+    names = [P(c).name for c in copied]
+    assert "cmd2.md" in names
+    assert "cmd1.md" not in names
+    # Verify cmd1.md was NOT overwritten
+    assert (dest_dir / "cmd1.md").read_text() == "existing content"

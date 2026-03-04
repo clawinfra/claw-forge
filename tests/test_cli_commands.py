@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from claw_forge.cli import app
@@ -503,3 +505,191 @@ def test_input_with_pending_items() -> None:
         result = runner.invoke(app, ["input", "my-session"])
     assert result.exit_code == 0
     assert "answer" in result.output.lower() or "answered" in result.output.lower()
+
+
+# ── _expand_env_vars tests ────────────────────────────────────────────────────
+
+
+def test_expand_env_vars_default_syntax(monkeypatch: pytest.MonkeyPatch) -> None:
+    """${VAR:-default} uses default when VAR is not set."""
+    from claw_forge.cli import _expand_env_vars
+
+    monkeypatch.delenv("MODEL_OPUS", raising=False)
+    result = _expand_env_vars("${MODEL_OPUS:-claude-opus-4-6}")
+    assert result == "claude-opus-4-6"
+
+
+def test_expand_env_vars_default_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """${VAR:-default} uses env value when VAR is set."""
+    from claw_forge.cli import _expand_env_vars
+
+    monkeypatch.setenv("MODEL_OPUS", "my-custom-model")
+    result = _expand_env_vars("${MODEL_OPUS:-claude-opus-4-6}")
+    assert result == "my-custom-model"
+
+
+def test_expand_env_vars_nested_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expansion works recursively in dicts."""
+    from claw_forge.cli import _expand_env_vars
+
+    monkeypatch.delenv("MODEL_SONNET", raising=False)
+    monkeypatch.setenv("MODEL_HAIKU", "custom-haiku")
+    result = _expand_env_vars({
+        "aliases": {
+            "sonnet": "${MODEL_SONNET:-claude-sonnet-4-6}",
+            "haiku": "${MODEL_HAIKU:-claude-haiku-4-6}",
+        }
+    })
+    assert result["aliases"]["sonnet"] == "claude-sonnet-4-6"
+    assert result["aliases"]["haiku"] == "custom-haiku"
+
+
+def test_expand_env_vars_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expansion works in lists."""
+    from claw_forge.cli import _expand_env_vars
+
+    monkeypatch.delenv("X", raising=False)
+    result = _expand_env_vars(["${X:-fallback}", "plain"])
+    assert result == ["fallback", "plain"]
+
+
+def test_expand_env_vars_no_default_warns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """${VAR} without default returns empty string when unset."""
+    from claw_forge.cli import _expand_env_vars
+
+    monkeypatch.delenv("MISSING_KEY_XYZ", raising=False)
+    result = _expand_env_vars("prefix-${MISSING_KEY_XYZ}-suffix")
+    assert result == "prefix--suffix"
+
+
+def test_expand_env_vars_passthrough() -> None:
+    """Non-string/dict/list types pass through unchanged."""
+    from claw_forge.cli import _expand_env_vars
+
+    assert _expand_env_vars(42) == 42
+    assert _expand_env_vars(None) is None
+    assert _expand_env_vars(True) is True
+
+
+# ── state --project flag test ─────────────────────────────────────────────────
+
+
+
+
+# ── _scaffold_config tests ────────────────────────────────────────────────────
+
+
+def test_scaffold_config_creates_files(tmp_path: Path) -> None:
+    """_scaffold_config creates yaml + .env.example."""
+    from claw_forge.cli import _scaffold_config
+
+    cfg_path = str(tmp_path / "claw-forge.yaml")
+    result = _scaffold_config(cfg_path)
+    assert result is True
+    assert (tmp_path / "claw-forge.yaml").exists()
+    assert (tmp_path / ".env.example").exists()
+
+
+def test_scaffold_config_existing_file(tmp_path: Path) -> None:
+    """_scaffold_config returns False when config already exists."""
+    from claw_forge.cli import _scaffold_config
+
+    cfg = tmp_path / "claw-forge.yaml"
+    cfg.write_text("providers: {}")
+    result = _scaffold_config(str(cfg))
+    assert result is False
+
+
+# ── _load_config tests ────────────────────────────────────────────────────────
+
+
+def test_load_config_missing_no_scaffold(tmp_path: Path) -> None:
+    """_load_config raises Exit when file missing and auto_scaffold=False."""
+    from claw_forge.cli import _load_config
+
+    with pytest.raises((SystemExit, Exception)):
+        _load_config(str(tmp_path / "nonexistent.yaml"))
+
+
+def test_load_config_auto_scaffold(tmp_path: Path) -> None:
+    """_load_config with auto_scaffold=True creates config then loads it."""
+    from claw_forge.cli import _load_config
+
+    cfg_path = str(tmp_path / "claw-forge.yaml")
+    result = _load_config(cfg_path, auto_scaffold=True)
+    assert isinstance(result, dict)
+    assert (tmp_path / "claw-forge.yaml").exists()
+
+
+def test_load_config_with_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_load_config reads .env and expands vars in yaml."""
+    from claw_forge.cli import _load_config
+
+    (tmp_path / ".env").write_text("TEST_KEY_XYZ=my-secret\n")
+    (tmp_path / "claw-forge.yaml").write_text(
+        yaml.dump({"key": "${TEST_KEY_XYZ}"})
+    )
+    monkeypatch.delenv("TEST_KEY_XYZ", raising=False)
+    result = _load_config(str(tmp_path / "claw-forge.yaml"))
+    assert result["key"] == "my-secret"
+
+
+# ── _http_get / _http_post error path tests ──────────────────────────────────
+
+
+def test_http_get_connect_error() -> None:
+    """_http_get prints hint and exits on ConnectError."""
+    from claw_forge.cli import _http_get
+
+    with pytest.raises((SystemExit, Exception)):
+        _http_get("http://localhost:19999/nonexistent")
+
+
+def test_http_post_connect_error() -> None:
+    """_http_post prints hint and exits on ConnectError."""
+    from claw_forge.cli import _http_post
+
+    with pytest.raises((SystemExit, Exception)):
+        _http_post("http://localhost:19999/nonexistent")
+
+
+def test_http_get_status_error() -> None:
+    """_http_get exits on HTTP errors."""
+    from claw_forge.cli import _http_get
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.text = "Internal error"
+    mock_resp.json.return_value = {}
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Server Error", request=httpx.Request("GET", "http://x"), response=mock_resp
+    )
+    with patch("claw_forge.cli.httpx.get", return_value=mock_resp):
+        with pytest.raises((SystemExit, Exception)):
+            _http_get("http://localhost:19999/test")
+
+
+def test_http_post_status_error() -> None:
+    """_http_post exits on HTTP errors."""
+    from claw_forge.cli import _http_post
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.text = "Not found"
+    mock_resp.json.return_value = {}
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Not Found", request=httpx.Request("POST", "http://x"), response=mock_resp
+    )
+    with patch("claw_forge.cli.httpx.post", return_value=mock_resp):
+        with pytest.raises((SystemExit, Exception)):
+            _http_post("http://localhost:19999/test")
+
+
+# ── _state_url test ──────────────────────────────────────────────────────────
+
+
+def test_state_url_default() -> None:
+    from claw_forge.cli import _state_url
+
+    assert _state_url() == "http://localhost:8420"
+    assert _state_url(9999) == "http://localhost:9999"
