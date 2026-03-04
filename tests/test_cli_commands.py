@@ -664,9 +664,11 @@ def test_http_get_status_error() -> None:
     mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
         "Server Error", request=httpx.Request("GET", "http://x"), response=mock_resp
     )
-    with patch("claw_forge.cli.httpx.get", return_value=mock_resp):
-        with pytest.raises((SystemExit, Exception)):
-            _http_get("http://localhost:19999/test")
+    with (
+        patch("claw_forge.cli.httpx.get", return_value=mock_resp),
+        pytest.raises((SystemExit, Exception)),
+    ):
+        _http_get("http://localhost:19999/test")
 
 
 def test_http_post_status_error() -> None:
@@ -680,9 +682,11 @@ def test_http_post_status_error() -> None:
     mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
         "Not Found", request=httpx.Request("POST", "http://x"), response=mock_resp
     )
-    with patch("claw_forge.cli.httpx.post", return_value=mock_resp):
-        with pytest.raises((SystemExit, Exception)):
-            _http_post("http://localhost:19999/test")
+    with (
+        patch("claw_forge.cli.httpx.post", return_value=mock_resp),
+        pytest.raises((SystemExit, Exception)),
+    ):
+        _http_post("http://localhost:19999/test")
 
 
 # ── _state_url test ──────────────────────────────────────────────────────────

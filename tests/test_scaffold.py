@@ -413,8 +413,9 @@ def test_generate_claude_md_with_extras(tmp_path: Path) -> None:
 
 def test_scaffold_commands_skips_existing(tmp_path: Path) -> None:
     """Lines 215-222: scaffold_commands copies .md files and skips existing."""
-    from unittest.mock import patch
     from pathlib import Path as P
+    from unittest.mock import patch
+
     from claw_forge.scaffold import scaffold_commands
 
     # Create a fake COMMANDS_SCAFFOLD_DIR with .md files
