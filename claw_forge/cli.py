@@ -397,32 +397,10 @@ def run(
     db_url = f"sqlite+aiosqlite:///{db_path}"
     console.print(f"[dim]DB: {db_path}[/dim]")
 
-    # Auto-start state service if nothing is already listening on the state port
+    # Auto-start state service (project-aware: restarts if serving a different project)
     _state_port = cfg.get("state", {}).get("port", 8420)
-    _state_auto_started = False
-    try:
-        import socket as _socket
-        with _socket.create_connection(("127.0.0.1", _state_port), timeout=1):
-            pass  # already running
-    except OSError:
-        import subprocess as _subprocess
-        _state_cmd = [
-            "claw-forge", "state",
-            "--project", str(project_path),
-            "--port", str(_state_port),
-        ]
-        _state_log = open(project_path / ".claw-forge" / "state.log", "w")  # noqa: SIM115, WPS515
-        # Use start_new_session=True so the child is in its own process group and
-        # asyncio's SIGCHLD watcher won't see it as an "Unknown child process".
-        _subprocess.Popen(  # noqa: S603
-            _state_cmd,
-            stdout=_state_log,
-            stderr=_subprocess.STDOUT,
-            start_new_session=True,
-        )
-        import time as _time
-        _time.sleep(1.5)  # give it a moment to bind
-        _state_auto_started = True
+    _state_auto_started = _ensure_state_service(project_path, _state_port)
+    if _state_auto_started:
         console.print(f"[dim]State service auto-started on port {_state_port}[/dim]")
 
     # Set up async engine
