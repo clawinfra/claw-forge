@@ -521,6 +521,14 @@ def run(
             configs = load_configs_from_yaml(cfg)
             pool = ProviderPoolManager(configs) if configs else None
 
+            # Semaphore to serialise claude CLI subprocess spawning.
+            # Python's asyncio SIGCHLD handler races when multiple subprocesses
+            # exit concurrently — one process reaps another's PID, causing
+            # "Unknown child process pid N, will report returncode 255".
+            # Limiting to 1 concurrent CLI invocation eliminates the race.
+            # API-only mode (pool) is unaffected and runs fully concurrently.
+            _cli_semaphore = asyncio.Semaphore(1)
+
             # Build task handler — each invocation gets its own session to
             # avoid concurrent commit() collisions on a shared session.
             async def task_handler(task_node: TaskNode) -> dict[str, Any]:
@@ -582,8 +590,15 @@ def run(
                                 permission_mode="bypassPermissions",
                             )
                             full_output: list[str] = []
+                            # Serialise entire claude CLI subprocess lifecycle to
+                            # prevent asyncio SIGCHLD PID-reaping race. When
+                            # multiple `claude` processes exit near-simultaneously,
+                            # asyncio's waitpid() handler reaps the wrong PID and
+                            # reports returncode 255. Running one CLI session at a
+                            # time eliminates this race entirely. API-only mode
+                            # (pool path below) is unaffected and runs concurrently.
                             try:
-                                async with AgentSession(options) as agent_session:
+                                async with _cli_semaphore, AgentSession(options) as agent_session:
                                     async for msg in agent_session.run(prompt):
                                         if hasattr(msg, "text"):
                                             full_output.append(msg.text)
