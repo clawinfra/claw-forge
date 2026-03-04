@@ -555,17 +555,25 @@ def run(
                                     _api_key = _provs[0].config.api_key or ""
                             if _api_key:
                                 sdk_env["ANTHROPIC_API_KEY"] = _api_key
-                            else:
-                                raise RuntimeError(
-                                    "No Anthropic API key found.\n"
-                                    "  Run: claude setup-token\n"
-                                    "  Or add ANTHROPIC_API_KEY to your .env file"
-                                )
+                            # If no API key, check for OAuth token — claude CLI can
+                            # authenticate via ~/.claude/.credentials.json without
+                            # ANTHROPIC_API_KEY when the user has run `claude login`.
+                            elif not _api_key:
+                                _oauth_tok = os.environ.get("ANTHROPIC_SETUP_TOKEN", "")
+                                if not _oauth_tok and pool is not None:
+                                    _provs = pool.providers
+                                    if _provs and hasattr(_provs[0], "config"):
+                                        _cfg = _provs[0].config
+                                        _oauth_tok = getattr(_cfg, "oauth_token", "") or ""
+                                if _oauth_tok:
+                                    sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
+                                # else: let claude CLI use its own stored credentials
 
                             options = ClaudeAgentOptions(
                                 model=model,
                                 cwd=str(project_path),
                                 env=sdk_env,
+                                permission_mode="bypassPermissions",
                             )
                             full_output: list[str] = []
                             try:
