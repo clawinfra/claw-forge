@@ -1173,8 +1173,13 @@ async def test_shutdown_endpoint_returns_status() -> None:
 
     client, _ = await _make_test_client()
     async with client:
-        # Patch os.kill so we don't actually terminate the test process
+        # Patch os.kill for the entire remaining scope — the shutdown endpoint
+        # spawns a daemon thread that calls os.kill after 0.2s delay, so the
+        # mock must outlive the HTTP response.
         with patch("os.kill"):
             resp = await client.post("/shutdown")
             assert resp.status_code == 200
             assert resp.json()["status"] == "shutting down"
+            # Wait for the daemon thread to fire (and hit the mock)
+            import time
+            time.sleep(0.5)
