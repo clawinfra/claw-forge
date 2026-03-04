@@ -32,7 +32,7 @@ from claw_forge.mcp.feature_mcp import (
 
 def _get_engine_for_dir(project_dir: Path) -> Engine:
     """Get (or create) a SQLAlchemy engine for the given project directory."""
-    db_path = project_dir / ".claw-forge" / "features.db"
+    db_path = project_dir / ".claw-forge" / "state.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
@@ -321,7 +321,7 @@ def create_feature_mcp_server(project_dir: Path) -> McpSdkServerConfig:
 
     Args:
         project_dir: Root directory of the project. DB lives at
-            <project_dir>/.claw-forge/features.db
+            <project_dir>/.claw-forge/state.db
 
     Returns:
         McpSdkServerConfig ready to be passed to ClaudeAgentOptions.mcp_servers

@@ -88,14 +88,14 @@ async def _call_tool(t: Any, args: dict[str, Any]) -> Any:
 class TestGetEngineForDir:
     def test_creates_db_file(self, tmp_path: Path) -> None:
         engine = _get_engine_for_dir(tmp_path)
-        db_path = tmp_path / ".claw-forge" / "features.db"
+        db_path = tmp_path / ".claw-forge" / "state.db"
         assert db_path.exists()
         engine.dispose()
 
     def test_creates_parent_dirs(self, tmp_path: Path) -> None:
         nested = tmp_path / "a" / "b"
         engine = _get_engine_for_dir(nested)
-        assert (nested / ".claw-forge" / "features.db").exists()
+        assert (nested / ".claw-forge" / "state.db").exists()
         engine.dispose()
 
     def test_returns_engine(self, tmp_path: Path) -> None:
