@@ -1254,6 +1254,58 @@ def human_input(
     console.print(f"[green]All questions answered. Project {project!r} can now continue.[/green]")
 
 
+def _resolve_latest_session(db_path: Path) -> str:
+    """Read the most-recent session id from state.db; return '' if none found."""
+    try:
+        import sqlite3 as _sq
+        if db_path.exists():
+            with _sq.connect(str(db_path)) as conn:
+                row = conn.execute(
+                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if row:
+                    return str(row[0])
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _build_session_redirect_js(session_id: str) -> str:
+    """Return inline JS that redirects the SPA to ?session=<id> if not already set."""
+    if not session_id:
+        return ""
+    return (
+        f"if(!new URLSearchParams(location.search).get('session')&&"
+        f"!location.hash){{"
+        f"history.replaceState(null,'',location.pathname+'?session={session_id}');}}"
+    )
+
+
+def _ensure_state_service(project_path: Path, port: int) -> bool:
+    """Start state service on *port* if nothing is already listening.
+
+    Returns True if auto-started, False if already running.
+    """
+    import socket as _sock
+    try:
+        with _sock.create_connection(("127.0.0.1", port), timeout=1):
+            return False  # already running
+    except OSError:
+        pass
+    import subprocess as _sp
+    import time as _st
+    project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
+    log_f = open(project_path / ".claw-forge" / "state.log", "w")  # noqa: SIM115
+    _sp.Popen(  # noqa: S603
+        ["claw-forge", "state", "--project", str(project_path), "--port", str(port)],
+        stdout=log_f,
+        stderr=_sp.STDOUT,
+        start_new_session=True,
+    )
+    _st.sleep(1.5)
+    return True
+
+
 @app.command()
 def ui(
     port: int = typer.Option(
@@ -1379,31 +1431,13 @@ def ui(
         raise typer.Exit(1) from None
 
     # Resolve session: explicit arg → latest from DB → empty
-    _resolved_session = session
-    if not _resolved_session:
-        try:
-            import sqlite3 as _sqlite3_prod
-            _db_path_prod = Path(project).resolve() / ".claw-forge" / "state.db"
-            if _db_path_prod.exists():
-                with _sqlite3_prod.connect(str(_db_path_prod)) as _conn_prod:
-                    _row_prod = _conn_prod.execute(
-                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                    ).fetchone()
-                    if _row_prod:
-                        _resolved_session = _row_prod[0]
-        except Exception:  # noqa: BLE001
-            pass
+    _resolved_session = session or _resolve_latest_session(
+        Path(project).resolve() / ".claw-forge" / "state.db"
+    )
 
     # Inject runtime config so the SPA knows where the state API lives
     index_html = (ui_dist / "index.html").read_text()
-    # Auto-redirect to ?session=<id> if session resolved but not in URL
-    _session_redirect = ""
-    if _resolved_session:
-        _session_redirect = (
-            f"if(!new URLSearchParams(location.search).get('session')&&"
-            f"!location.hash){{"
-            f"history.replaceState(null,'',location.pathname+'?session={_resolved_session}');}}"
-        )
+    _session_redirect = _build_session_redirect_js(_resolved_session)
     runtime_cfg = (
         f"<script>window.__CLAW_FORGE_STATE_PORT__={state_port};"
         f"window.__CLAW_FORGE_SESSION__='{_resolved_session}';"
@@ -1481,30 +1515,8 @@ def ui(
     )
 
     # Auto-start state service if not already running
-    _ui_state_port = state_port
-    try:
-        import socket as _ui_sock
-        with _ui_sock.create_connection(("127.0.0.1", _ui_state_port), timeout=1):
-            pass  # already running
-    except OSError:
-        import subprocess as _ui_subprocess
-        import time as _ui_time
-        _project_path_ui = Path(project).resolve()
-        _project_path_ui.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
-        _state_log_ui = open(_project_path_ui / ".claw-forge" / "state.log", "w")  # noqa: SIM115
-        _state_cmd_ui = [
-            "claw-forge", "state",
-            "--project", str(_project_path_ui),
-            "--port", str(_ui_state_port),
-        ]
-        _ui_subprocess.Popen(  # noqa: S603
-            _state_cmd_ui,
-            stdout=_state_log_ui,
-            stderr=_ui_subprocess.STDOUT,
-            start_new_session=True,
-        )
-        _ui_time.sleep(1.5)
-        console.print(f"[dim]State service auto-started on port {_ui_state_port}[/dim]")
+    if _ensure_state_service(Path(project).resolve(), state_port):
+        console.print(f"[dim]State service auto-started on port {state_port}[/dim]")
 
     # Prefer --session arg; otherwise read latest from DB
     if session:

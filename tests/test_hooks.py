@@ -38,6 +38,42 @@ class TestPreToolUseHook:
         assert not result.allow
 
 
+    @pytest.mark.asyncio
+    async def test_custom_handler_blocks(self):
+        hook = PreToolUseHook()
+
+        async def blocking_handler(ctx):
+            return {"allow": False, "reason": "custom block"}
+
+        hook.add_handler(blocking_handler)
+        result = await hook.check("some_tool", {})
+        assert not result.allow
+        assert "custom block" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_custom_handler_allows(self):
+        hook = PreToolUseHook()
+
+        async def allowing_handler(ctx):
+            return {"allow": True}
+
+        hook.add_handler(allowing_handler)
+        result = await hook.check("read_file", {"path": "/src/main.py"})
+        assert result.allow
+
+    @pytest.mark.asyncio
+    async def test_blocked_path_in_file_path_key(self):
+        hook = PreToolUseHook()
+        result = await hook.check("write_file", {"file_path": "/etc/shadow"})
+        assert not result.allow
+
+    @pytest.mark.asyncio
+    async def test_blocked_path_in_target_key(self):
+        hook = PreToolUseHook()
+        result = await hook.check("move_file", {"target": "/etc/passwd"})
+        assert not result.allow
+
+
 class TestPreCompactHook:
     @pytest.mark.asyncio
     async def test_flush_runs_handlers(self):
@@ -51,3 +87,23 @@ class TestPreCompactHook:
         result = await hook.flush({"key": "value"})
         assert len(called) == 1
         assert "flushed" in result
+
+    @pytest.mark.asyncio
+    async def test_flush_handles_exception(self):
+        hook = PreCompactHook()
+
+        async def bad_handler():
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        hook.add_flush_handler(bad_handler)
+        # Should not raise; exception is swallowed
+        result = await hook.flush({})
+        assert result["flushed"] == []
+
+    @pytest.mark.asyncio
+    async def test_flush_no_handlers(self):
+        hook = PreCompactHook()
+        result = await hook.flush({"a": 1, "b": 2})
+        assert result["flushed"] == []
+        assert set(result["context_keys"]) == {"a", "b"}

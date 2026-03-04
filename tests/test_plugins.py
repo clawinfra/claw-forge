@@ -45,6 +45,7 @@ class TestPlugins:
     async def test_testing_plugin(self):
         plugin = TestingPlugin()
         assert plugin.name == "testing"
+        assert plugin.description == "Run test suites, analyze failures, suggest fixes"
         with patch("claw_forge.plugins.testing.collect_result", new_callable=AsyncMock) as mock_cr:
             mock_cr.return_value = "tests run"
             result = await plugin.execute(self._ctx())
@@ -53,6 +54,10 @@ class TestPlugins:
     @pytest.mark.asyncio
     async def test_reviewer_plugin(self):
         plugin = ReviewerPlugin()
+        assert (
+            plugin.description
+            == "Review code changes for correctness, style, security, and performance"
+        )
         assert plugin.name == "reviewer"
         with patch("claw_forge.plugins.reviewer.collect_result", new_callable=AsyncMock) as mock_cr:
             mock_cr.return_value = "review done"
@@ -193,3 +198,59 @@ class TestInitializerWithSpec:
         result = await plugin.execute(ctx)
         # Should still run (warning logged, not fatal)
         assert isinstance(result.success, bool)
+
+
+class TestInitializerWaveCompute:
+    """Unit tests for _compute_wave_count static method."""
+
+    def _make_feat(self, deps: list[int]):
+        """Create a simple object with depends_on_indices."""
+        class F:
+            depends_on_indices = deps
+        return F()
+
+    def test_empty_features(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        assert InitializerPlugin._compute_wave_count([]) == 0
+
+    def test_single_no_dep(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        feat = self._make_feat([])
+        assert InitializerPlugin._compute_wave_count([feat]) == 1
+
+    def test_linear_chain(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        feats = [self._make_feat([]) , self._make_feat([0]), self._make_feat([1])]
+        assert InitializerPlugin._compute_wave_count(feats) == 3
+
+    def test_cycle_resolved(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        # Two features that depend on each other — should not hang
+        feats = [self._make_feat([1]), self._make_feat([0])]
+        result = InitializerPlugin._compute_wave_count(feats)
+        assert result >= 1  # cycle detected, fallback assigned
+
+    def test_out_of_range_deps_treated_as_no_dep(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        feats = [self._make_feat([99, 100])]  # indices out of range
+        assert InitializerPlugin._compute_wave_count(feats) == 1
+
+    def test_name_description_properties(self):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        from claw_forge.plugins.base import PluginContext
+        plugin = InitializerPlugin()
+        assert plugin.name == "initializer"
+        assert "project structure" in plugin.description.lower()
+
+    def test_build_prompt_contains_path(self, tmp_path):
+        from claw_forge.plugins.initializer import InitializerPlugin
+        from claw_forge.plugins.base import PluginContext
+        plugin = InitializerPlugin()
+        ctx = PluginContext(
+            project_path=str(tmp_path),
+            session_id="sess-123",
+            task_id="42",
+        )
+        prompt = plugin._build_prompt(ctx)
+        assert str(tmp_path) in prompt
+        assert "sess-123" in prompt

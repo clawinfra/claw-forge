@@ -697,3 +697,96 @@ def test_state_url_default() -> None:
 
     assert _state_url() == "http://localhost:8420"
     assert _state_url(9999) == "http://localhost:9999"
+
+
+# ── UI helper functions ──────────────────────────────────────────────────────
+
+class TestResolveLatestSession:
+    def test_returns_empty_when_db_missing(self, tmp_path: Path) -> None:
+        from claw_forge.cli import _resolve_latest_session
+        result = _resolve_latest_session(tmp_path / "nonexistent.db")
+        assert result == ""
+
+    def test_returns_empty_when_no_sessions(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        from claw_forge.cli import _resolve_latest_session
+        db = tmp_path / "state.db"
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute(
+                "CREATE TABLE sessions (id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            )
+        result = _resolve_latest_session(db)
+        assert result == ""
+
+    def test_returns_latest_session_id(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        from claw_forge.cli import _resolve_latest_session
+        db = tmp_path / "state.db"
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute(
+                "CREATE TABLE sessions (id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            )
+            conn.execute("INSERT INTO sessions VALUES ('sess-aaa', '2026-01-01')")
+            conn.execute("INSERT INTO sessions VALUES ('sess-bbb', '2026-01-02')")
+        result = _resolve_latest_session(db)
+        assert result == "sess-bbb"
+
+    def test_returns_empty_on_db_error(self, tmp_path: Path) -> None:
+        from claw_forge.cli import _resolve_latest_session
+        # Corrupt file — sqlite will raise
+        db = tmp_path / "bad.db"
+        db.write_bytes(b"not a sqlite db")
+        result = _resolve_latest_session(db)
+        assert result == ""
+
+
+class TestBuildSessionRedirectJs:
+    def test_empty_when_no_session(self) -> None:
+        from claw_forge.cli import _build_session_redirect_js
+        assert _build_session_redirect_js("") == ""
+
+    def test_returns_js_with_session_id(self) -> None:
+        from claw_forge.cli import _build_session_redirect_js
+        js = _build_session_redirect_js("abc-123")
+        assert "abc-123" in js
+        assert "replaceState" in js
+        assert "URLSearchParams" in js
+
+    def test_js_contains_session_param(self) -> None:
+        from claw_forge.cli import _build_session_redirect_js
+        js = _build_session_redirect_js("my-session-id")
+        assert "?session=my-session-id" in js
+
+
+class TestEnsureStateService:
+    def test_returns_false_when_already_running(self, tmp_path: Path) -> None:
+        """If port is already bound, returns False (no auto-start)."""
+        import socket
+
+        from claw_forge.cli import _ensure_state_service
+        # Bind a real port to simulate running service
+        with socket.socket() as srv:
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            port = srv.getsockname()[1]
+            result = _ensure_state_service(tmp_path, port)
+        assert result is False
+
+    def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
+        """When port is free, Popen is called and returns True."""
+        from unittest.mock import MagicMock, patch
+
+        from claw_forge.cli import _ensure_state_service
+        mock_popen = MagicMock()
+        with (
+            patch("subprocess.Popen", mock_popen),
+            patch("time.sleep"),
+        ):
+            result = _ensure_state_service(tmp_path, 19999)
+        assert result is True
+        mock_popen.assert_called_once()
+        # Verify start_new_session=True is passed
+        call_kwargs = mock_popen.call_args.kwargs
+        assert call_kwargs.get("start_new_session") is True
