@@ -1,194 +1,434 @@
 <!--
-  claw-forge Project Specification
-  =================================
-  This file drives autonomous agent implementation.
-  Use /create-spec in Claude Code to generate this interactively.
+  claw-forge Project Specification — Example
+  ==========================================
+  This example shows the correct XML format for app_spec.txt.
+  Use /create-spec in Claude Code to generate your own interactively.
 
-  Features in <core_features> become individual agent tasks (typically 100-300 per project).
-  Write each bullet as a testable behavior: "User can...", "System returns...", "API validates..."
+  Key format rules:
+  - <category name="..."> groups features (human-readable names, supports spaces and &amp;)
+  - <table name="..."><column>...</column></table> for database schema
+  - <domain name="..."> groups API endpoints
+  - <phase name="..."> for implementation steps
+  - <interaction number="N" name="..."> for key user flows
 -->
-<project_specification>
-  <project_name>my-project</project_name>
+<project_specification mode="greenfield">
+
+  <project_name>Recipe Manager</project_name>
 
   <overview>
-    2-3 sentences: what you're building, what problem it solves, who it's for.
+    A web application that lets home cooks save, organize, and scale recipes.
+    Users upload recipes manually or import from URLs, tag by cuisine and diet,
+    and adjust serving sizes with automatic ingredient scaling.
   </overview>
+
+  <target_audience>
+    Home cooks and meal planners who want a personal recipe library that's faster
+    to search than bookmarks and more flexible than printed cookbooks.
+  </target_audience>
 
   <technology_stack>
     <frontend>
       <framework>React with Vite</framework>
+      <language>TypeScript</language>
       <styling>Tailwind CSS</styling>
-      <state_management>React hooks and context</state_management>
+      <state_management>React Query for server state; React hooks for local state</state_management>
       <routing>React Router</routing>
-      <port>3000</port>
     </frontend>
     <backend>
-      <runtime>Python with FastAPI</runtime>
-      <database>SQLite (dev) / PostgreSQL (prod)</database>
-      <port>8000</port>
+      <framework>Python with FastAPI</framework>
+      <orm>SQLAlchemy 2.0 (async)</orm>
+      <validation>Pydantic v2</validation>
+      <auth>python-jose (JWT) + passlib (bcrypt)</auth>
     </backend>
+    <database>
+      <primary>PostgreSQL</primary>
+      <dev>SQLite (via env toggle for local development)</dev>
+    </database>
     <communication>
-      <api>RESTful JSON endpoints</api>
+      <api_style>REST</api_style>
+      <response_format>JSON envelope: { "data": ..., "error": null, "status": 200 }</response_format>
     </communication>
   </technology_stack>
 
   <prerequisites>
-    <environment_setup>
-      - Python 3.12+ with uv installed
-      - Node.js 18+ for frontend
-      - Any required API keys (list here)
-    </environment_setup>
+    - Python 3.12+ with uv installed
+    - Node.js 18+ for frontend
+    - Environment variables: DATABASE_URL, JWT_SECRET
   </prerequisites>
 
   <core_features>
-    <!--
-      Each bullet = one agent task.
-      Start with action verb: "User can...", "System displays...", "API returns..."
-      Group by category. Aim for 100-300 bullets total for a full app.
-    -->
-    <authentication>
+
+    <!-- ============================================================ -->
+    <!-- 1. AUTHENTICATION &amp; USER MANAGEMENT                      -->
+    <!-- ============================================================ -->
+    <category name="Authentication &amp; User Management">
       - User can register with email and password (returns 201 with user_id)
-      - User can login and receive JWT access_token and refresh_token
-      - User can logout and invalidate their refresh token
-      - System rejects login with invalid credentials (returns 401)
-      - User can refresh expired access token using refresh_token
-    </authentication>
+      - System validates email format (RFC 5322) and rejects duplicates with 409 error
+      - System validates password minimum 8 characters with at least one number
+      - System hashes passwords using bcrypt before storing in database
+      - User can login and receive JWT access_token (15 min) and refresh_token (7 day)
+      - System returns 401 with "Invalid credentials" on failed login
+      - User can logout and system invalidates refresh_token in database
+      - System auto-refreshes access_token silently using refresh_token when it expires
+      - System returns 401 on all protected endpoints when token is missing or expired
+      - User can view their profile: display name, email, account creation date
+      - User can update their display name from the profile settings page
+      - User can change password by providing current password and new password
+      - System rejects password change if current password is incorrect with 400 error
+    </category>
 
-    <core_functionality>
-      - User can create a new item with title and description
-      - User can view paginated list of their items (?page=1&amp;per_page=20)
-      - User can update an existing item's title or description
-      - User can delete an item (soft delete — sets deleted_at)
-      - System returns 403 if user tries to access another user's item
-    </core_functionality>
+    <!-- ============================================================ -->
+    <!-- 2. RECIPE MANAGEMENT                                         -->
+    <!-- ============================================================ -->
+    <category name="Recipe Management">
+      - User can create a recipe with title, description, servings, prep time, cook time
+      - User can add ingredients to a recipe as a list of { name, quantity, unit } objects
+      - User can add step-by-step instructions to a recipe
+      - User can edit any field of an existing recipe
+      - User can delete a recipe (soft delete — sets deleted_at)
+      - System returns 403 if user tries to access another user's recipe
+      - User can upload a cover photo for a recipe (JPG, PNG, WEBP; max 5MB)
+      - System resizes uploaded images to max 1200px on the longest side
+      - User can duplicate an existing recipe to use it as a starting point
+      - System tracks created_at and updated_at timestamps for every recipe
+    </category>
 
-    <user_interface>
-      - UI displays loading skeleton while data is fetching
-      - UI shows success toast notification after create/update/delete
-      - UI shows error message when API request fails
-      - UI is responsive on mobile (375px), tablet (768px), and desktop (1280px)
-    </user_interface>
+    <!-- ============================================================ -->
+    <!-- 3. SERVING SIZE SCALING                                      -->
+    <!-- ============================================================ -->
+    <category name="Serving Size Scaling">
+      - User can adjust the serving size on the recipe detail page using a number input
+      - System scales all ingredient quantities proportionally when serving size changes
+      - System rounds scaled quantities to sensible precision (e.g., 0.5 not 0.4999)
+      - System preserves original serving size and quantities separately for reset
+      - User can click "Reset" to restore the original serving size and quantities
+      - Scaling state is local to the session and not persisted to the database
+    </category>
 
-    <api_layer>
-      - API validates all request bodies and returns 400 for invalid input
-      - API requires valid JWT for all protected routes (returns 401 if missing)
-      - API returns paginated results with total count and next/prev links
-    </api_layer>
+    <!-- ============================================================ -->
+    <!-- 4. TAGS &amp; ORGANIZATION                                   -->
+    <!-- ============================================================ -->
+    <category name="Tags &amp; Organization">
+      - User can add free-form tags to any recipe (e.g., "vegan", "quick", "italian")
+      - System shows autocomplete suggestions for previously used tags while typing
+      - User can remove a tag by clicking the X on the tag chip
+      - User can filter the recipe list by one or more tags (AND logic)
+      - System shows all unique tags used by the user in the settings page
+      - User can rename a tag globally (renames it on all recipes that use it)
+      - User can mark any recipe as a favourite with a star icon
+      - User can filter the recipe list to show only favourites
+      - System shows recipe count next to each tag in the settings page
+    </category>
+
+    <!-- ============================================================ -->
+    <!-- 5. RECIPE LIST / DASHBOARD                                   -->
+    <!-- ============================================================ -->
+    <category name="Recipe List / Dashboard">
+      - User sees the dashboard at /dashboard showing all their recipes as a grid of cards
+      - Each recipe card shows: cover photo thumbnail, title, tags, prep+cook time, servings
+      - System fetches recipes sorted by updated_at descending by default
+      - User can switch between grid view and list view with a toggle button
+      - System shows 24 recipes per page with pagination controls at the bottom
+      - User can search recipes by title using a search input in the toolbar (debounced 300ms)
+      - User can filter recipes by tag using a multi-select dropdown
+      - User can filter recipes to show only favourites using a heart toggle button
+      - Active filters are shown as removable chips in the toolbar
+      - User can clear all filters with a single "Clear filters" button
+      - System shows total count of recipes matching current filters
+      - System shows empty state with illustration and "Add your first recipe" CTA when no recipes exist
+      - System shows "No results found" state with filter reset option when filters match nothing
+      - Dashboard shows loading skeleton cards while fetching data
+      - User can click any recipe card to navigate to the recipe detail page
+    </category>
+
+    <!-- ============================================================ -->
+    <!-- 6. UI / UX                                                   -->
+    <!-- ============================================================ -->
+    <category name="UI / UX">
+      - App is fully responsive on mobile (375px+), tablet (768px+), and desktop (1280px+)
+      - Navigation sidebar is visible on desktop; collapses to hamburger menu on mobile
+      - App uses skeleton screen loading states (not spinners) for list and detail pages
+      - All async actions show inline loading indicators on the triggering button
+      - All form validation errors appear inline below the relevant field
+      - App shows success/error toast notifications in the top-right corner (auto-dismiss 4s)
+      - All destructive actions require a confirmation dialog before executing
+      - App supports dark mode via system preference with manual toggle in header
+      - Dark mode preference is persisted in localStorage and applied on page load
+      - Active filters and sort state are persisted in URL query parameters (shareable)
+      - App supports full keyboard navigation: all interactive elements are focusable
+      - App shows 404 error page for unknown routes with a link back to the dashboard
+      - Page titles update to reflect the current route (e.g., "Pasta Carbonara | Recipe Manager")
+    </category>
+
+    <!-- ============================================================ -->
+    <!-- 7. API LAYER                                                  -->
+    <!-- ============================================================ -->
+    <category name="API Layer">
+      - API returns consistent JSON envelope: { "data": ..., "error": null, "status": 200 }
+      - API returns { "data": null, "error": { "message": "...", "code": "..." }, "status": 4xx } on errors
+      - API validates all request bodies with Pydantic v2 and returns 400 with field-level errors
+      - API returns 401 for all requests missing or with invalid/expired JWT token
+      - API returns 403 if authenticated user attempts to access another user's resource
+      - API returns 404 with descriptive message when a resource is not found
+      - API returns 500 with unique error_id for unexpected server errors (logged server-side)
+      - API enables CORS for the configured FRONTEND_URL environment variable
+      - API returns paginated responses as: { "items": [...], "total": N, "page": 1, "per_page": 24, "has_next": true }
+      - GET /api/recipes accepts query params: search, tag, favourites, sort_by, sort_dir, page, per_page
+    </category>
+
   </core_features>
 
   <database_schema>
     <tables>
-      <users>
-        - id (PRIMARY KEY, UUID)
-        - email (UNIQUE, NOT NULL)
-        - password_hash (NOT NULL)
-        - name
-        - created_at, updated_at
-      </users>
+
+      <table name="users">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>email VARCHAR(255) UNIQUE NOT NULL</column>
+        <column>password_hash VARCHAR(255) NOT NULL</column>
+        <column>display_name VARCHAR(100)</column>
+        <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+        <column>updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="refresh_tokens">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE</column>
+        <column>token_hash VARCHAR(255) NOT NULL UNIQUE</column>
+        <column>expires_at TIMESTAMP WITH TIME ZONE NOT NULL</column>
+        <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="recipes">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE</column>
+        <column>title VARCHAR(255) NOT NULL</column>
+        <column>description TEXT</column>
+        <column>servings INTEGER NOT NULL DEFAULT 4</column>
+        <column>prep_time_minutes INTEGER</column>
+        <column>cook_time_minutes INTEGER</column>
+        <column>cover_image_path VARCHAR(500)</column>
+        <column>is_favourite BOOLEAN DEFAULT FALSE</column>
+        <column>deleted_at TIMESTAMP WITH TIME ZONE</column>
+        <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+        <column>updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+        <column>INDEX idx_recipes_user_id ON recipes(user_id) WHERE deleted_at IS NULL</column>
+      </table>
+
+      <table name="ingredients">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE</column>
+        <column>name VARCHAR(255) NOT NULL</column>
+        <column>quantity DECIMAL(10, 3)</column>
+        <column>unit VARCHAR(50)</column>
+        <column>display_order INTEGER NOT NULL DEFAULT 0</column>
+      </table>
+
+      <table name="instructions">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE</column>
+        <column>step_number INTEGER NOT NULL</column>
+        <column>body TEXT NOT NULL</column>
+      </table>
+
+      <table name="recipe_tags">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE</column>
+        <column>tag_name VARCHAR(100) NOT NULL</column>
+        <column>UNIQUE(recipe_id, tag_name)</column>
+      </table>
+
     </tables>
   </database_schema>
 
   <api_endpoints_summary>
-    <authentication>
-      - POST /api/auth/register
-      - POST /api/auth/login
-      - POST /api/auth/logout
-      - POST /api/auth/refresh
-      - GET  /api/auth/me
-    </authentication>
+
+    <domain name="Authentication">
+      POST   /api/auth/register    - Register new user account
+      POST   /api/auth/login       - Login and receive JWT tokens
+      POST   /api/auth/logout      - Logout and invalidate refresh token
+      POST   /api/auth/refresh     - Refresh access token using refresh token
+      GET    /api/auth/me          - Get current user profile
+      PATCH  /api/auth/me          - Update display name
+      POST   /api/auth/me/password - Change password
+    </domain>
+
+    <domain name="Recipes">
+      GET    /api/recipes          - List recipes with search, filters, and pagination
+      POST   /api/recipes          - Create a new recipe
+      GET    /api/recipes/{id}     - Get single recipe with ingredients, instructions, and tags
+      PUT    /api/recipes/{id}     - Update recipe header fields
+      DELETE /api/recipes/{id}     - Soft-delete a recipe
+      POST   /api/recipes/{id}/duplicate - Duplicate a recipe
+    </domain>
+
+    <domain name="Recipe Ingredients">
+      PUT    /api/recipes/{id}/ingredients   - Replace all ingredients for a recipe
+    </domain>
+
+    <domain name="Recipe Instructions">
+      PUT    /api/recipes/{id}/instructions  - Replace all instructions for a recipe
+    </domain>
+
+    <domain name="Recipe Tags">
+      PUT    /api/recipes/{id}/tags          - Replace all tags for a recipe
+    </domain>
+
+    <domain name="Images">
+      POST   /api/recipes/{id}/image        - Upload cover photo (multipart/form-data)
+    </domain>
+
+    <domain name="Tags">
+      GET    /api/tags             - Get all unique tags used by current user
+      POST   /api/tags/rename      - Rename a tag globally across all recipes
+    </domain>
+
   </api_endpoints_summary>
 
   <ui_layout>
-    <main_structure>
-      - Header with navigation and user menu
-      - Sidebar for navigation (collapsible on mobile)
-      - Main content area with page header and content
-    </main_structure>
+    <structure>
+      Root layout:
+        - Header bar (logo, "New Recipe" CTA, user avatar dropdown with Settings/Logout)
+        - Left sidebar (desktop): Dashboard, Favourites, Tags, Settings navigation links
+        - Main content area (full width on mobile, fills remaining space on desktop)
+        - Toast notification portal (top-right)
+
+      Pages:
+        /                        - Redirect to /dashboard if logged in, else /login
+        /login                   - Email + password login form, link to register
+        /register                - Email + display name + password registration form
+        /dashboard               - Recipe grid with toolbar (search, tag filter, favourites toggle)
+        /recipes/new             - Create recipe form (title, description, servings, ingredients, steps)
+        /recipes/[id]            - Recipe detail: cover photo, ingredients, instructions, scaling control
+        /recipes/[id]/edit       - Edit recipe form
+        /settings                - Profile settings and password change
+        /settings/tags           - Tag management (rename, delete)
+    </structure>
   </ui_layout>
 
   <design_system>
     <color_palette>
-      - Primary: #f97316 (forge orange)
-      - Secondary: #3b82f6 (blue)
-      - Background: #ffffff (light) / #0f172a (dark)
-      - Surface: #f8fafc (light) / #1e293b (dark)
-      - Text: #0f172a (light) / #f1f5f9 (dark)
-      - Error: #ef4444
-      - Success: #22c55e
-      - Warning: #f59e0b
+      Primary:      #f97316 (orange-500) - buttons, links, active states
+      Primary dark: #ea580c (orange-600) - hover states
+      Success:      #22c55e (green-500) - success toasts
+      Danger:       #ef4444 (red-500) - delete buttons, error messages
+      Warning:      #f59e0b (amber-500) - warning states
+      Background:   #ffffff (light) / #0f172a (dark)
+      Surface:      #f8fafc (light) / #1e293b (dark)
+      Text:         #0f172a (light) / #f1f5f9 (dark)
     </color_palette>
     <typography>
-      - Font family: Inter, system-ui, sans-serif
-      - Headings: font-semibold
-      - Body: font-normal, leading-relaxed
-      - Code: JetBrains Mono, monospace
+      Font family: Inter, system-ui, sans-serif
+      Headings:   font-semibold, tracking-tight
+      Body:       font-normal, leading-relaxed
+      Code:       JetBrains Mono, monospace
     </typography>
     <animations>
-      - Transitions: 150-200ms ease
-      - Loading: skeleton screens (not spinners)
-      - Modals: fade + scale in
+      Transitions: 150-200ms ease
+      Loading:     skeleton screens (not spinners)
+      Modals:      fade + scale in
+      Toasts:      slide-in from right, fade-out on dismiss
     </animations>
   </design_system>
 
   <key_interactions>
-    <flow_registration>
-      1. User clicks "Sign up"
-      2. Fills email + password form
-      3. System creates account
-      4. Redirect to dashboard with welcome toast
-    </flow_registration>
+    <interaction number="1" name="Add a new recipe">
+      1. User clicks "New Recipe" in the header
+      2. Fills in title, description, servings, prep and cook time
+      3. Adds ingredients one by one (name, quantity, unit)
+      4. Adds step-by-step instructions
+      5. Uploads a cover photo (optional)
+      6. Clicks "Save Recipe"
+      7. System saves and redirects to the recipe detail page
+    </interaction>
+    <interaction number="2" name="Scale a recipe">
+      1. User opens a recipe detail page
+      2. Sees the serving size control (e.g., "4 servings")
+      3. Changes serving size to 8 using the number input
+      4. System instantly scales all ingredient quantities proportionally
+      5. User clicks "Reset" to restore original quantities
+    </interaction>
+    <interaction number="3" name="Search and filter recipes">
+      1. User navigates to /dashboard
+      2. Types "pasta" in the search box — list filters to matching recipes
+      3. Selects "italian" from the tag filter dropdown
+      4. List narrows further to italian pasta recipes
+      5. User clicks "Export" or navigates to a recipe
+    </interaction>
   </key_interactions>
 
   <implementation_steps>
-    <step number="1">
-      <title>Project Setup and Database</title>
-      <tasks>
-        - Initialize frontend and backend projects
-        - Create database schema and migrations
-        - Set up environment variables and config
-        - Configure CORS and middleware
-      </tasks>
-    </step>
-    <step number="2">
-      <title>Authentication System</title>
-      <tasks>
-        - Implement JWT register/login/logout/refresh
-        - Add session management and protected routes
-      </tasks>
-    </step>
-    <step number="3">
-      <title>Core Features</title>
-      <tasks>
-        - Build primary CRUD operations
-        - Implement list/pagination/filtering
-        - Add form validation and error handling
-      </tasks>
-    </step>
-    <step number="4">
-      <title>UI Polish and Testing</title>
-      <tasks>
-        - Responsive design and dark/light theme
-        - Loading states, toasts, error feedback
-        - Full test suite (≥90% coverage)
-      </tasks>
-    </step>
+    <phase name="Phase 1: Project Setup &amp; Auth">
+      Initialize React + Vite + Tailwind frontend and FastAPI + SQLAlchemy backend
+      Configure PostgreSQL and run initial migrations for users and refresh_tokens tables
+      Implement POST /api/auth/register with email validation and bcrypt hashing
+      Implement POST /api/auth/login returning JWT access and refresh tokens
+      Implement POST /api/auth/logout and POST /api/auth/refresh
+      Build /login and /register pages with form validation and error display
+      Implement JWT middleware for protecting API routes
+      Set up CORS and rate limiting middleware
+    </phase>
+    <phase name="Phase 2: Recipe CRUD">
+      Create recipes, ingredients, instructions, and recipe_tags tables and migrations
+      Implement GET/POST /api/recipes and GET/PUT/DELETE /api/recipes/{id}
+      Implement PUT endpoints for ingredients, instructions, and tags
+      Build /recipes/new and /recipes/[id]/edit forms with validation
+      Build recipe detail page with ingredients, instructions, and tag display
+      Implement recipe duplication endpoint and UI action
+    </phase>
+    <phase name="Phase 3: Dashboard &amp; Filtering">
+      Implement GET /api/recipes with search, tag filter, favourites, sort, and pagination
+      Build /dashboard with recipe card grid and loading skeleton
+      Implement search input with 300ms debounce
+      Implement tag filter multi-select dropdown
+      Implement favourites toggle filter
+      Implement pagination controls and sort options
+      Implement empty state and no-results state
+    </phase>
+    <phase name="Phase 4: Images, Tags &amp; Scaling">
+      Implement POST /api/recipes/{id}/image with multipart upload and image resizing
+      Add cover photo upload to the recipe create/edit forms
+      Implement GET /api/tags and POST /api/tags/rename endpoints
+      Build /settings/tags page for tag management
+      Implement serving size scaling control on the recipe detail page
+      Add proportional quantity calculation and reset functionality
+    </phase>
+    <phase name="Phase 5: UI Polish &amp; Testing">
+      Implement responsive design across all breakpoints (mobile, tablet, desktop)
+      Add dark mode toggle with localStorage persistence
+      Implement toast notification system and confirmation dialogs
+      Persist filter and sort state to URL query parameters
+      Add full keyboard navigation and ARIA labels throughout
+      Write API integration tests for all endpoints (happy paths and key error cases)
+      Write frontend component tests for critical UI flows
+      Ensure test coverage reaches 90% threshold
+    </phase>
   </implementation_steps>
 
   <success_criteria>
     <functionality>
-      - All features in core_features are implemented and passing
-      - No console errors in browser during normal use
-      - Data persists correctly across sessions
+      All feature bullets implemented and manually verified
+      User can create, edit, duplicate, and delete recipes with all fields
+      Serving size scaling calculates correctly and resets cleanly
+      Tag filtering applies AND logic and URL state persists on refresh
+      Search updates results within 300ms of typing (debounced)
+      Image upload rejects invalid types and oversized files
     </functionality>
-    <user_experience>
-      - Responsive on mobile, tablet, and desktop
-      - All async operations show loading states
-      - Clear feedback for every user action
-    </user_experience>
+    <ux>
+      App is fully usable on iPhone SE (375px width) and up
+      All loading states use skeleton screens — no blank flash
+      All destructive actions have confirmation dialogs
+      Dark mode works across all pages and persists after refresh
+      Keyboard navigation reaches all interactive elements without a mouse
+    </ux>
     <technical_quality>
-      - Test coverage ≥ 90%
-      - No TypeScript or mypy type errors
-      - Proper error handling throughout
+      All API endpoints return correct HTTP status codes and envelopes
+      JWT authentication protects all /api/* routes except /api/auth/*
+      Image upload validates type by MIME type and rejects oversized files
+      No N+1 query issues in recipe list endpoint
+      Test coverage >= 90%
+      No TypeScript or mypy type errors
+      No secrets committed to source control
     </technical_quality>
   </success_criteria>
+
 </project_specification>
