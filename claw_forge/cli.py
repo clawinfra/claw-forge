@@ -400,9 +400,8 @@ def run(
 
     # Auto-start state service (project-aware: restarts if serving a different project)
     _state_port = cfg.get("state", {}).get("port", 8420)
-    _state_auto_started = _ensure_state_service(project_path, _state_port)
-    if _state_auto_started:
-        console.print(f"[dim]State service auto-started on port {_state_port}[/dim]")
+    _state_port = _ensure_state_service(project_path, _state_port)
+    console.print(f"[dim]State service on port {_state_port}[/dim]")
 
     # Set up async engine
     engine = create_async_engine(db_url, echo=False)
@@ -1281,137 +1280,143 @@ def _build_session_redirect_js(session_id: str) -> str:
     )
 
 
-def _ensure_state_service(project_path: Path, port: int) -> bool:
-    """Start state service on *port* if not running or serving the wrong project.
+def _ensure_state_service(project_path: Path, port: int) -> int:
+    """Start state service if not running or serving the wrong project.
 
-    Returns True if (re)started, False if already running for this project.
-    Raises RuntimeError if the service fails to become ready within the timeout.
+    Returns the actual port the state service is listening on (may differ from
+    *port* if that port is blocked by another process such as an IDE).
+    Tries *port* then port+1 … port+4 before raising RuntimeError.
     """
+    import json as _json
     import socket as _sock
     import subprocess as _sp
     import time as _st
+    import urllib.request as _req
 
     want_project = str(project_path.resolve())
+    log_path = project_path / ".claw-forge" / "state.log"
 
-    def _wait_for_port(timeout: float = 10.0) -> bool:
-        """Poll until port accepts connections. Returns True if ready, False if timeout."""
+    def _listening(p: int) -> bool:
+        try:
+            with _sock.create_connection(("127.0.0.1", p), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    def _wait_for_port(p: int, timeout: float = 10.0) -> bool:
         deadline = _st.monotonic() + timeout
         while _st.monotonic() < deadline:
             _st.sleep(0.25)
             try:
-                with _sock.create_connection(("127.0.0.1", port), timeout=0.5):
+                with _sock.create_connection(("127.0.0.1", p), timeout=0.5):
                     return True
             except OSError:
                 pass
         return False
 
-    def _wait_for_port_free(timeout: float = 5.0) -> None:
-        """Wait until port is no longer in use (after shutdown)."""
+    def _wait_for_port_free(p: int, timeout: float = 5.0) -> None:
         deadline = _st.monotonic() + timeout
         while _st.monotonic() < deadline:
             try:
-                with _sock.create_connection(("127.0.0.1", port), timeout=0.5):
-                    _st.sleep(0.25)  # still bound — keep waiting
+                with _sock.create_connection(("127.0.0.1", p), timeout=0.5):
+                    _st.sleep(0.25)
             except OSError:
-                return  # port is free
-        # Port still held after timeout — proceed anyway (Popen will fail to bind,
-        # which is surfaced via _wait_for_port returning False below)
+                return
 
-    def _verify_info(timeout: float = 2.0) -> bool:
-        """Return True if /info responds with a claw-forge project_path field."""
-        import json as _json
-        import urllib.request as _req
+    def _get_info(p: int, timeout: float = 2.0) -> dict[str, object] | None:
         try:
             with _req.urlopen(  # noqa: S310
-                f"http://127.0.0.1:{port}/info", timeout=timeout
+                f"http://127.0.0.1:{p}/info", timeout=timeout
             ) as resp:
-                info = _json.loads(resp.read())
-            return bool(info.get("project_path") is not None)
+                return _json.loads(resp.read())  # type: ignore[no-any-return]
         except Exception:  # noqa: BLE001
-            return False
+            return None
 
-    def _start() -> None:
+    def _start_on(p: int) -> bool:
+        """Launch state service on *p*. Return True if /info responds correctly."""
         project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
-        log_path = project_path / ".claw-forge" / "state.log"
         with open(log_path, "w") as log_f:  # noqa: WPS515
             _sp.Popen(  # noqa: S603
                 [
                     "claw-forge", "state",
                     "--project", str(project_path),
-                    "--port", str(port),
+                    "--port", str(p),
                 ],
                 stdout=log_f,
                 stderr=_sp.STDOUT,
                 start_new_session=True,
             )
-        if not _wait_for_port(timeout=10.0):
-            import contextlib as _ctx
-            log_tail = ""
-            with _ctx.suppress(OSError):
-                log_tail = log_path.read_text()[-500:]
-            msg = (
-                f"State service failed to start on port {port} within 10s.\n"
-                f"Log: {log_path}\n{log_tail}"
-            )
-            raise RuntimeError(msg)
-        # Verify that the process answering on the port is actually the
-        # claw-forge state service and not another program (e.g. an IDE that
-        # happened to bind the same loopback port with higher TCP priority).
-        if not _verify_info(timeout=3.0):
-            import contextlib as _ctx
-            log_tail = ""
-            with _ctx.suppress(OSError):
-                log_tail = log_path.read_text()[-500:]
-            msg = (
-                f"Port {port} is occupied by another process that does not "
-                f"respond to the claw-forge /info endpoint.\n"
-                f"Fix: run `claw-forge ui --state-port <other_port>` to use "
-                f"a different port.\n"
-                f"Log: {log_path}\n{log_tail}"
-            )
-            raise RuntimeError(msg)
+        if not _wait_for_port(p, timeout=10.0):
+            return False
+        info = _get_info(p, timeout=3.0)
+        return info is not None and info.get("project_path") is not None
 
-    # ── Is anything listening on the port? ────────────────────────────────────
-    try:
-        with _sock.create_connection(("127.0.0.1", port), timeout=1):
-            pass  # something is listening
-    except OSError:
-        # Nothing listening — start fresh
-        _start()
-        return True
+    # ── Is the configured port occupied by something? ─────────────────────────
+    if _listening(port):
+        info = _get_info(port)
+        if info is not None:
+            svc_project_raw = info.get("project_path", "")
+            if svc_project_raw:
+                svc_project = str(Path(str(svc_project_raw)).resolve())
+                if svc_project == want_project:
+                    return port  # already running for this project — nothing to do
+                # Claw-forge running but wrong project → shut down and restart
+                console.print(f"[dim]State service switching project → {want_project}[/dim]")
+                try:
+                    with _req.urlopen(  # noqa: S310
+                        _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),
+                        timeout=2,
+                    ):
+                        pass
+                except Exception:  # noqa: BLE001
+                    pass
+                _wait_for_port_free(port)
+                if _start_on(port):
+                    return port
+        # Port blocked by a non-claw-forge process (e.g. Cursor IDE) or startup
+        # failed — try the next 4 ports automatically.
+        console.print(
+            f"[yellow]Port {port} is occupied by another process — "
+            f"trying fallback ports…[/yellow]"
+        )
+        for p in range(port + 1, port + 5):
+            if _listening(p):
+                # Check if it's already our service on this alternate port
+                alt_info = _get_info(p)
+                if alt_info is not None:
+                    alt_raw = alt_info.get("project_path", "")
+                    if alt_raw and str(Path(str(alt_raw)).resolve()) == want_project:
+                        return p
+                continue  # also blocked
+            if _start_on(p):
+                console.print(
+                    f"[yellow]State service started on port {p} "
+                    f"(port {port} blocked by another process).[/yellow]\n"
+                    f"[dim]Tip: add 'state:\\n  port: {p}' to claw-forge.yaml "
+                    f"to keep this port consistently.[/dim]"
+                )
+                return p
+        import contextlib as _ctx
+        log_tail = ""
+        with _ctx.suppress(OSError):
+            log_tail = log_path.read_text()[-500:]
+        raise RuntimeError(
+            f"Port {port} and the next 4 alternatives are all occupied.\n"
+            f"Fix: add 'state:\\n  port: <free_port>' to claw-forge.yaml.\n"
+            f"Log: {log_path}\n{log_tail}"
+        )
 
-    # ── Something is running — verify it's the right project ─────────────────
-    try:
-        import json as _json
-        import urllib.request as _req
-        with _req.urlopen(  # noqa: S310
-            f"http://127.0.0.1:{port}/info", timeout=2
-        ) as resp:
-            info = _json.loads(resp.read())
-        svc_project_raw = info.get("project_path", "")
-        # Guard: empty path would resolve to CWD and could falsely match
-        if not svc_project_raw:
-            raise ValueError("empty project_path in /info response")  # noqa: TRY301
-        svc_project = str(Path(svc_project_raw).resolve())
-        if svc_project == want_project:
-            return False  # correct project, nothing to do
-        # Wrong project — gracefully shut down, wait for port to free, then restart
-        console.print(f"[dim]State service switching project → {want_project}[/dim]")
-        try:
-            with _req.urlopen(  # noqa: S310
-                _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),
-                timeout=2,
-            ):
-                pass
-        except Exception:  # noqa: BLE001
-            pass
-        _wait_for_port_free(timeout=5.0)
-    except Exception:  # noqa: BLE001
-        # /info unavailable (old version, wrong process, or unhealthy) — restart
-        pass
-
-    _start()
-    return True
+    # ── Port is free — start normally ─────────────────────────────────────────
+    if _start_on(port):
+        return port
+    import contextlib as _ctx
+    log_tail = ""
+    with _ctx.suppress(OSError):
+        log_tail = log_path.read_text()[-500:]
+    raise RuntimeError(
+        f"State service failed to start on port {port} within 10s.\n"
+        f"Log: {log_path}\n{log_tail}"
+    )
 
 
 @app.command()
@@ -1663,8 +1668,7 @@ def ui(
     )
 
     # Auto-start state service if not already running
-    if _ensure_state_service(Path(project).resolve(), state_port):
-        console.print(f"[dim]State service auto-started on port {state_port}[/dim]")
+    state_port = _ensure_state_service(Path(project).resolve(), state_port)
 
     # Prefer --session arg; otherwise read latest from DB
     if session:

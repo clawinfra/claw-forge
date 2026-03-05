@@ -15,5 +15,5 @@ import pytest
 @pytest.fixture(autouse=True)
 def _patch_ensure_state_service() -> None:  # type: ignore[misc]
     """Prevent _ensure_state_service from touching real ports in e2e tests."""
-    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+    with patch("claw_forge.cli._ensure_state_service", return_value=8420):
         yield  # type: ignore[misc]

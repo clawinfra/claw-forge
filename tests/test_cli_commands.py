@@ -69,7 +69,7 @@ def test_status_with_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_run_with_config(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path, providers={"p1": {"type": "anthropic", "api_key": "k"}})
-    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+    with patch("claw_forge.cli._ensure_state_service", return_value=8420):
         result = runner.invoke(app, ["run", "--config", str(cfg)])
     assert result.exit_code == 0
     assert "claw-forge" in result.output
@@ -82,7 +82,7 @@ def test_run_missing_config(tmp_path: Path) -> None:
 
 def test_run_yolo_mode(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path)
-    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+    with patch("claw_forge.cli._ensure_state_service", return_value=8420):
         result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo"])
     assert result.exit_code == 0
     assert "YOLO" in result.output
@@ -396,7 +396,7 @@ def test_ui_serves_static_bundle(tmp_path: Path) -> None:
         patch.object(cli_mod, "__file__", str(fake_dist.parent / "cli.py")),
         patch("uvicorn.run"),
         patch("starlette.staticfiles.StaticFiles.__init__", return_value=None),
-        patch("claw_forge.cli._ensure_state_service", return_value=False),
+        patch("claw_forge.cli._ensure_state_service", return_value=8420),
     ):
         result = runner.invoke(app, ["ui", "--no-open"])
     assert result.exit_code == 0, result.output
@@ -482,7 +482,7 @@ def test_load_config_with_env_file(tmp_path: Path) -> None:
     env_file.write_text("MY_KEY=abc123\n")
     cfg_path = tmp_path / "claw-forge.yaml"
     cfg_path.write_text(yaml.dump({"providers": {}, "key": "${MY_KEY}"}))
-    with patch("claw_forge.cli._ensure_state_service", return_value=False):
+    with patch("claw_forge.cli._ensure_state_service", return_value=8420):
         result = runner.invoke(app, ["run", "--config", str(cfg_path)])
     assert result.exit_code == 0
 
@@ -766,7 +766,7 @@ class TestBuildSessionRedirectJs:
 
 class TestEnsureStateService:
     def test_returns_false_when_already_running(self, tmp_path: Path) -> None:
-        """If port is bound and /info confirms same project, returns False (no restart)."""
+        """If port is bound and /info confirms same project, returns the port (no restart)."""
         import json
         import socket
         from unittest.mock import MagicMock, patch
@@ -787,7 +787,7 @@ class TestEnsureStateService:
             port = srv.getsockname()[1]
             with patch("urllib.request.urlopen", return_value=mock_resp):
                 result = _ensure_state_service(tmp_path, port)
-        assert result is False
+        assert result == port
 
     def test_restarts_when_wrong_project(self, tmp_path: Path) -> None:
         """If /info returns a different project, the service is restarted."""
@@ -827,7 +827,7 @@ class TestEnsureStateService:
 
             ):
                 result = _ensure_state_service(tmp_path, port)
-        assert result is True
+        assert result == port
         mock_popen.assert_called_once()
 
     def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
@@ -856,7 +856,7 @@ class TestEnsureStateService:
             patch("urllib.request.urlopen", return_value=mock_resp),
         ):
             result = _ensure_state_service(tmp_path, 19999)
-        assert result is True
+        assert result == 19999
         mock_popen.assert_called_once()
         call_kwargs = mock_popen.call_args.kwargs
         assert call_kwargs.get("start_new_session") is True
