@@ -860,3 +860,150 @@ class TestEnsureStateService:
         mock_popen.assert_called_once()
         call_kwargs = mock_popen.call_args.kwargs
         assert call_kwargs.get("start_new_session") is True
+
+
+# ── sdk agent execution (CLAUDECODE pop/restore) ──────────────────────────────
+
+
+class TestSdkAgentExecution:
+    """Tests for the sdk_available execution path in the run command.
+
+    These tests verify that CLAUDECODE is popped from os.environ during the
+    claude CLI subprocess spawn and properly restored in the finally block.
+    """
+
+    def _seed_db(self, db_path: Path, project_path: Path) -> None:
+        """Synchronously seed SQLite with one pending task via asyncio.run."""
+        import asyncio
+        import uuid
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from claw_forge.state.models import Base, Task
+        from claw_forge.state.models import Session as DbSess
+
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+
+        async def _seed() -> None:
+            engine = create_async_engine(db_url, echo=False)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            session_id = str(uuid.uuid4())
+            task_id = str(uuid.uuid4())
+            async with async_sessionmaker(engine, expire_on_commit=False)() as sess:
+                sess.add(DbSess(
+                    id=session_id,
+                    project_path=str(project_path),
+                    status="running",
+                ))
+                await sess.flush()
+                sess.add(Task(
+                    id=task_id,
+                    session_id=session_id,
+                    plugin_name="coding",
+                    status="pending",
+                    priority=1,
+                    description="Implement a feature",
+                    depends_on=[],
+                ))
+                await sess.commit()
+            await engine.dispose()
+
+        asyncio.run(_seed())
+
+    def test_claudecode_popped_and_restored_on_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CLAUDECODE is removed before spawning claude CLI and restored after."""
+        import os
+
+        project_path = tmp_path / "proj"
+        project_path.mkdir()
+        claw_forge_dir = project_path / ".claw-forge"
+        claw_forge_dir.mkdir()
+        self._seed_db(claw_forge_dir / "state.db", project_path)
+
+        config_path = tmp_path / "cf.yaml"
+        config_path.write_text("providers: {}\n")
+
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        env_during_aenter: list[str | None] = []
+
+        class FakeAgentSession:
+            def __init__(self, options: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> FakeAgentSession:
+                env_during_aenter.append(os.environ.get("CLAUDECODE"))
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                pass
+
+            async def run(self, prompt: str) -> Any:  # type: ignore[misc]
+                class _Msg:
+                    text = "Code written successfully."
+
+                yield _Msg()
+
+        with (
+            patch("claw_forge.cli._ensure_state_service", return_value=8420),
+            patch("claw_forge.cli.shutil.which", return_value="/usr/bin/claude"),
+            patch("claw_forge.agent.session.AgentSession", FakeAgentSession),
+        ):
+            result = runner.invoke(
+                app,
+                ["run", "--config", str(config_path), "--project", str(project_path)],
+            )
+
+        # CLAUDECODE must be restored after the run
+        assert os.environ.get("CLAUDECODE") == "1"
+        # CLAUDECODE must have been absent while AgentSession was entered
+        assert env_during_aenter == [None]
+        assert result.exit_code == 0
+
+    def test_claudecode_restored_after_sdk_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CLAUDECODE is restored even when the AgentSession raises."""
+        import os
+
+        project_path = tmp_path / "proj2"
+        project_path.mkdir()
+        claw_forge_dir = project_path / ".claw-forge"
+        claw_forge_dir.mkdir()
+        self._seed_db(claw_forge_dir / "state.db", project_path)
+
+        config_path = tmp_path / "cf2.yaml"
+        config_path.write_text("providers: {}\n")
+
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        class FailingAgentSession:
+            def __init__(self, options: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> FailingAgentSession:
+                raise RuntimeError("claude CLI not logged in")
+
+            async def __aexit__(self, *args: Any) -> None:
+                pass
+
+            async def run(self, prompt: str) -> Any:  # type: ignore[misc]
+                yield  # pragma: no cover
+
+        with (
+            patch("claw_forge.cli._ensure_state_service", return_value=8420),
+            patch("claw_forge.cli.shutil.which", return_value="/usr/bin/claude"),
+            patch("claw_forge.agent.session.AgentSession", FailingAgentSession),
+        ):
+            result = runner.invoke(
+                app,
+                ["run", "--config", str(config_path), "--project", str(project_path)],
+            )
+
+        # CLAUDECODE must be restored even after an exception
+        assert os.environ.get("CLAUDECODE") == "1"
+        # run command itself should exit 0 (task fails, but CLI exits cleanly)
+        assert result.exit_code == 0
