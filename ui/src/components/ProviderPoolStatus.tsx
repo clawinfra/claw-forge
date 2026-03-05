@@ -7,17 +7,13 @@
  * "Save to config" calls POST /pool/providers/{name}/persist to write claw-forge.yaml.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { ProviderStatus } from "../types";
 import { toggleProvider, persistProvider } from "../api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Toast {
-  id: number;
-  message: string;
-  kind: "success" | "error";
-}
+type ToastKind = "success" | "error";
 
 interface ProviderRowProps {
   provider: ProviderStatus;
@@ -26,7 +22,7 @@ interface ProviderRowProps {
   onToggle: (name: string, enabled: boolean) => void;
   onSave: (name: string) => void;
   onSaveSuccess: (name: string) => void;
-  onToast: (msg: string, kind: Toast["kind"]) => void;
+  onToast: (msg: string, kind: ToastKind) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -91,7 +87,7 @@ function ProviderRow({
     try {
       await persistProvider(provider.name, provider.enabled);
       onSave(provider.name);
-      onToast(`Saved to claw-forge.yaml ✅`, "success");
+      onToast(`Saved to claw-forge.yaml`, "success");
     } catch (err) {
       onToast(`Failed to persist ${provider.name}: ${String(err)}`, "error");
     } finally {
@@ -170,31 +166,31 @@ interface ProviderPoolStatusProps {
   providers: ProviderStatus[];
   isLoading?: boolean;
   onProvidersChange?: (providers: ProviderStatus[]) => void;
+  /** Bubble toast events to the parent (global toast system) */
+  onToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
 }
-
-let _toastId = 0;
 
 export function ProviderPoolStatus({
   providers: initialProviders,
   isLoading = false,
   onProvidersChange,
+  onToast,
 }: ProviderPoolStatusProps) {
   const [providers, setProviders] = useState<ProviderStatus[]>(initialProviders);
   const [pendingPersist, setPendingPersist] = useState<Set<string>>(new Set());
   const [toggling, setToggling] = useState<Set<string>>(new Set());
-  const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Keep local state in sync with prop updates (e.g. WebSocket refreshes)
   // Only sync when not mid-toggle to avoid flicker
-  useState(() => {
-    setProviders(initialProviders);
-  });
+  useEffect(() => {
+    if (toggling.size === 0) {
+      setProviders(initialProviders);
+    }
+  }, [initialProviders, toggling]);
 
-  const addToast = useCallback((message: string, kind: Toast["kind"]) => {
-    const id = ++_toastId;
-    setToasts((prev) => [...prev, { id, message, kind }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
-  }, []);
+  const handleToast = useCallback((message: string, kind: ToastKind) => {
+    onToast?.(message, kind === "success" ? "success" : "error");
+  }, [onToast]);
 
   const handleToggle = useCallback((name: string, enabled: boolean) => {
     setToggling((prev) => {
@@ -245,36 +241,19 @@ export function ProviderPoolStatus({
   }
 
   return (
-    <div className="relative">
-      {/* Provider rows */}
-      <div className="flex flex-col gap-1">
-        {providers.map((p) => (
-          <ProviderRow
-            key={p.name}
-            provider={p}
-            pendingPersist={pendingPersist.has(p.name)}
-            toggling={toggling.has(p.name)}
-            onToggle={handleToggle}
-            onSave={handleSaveSuccess}
-            onSaveSuccess={handleSaveSuccess}
-            onToast={addToast}
-          />
-        ))}
-      </div>
-
-      {/* Toast notifications */}
-      <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50 pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`px-4 py-2 rounded-lg shadow-lg text-sm text-white pointer-events-auto
-              transition-all duration-300
-              ${t.kind === "success" ? "bg-emerald-600" : "bg-red-600"}`}
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
+    <div className="flex flex-col gap-1">
+      {providers.map((p) => (
+        <ProviderRow
+          key={p.name}
+          provider={p}
+          pendingPersist={pendingPersist.has(p.name)}
+          toggling={toggling.has(p.name)}
+          onToggle={handleToggle}
+          onSave={handleSaveSuccess}
+          onSaveSuccess={handleSaveSuccess}
+          onToast={handleToast}
+        />
+      ))}
     </div>
   );
 }

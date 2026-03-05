@@ -44,7 +44,11 @@ function eventToMessage(event: WsEvent): string {
   }
 }
 
-export function useWebSocket(sessionId: string) {
+export interface UseWebSocketOptions {
+  onCommandEvent?: (event: Record<string, unknown>) => void;
+}
+
+export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {}) {
   const queryClient = useQueryClient();
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("connecting");
@@ -54,6 +58,8 @@ export function useWebSocket(sessionId: string) {
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const onCommandEventRef = useRef(options.onCommandEvent);
+  onCommandEventRef.current = options.onCommandEvent;
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
@@ -117,9 +123,7 @@ export function useWebSocket(sessionId: string) {
 
       // Handle command execution events (not part of WsEvent union)
       if (raw.type === "command_output" || raw.type === "command_done") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cmdHandler = (window as any).__commandEventHandler;
-        if (cmdHandler) cmdHandler(raw);
+        onCommandEventRef.current?.(raw);
         return;
       }
 

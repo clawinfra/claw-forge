@@ -1,6 +1,6 @@
 /**
  * API client for claw-forge state service.
- * All paths are relative so Vite's proxy (/api → localhost:8888) applies in dev,
+ * All paths are relative so Vite's proxy (/api → localhost:8420) applies in dev,
  * and the same paths work in production when served from the same origin.
  */
 
@@ -99,7 +99,7 @@ export async function persistProvider(name: string, enabled: boolean): Promise<v
 /**
  * Open a WebSocket to the global Kanban endpoint.
  *
- * In development Vite proxies ``/ws`` → ``ws://localhost:8888/ws``.
+ * In development Vite proxies ``/ws`` → ``ws://localhost:8420/ws``.
  * In production the same path works when deployed on the same host.
  */
 export function openKanbanSocket(): WebSocket {

@@ -3,6 +3,7 @@
  * No external libraries — pure SVG + React.
  */
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useDarkMode } from "../hooks/useDarkMode";
 import type { Feature } from "../types";
 
 interface DependencyGraphProps {
@@ -24,13 +25,28 @@ const H_GAP = 60;
 const V_GAP = 24;
 const PADDING = 40;
 
-const STATUS_COLORS: Record<Feature["status"], { fill: string; stroke: string; text: string }> = {
+interface StatusColorSet {
+  fill: string;
+  stroke: string;
+  text: string;
+}
+
+const STATUS_COLORS_LIGHT: Record<Feature["status"], StatusColorSet> = {
   pending: { fill: "#f1f5f9", stroke: "#94a3b8", text: "#475569" },
   queued: { fill: "#e0e7ff", stroke: "#818cf8", text: "#4338ca" },
   running: { fill: "#dbeafe", stroke: "#3b82f6", text: "#1e40af" },
   completed: { fill: "#d1fae5", stroke: "#10b981", text: "#065f46" },
   failed: { fill: "#fce7ef", stroke: "#ef4444", text: "#991b1b" },
   blocked: { fill: "#fef3c7", stroke: "#f59e0b", text: "#92400e" },
+};
+
+const STATUS_COLORS_DARK: Record<Feature["status"], StatusColorSet> = {
+  pending: { fill: "#1e293b", stroke: "#64748b", text: "#cbd5e1" },
+  queued: { fill: "#1e1b4b", stroke: "#818cf8", text: "#c7d2fe" },
+  running: { fill: "#172554", stroke: "#60a5fa", text: "#bfdbfe" },
+  completed: { fill: "#052e16", stroke: "#34d399", text: "#a7f3d0" },
+  failed: { fill: "#450a0a", stroke: "#f87171", text: "#fecaca" },
+  blocked: { fill: "#451a03", stroke: "#fbbf24", text: "#fde68a" },
 };
 
 function computeLayout(features: Feature[]): { nodes: GraphNode[]; width: number; height: number } {
@@ -96,6 +112,14 @@ function computeLayout(features: Feature[]): { nodes: GraphNode[]; width: number
 }
 
 export function DependencyGraph({ features, onSelectFeature }: DependencyGraphProps) {
+  const [isDark] = useDarkMode();
+  const statusColors = isDark ? STATUS_COLORS_DARK : STATUS_COLORS_LIGHT;
+  const edgeColor = isDark ? "#64748b" : "#94a3b8";
+  const legendBg = isDark ? "#1e293b" : "white";
+  const legendBgOpacity = isDark ? 0.9 : 0.8;
+  const legendStroke = isDark ? "#334155" : "#e2e8f0";
+  const legendText = isDark ? "#94a3b8" : "#64748b";
+
   const { nodes } = useMemo(() => computeLayout(features), [features]);
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
@@ -175,13 +199,13 @@ export function DependencyGraph({ features, onSelectFeature }: DependencyGraphPr
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+              <polygon points="0 0, 10 3.5, 0 7" fill={edgeColor} />
             </marker>
           </defs>
 
           <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
             {/* Edges */}
-            {edges.map((edge, i) => {
+            {edges.map((edge) => {
               const x1 = edge.from.x + NODE_WIDTH;
               const y1 = edge.from.y + NODE_HEIGHT / 2;
               const x2 = edge.to.x;
@@ -190,10 +214,10 @@ export function DependencyGraph({ features, onSelectFeature }: DependencyGraphPr
 
               return (
                 <path
-                  key={i}
+                  key={`${edge.from.id}-${edge.to.id}`}
                   d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
                   fill="none"
-                  stroke="#94a3b8"
+                  stroke={edgeColor}
                   strokeWidth={1.5}
                   markerEnd="url(#arrowhead)"
                   className="opacity-50"
@@ -203,7 +227,7 @@ export function DependencyGraph({ features, onSelectFeature }: DependencyGraphPr
 
             {/* Nodes */}
             {nodes.map((node) => {
-              const colors = STATUS_COLORS[node.feature.status];
+              const colors = statusColors[node.feature.status];
               return (
                 <g
                   key={node.id}
@@ -254,11 +278,11 @@ export function DependencyGraph({ features, onSelectFeature }: DependencyGraphPr
               width={130}
               height={20}
               rx={4}
-              fill="white"
-              fillOpacity={0.8}
-              stroke="#e2e8f0"
+              fill={legendBg}
+              fillOpacity={legendBgOpacity}
+              stroke={legendStroke}
             />
-            <text x={8} y={14} fontSize={10} fill="#64748b">
+            <text x={8} y={14} fontSize={10} fill={legendText}>
               Scroll: zoom · Drag: pan
             </text>
           </g>

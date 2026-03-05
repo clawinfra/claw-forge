@@ -12,7 +12,7 @@
  *   - Activity log toggle
  *   - Keyboard shortcuts help
  *
- * Real-time updates via WebSocket (ws://localhost:8888/ws).
+ * Real-time updates via WebSocket (ws://localhost:8420/ws).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -146,6 +146,40 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     staleTime: 60_000,
   });
 
+  // Active executions for the ExecutionDrawer (declared before useWebSocket so callback can reference it)
+  const [activeExecutions, setActiveExecutions] = useState<Execution[]>([]);
+
+  // Command event handler for WebSocket command_output / command_done events
+  const handleCommandEvent = useCallback((event: Record<string, unknown>) => {
+    if (event.type === "command_output") {
+      const exec_id = event.execution_id as string;
+      const line = event.line as string;
+      setActiveExecutions((prev) =>
+        prev.map((ex) =>
+          ex.execution_id === exec_id
+            ? { ...ex, output: [...ex.output, line] }
+            : ex,
+        ),
+      );
+    } else if (event.type === "command_done") {
+      const exec_id = event.execution_id as string;
+      const exit_code = event.exit_code as number;
+      const duration_ms = event.duration_ms as number;
+      setActiveExecutions((prev) =>
+        prev.map((ex) =>
+          ex.execution_id === exec_id
+            ? {
+                ...ex,
+                status: exit_code === 0 ? "done" : "failed",
+                exit_code,
+                duration_ms,
+              }
+            : ex,
+        ),
+      );
+    }
+  }, []);
+
   // Shared WebSocket
   const {
     connectionStatus,
@@ -154,8 +188,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     toasts,
     reconnectCountdown,
     forceReconnect,
+    addToast,
     removeToast,
-  } = useWebSocket(sessionId);
+  } = useWebSocket(sessionId, { onCommandEvent: handleCommandEvent });
 
   // Dark mode
   const [isDark, toggleDark] = useDarkMode();
@@ -199,9 +234,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
   // Commands panel (sidebar tab)
   const [commandsPanelOpen, setCommandsPanelOpen] = useState(false);
-
-  // Active executions for the ExecutionDrawer
-  const [activeExecutions, setActiveExecutions] = useState<Execution[]>([]);
 
   // Fetch command registry
   const { data: commands = [] } = useQuery<Command[]>({
@@ -264,48 +296,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     return map;
   }, [filteredFeatures]);
 
-  // Handle command WebSocket events (command_output / command_done)
-  useEffect(() => {
-    // We listen via a custom event dispatched from useWebSocket
-    // Instead, poll activityLog for command events — handled below in useWebSocket extension
-    // For now we attach a direct handler by monkey-patching via a ref approach.
-    // The cleanest approach: intercept in useWebSocket hook — but to avoid changing hook,
-    // we expose a global handler here that the ExecutionDrawer can reference.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__commandEventHandler = (event: Record<string, unknown>) => {
-      if (event.type === "command_output") {
-        const exec_id = event.execution_id as string;
-        const line = event.line as string;
-        setActiveExecutions((prev) =>
-          prev.map((ex) =>
-            ex.execution_id === exec_id
-              ? { ...ex, output: [...ex.output, line] }
-              : ex,
-          ),
-        );
-      } else if (event.type === "command_done") {
-        const exec_id = event.execution_id as string;
-        const exit_code = event.exit_code as number;
-        const duration_ms = event.duration_ms as number;
-        setActiveExecutions((prev) =>
-          prev.map((ex) =>
-            ex.execution_id === exec_id
-              ? {
-                  ...ex,
-                  status: exit_code === 0 ? "done" : "failed",
-                  exit_code,
-                  duration_ms,
-                }
-              : ex,
-          ),
-        );
-      }
-    };
-    return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any).__commandEventHandler;
-    };
-  }, []);
 
   // Execute a command
   const handleExecuteCommand = useCallback(
@@ -486,7 +476,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
             <span className="text-xs text-slate-400 dark:text-slate-500 font-medium shrink-0">
               Providers:
             </span>
-            <ProviderPoolStatus providers={providers} isLoading={poolLoading} />
+            <ProviderPoolStatus providers={providers} isLoading={poolLoading} onToast={addToast} />
           </div>
         </div>
       </header>
