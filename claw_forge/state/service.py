@@ -130,6 +130,8 @@ class ConnectionManager:
         task_name: str,
         role: str,
         content: str,
+        level: str = "info",
+        model: str | None = None,
     ) -> None:
         """Broadcast an agent streaming log entry to all connected Kanban UIs."""
         await self.broadcast(
@@ -139,6 +141,8 @@ class ConnectionManager:
                 "task_name": task_name,
                 "role": role,
                 "content": content,
+                "level": level,
+                "model": model,
             }
         )
 
@@ -198,6 +202,8 @@ class AgentLogRequest(BaseModel):
     role: str  # "assistant" | "tool_use" | "tool_result" | "result" | "error"
     content: str
     task_name: str | None = None
+    level: str = "info"  # "info" | "warning" | "error"
+    model: str | None = None  # LLM model identifier used for this task
 
 
 class ToggleProviderRequest(BaseModel):
@@ -306,7 +312,12 @@ class AgentStateService:
         @app.get("/info")
         async def service_info() -> dict[str, str]:
             """Return which project this state service instance is serving."""
-            return {"project_path": _svc_project, "database_url": _db_url_str}
+            from claw_forge import __version__ as _ver
+            return {
+                "project_path": _svc_project,
+                "database_url": _db_url_str,
+                "claw_forge_version": _ver,
+            }
 
         @app.post("/shutdown", status_code=200)
         async def shutdown() -> dict[str, str]:
@@ -432,6 +443,8 @@ class AgentStateService:
                 task_name=task_name,
                 role=req.role,
                 content=req.content,
+                level=req.level,
+                model=req.model,
             )
             return {"status": "ok"}
 

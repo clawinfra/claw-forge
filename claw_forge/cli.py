@@ -524,13 +524,13 @@ def run(
             configs = load_configs_from_yaml(cfg)
             pool = ProviderPoolManager(configs) if configs else None
 
-            # Semaphore to serialise claude CLI subprocess spawning.
-            # Python's asyncio SIGCHLD handler races when multiple subprocesses
-            # exit concurrently — one process reaps another's PID, causing
-            # "Unknown child process pid N, will report returncode 255".
-            # Limiting to 1 concurrent CLI invocation eliminates the race.
-            # API-only mode (pool) is unaffected and runs fully concurrently.
-            _cli_semaphore = asyncio.Semaphore(1)
+            # Lock to serialise env-sensitive options construction.
+            # Matches the _env_client_lock pattern from autonomous-coding:
+            # env reads + ClaudeAgentOptions creation happen under lock;
+            # AgentSession connect + agent execution run fully in parallel.
+            # The dispatcher's Semaphore(max_concurrency) gates overall
+            # concurrency; this lock only prevents env-read races.
+            _env_lock = asyncio.Lock()
 
             # Build task handler — communicates with the state service via HTTP
             # so that WebSocket events are broadcast to the Kanban UI.
@@ -590,21 +590,36 @@ def run(
                         return val
                 return str(raw)[:80]
 
+            # Dedup: track all logged (role, content) per task to avoid
+            # duplicates from SDK yielding streaming + complete messages.
+            _seen_logs: dict[str, set[tuple[str, str]]] = {}
+
             async def _log_agent(
                 client: httpx.AsyncClient,
                 task_id: str,
                 task_name: str,
                 role: str,
                 content: str,
+                level: str = "info",
+                model: str = "",
             ) -> None:
                 """POST agent log entry via HTTP (triggers WS broadcast)."""
+                short = _first_line(content)
+                # Skip any duplicate (same role + content already seen for this task)
+                key = (role, short)
+                seen = _seen_logs.setdefault(task_id, set())
+                if key in seen:
+                    return
+                seen.add(key)
                 with suppress(httpx.HTTPError):
                     await client.post(
                         f"{_state_base}/tasks/{task_id}/agent-log",
                         json={
                             "role": role,
-                            "content": _first_line(content),
+                            "content": short,
                             "task_name": _short_name(task_name),
+                            "level": level,
+                            "model": model or None,
                         },
                         timeout=5,
                     )
@@ -640,103 +655,88 @@ def run(
                             from claude_agent_sdk import ClaudeAgentOptions
 
                             from claw_forge.agent.session import AgentSession
-                            # Resolve auth: ANTHROPIC_API_KEY env → pool provider key.
-                            # Pass as env so the claude CLI subprocess uses our key.
-                            sdk_env: dict[str, str] = {}
-                            _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-                            if not _api_key and pool is not None:
-                                # Extract key from first healthy provider
-                                _provs = pool.providers
-                                if _provs and hasattr(_provs[0], "config"):
-                                    _api_key = _provs[0].config.api_key or ""
-                            if _api_key:
-                                sdk_env["ANTHROPIC_API_KEY"] = _api_key
-                            # If no API key, check for OAuth token — claude CLI can
-                            # authenticate via ~/.claude/.credentials.json without
-                            # ANTHROPIC_API_KEY when the user has run `claude login`.
-                            elif not _api_key:
-                                _oauth_tok = os.environ.get("ANTHROPIC_SETUP_TOKEN", "")
-                                if not _oauth_tok and pool is not None:
+
+                            # UNDER LOCK: env reads + options construction
+                            # (matches autonomous-coding _env_client_lock pattern)
+                            async with _env_lock:
+                                sdk_env: dict[str, str] = {}
+                                _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                                if not _api_key and pool is not None:
                                     _provs = pool.providers
                                     if _provs and hasattr(_provs[0], "config"):
-                                        _cfg = _provs[0].config
-                                        _oauth_tok = getattr(_cfg, "oauth_token", "") or ""
-                                if _oauth_tok:
-                                    sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
-                                # else: let claude CLI use its own stored credentials
+                                        _api_key = _provs[0].config.api_key or ""
+                                if _api_key:
+                                    sdk_env["ANTHROPIC_API_KEY"] = _api_key
+                                elif not _api_key:
+                                    _oauth_tok = os.environ.get("ANTHROPIC_SETUP_TOKEN", "")
+                                    if not _oauth_tok and pool is not None:
+                                        _provs = pool.providers
+                                        if _provs and hasattr(_provs[0], "config"):
+                                            _cfg = _provs[0].config
+                                            _oauth_tok = getattr(_cfg, "oauth_token", "") or ""
+                                    if _oauth_tok:
+                                        sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
 
-                            options = ClaudeAgentOptions(
-                                model=model,
-                                cwd=str(project_path),
-                                env=sdk_env,
-                                permission_mode="bypassPermissions",
-                            )
+                                options = ClaudeAgentOptions(
+                                    model=model,
+                                    cwd=str(project_path),
+                                    env=sdk_env,
+                                    permission_mode="bypassPermissions",
+                                )
+
+                            # OUTSIDE LOCK: connect + run (parallel with other agents)
                             full_output: list[str] = []
-                            # Serialise entire claude CLI subprocess lifecycle to
-                            # prevent asyncio SIGCHLD PID-reaping race. When
-                            # multiple `claude` processes exit near-simultaneously,
-                            # asyncio's waitpid() handler reaps the wrong PID and
-                            # reports returncode 255. Running one CLI session at a
-                            # time eliminates this race entirely. API-only mode
-                            # (pool path below) is unaffected and runs concurrently.
                             try:
-                                # The claude CLI refuses to start when CLAUDECODE is set
-                                # (it thinks it's nested inside another Claude Code
-                                # session). Temporarily remove it from os.environ for
-                                # the duration of the subprocess spawn. This is safe
-                                # because _cli_semaphore(1) ensures only one agent
-                                # subprocess is running at a time.
-                                _saved_claudecode = os.environ.pop("CLAUDECODE", None)
-                                try:
-                                    async with (
-                                        _cli_semaphore,
-                                        AgentSession(options) as agent_session,
-                                    ):
-                                        async for msg in agent_session.run(prompt):  # noqa: E501
-                                            # AssistantMessage: content blocks
-                                            content = getattr(msg, "content", None)
-                                            if isinstance(content, list):
-                                                for block in content:
-                                                    if hasattr(block, "text"):
-                                                        full_output.append(block.text)
-                                                        await _log_agent(
-                                                            http, task_node.id, task_name,
-                                                            "assistant", block.text[:500],
-                                                        )
-                                                    elif hasattr(block, "tool_name"):
-                                                        _tn = getattr(block, "tool_name", "?")
-                                                        _raw = getattr(block, "input", {})
-                                                        _ti = _fmt_tool(_tn, _raw)
-                                                        await _log_agent(
-                                                            http, task_node.id, task_name,
-                                                            "tool_use", f"{_tn} → {_ti}",
-                                                        )
-                                            # ToolResultMessage
-                                            elif hasattr(msg, "tool_results"):
-                                                for tr in getattr(msg, "tool_results", []):
-                                                    _tc = str(getattr(tr, "content", ""))[:300]
-                                                    await _log_agent(
-                                                        http, task_node.id, task_name,
-                                                        "tool_result", _tc,
-                                                    )
-                                            # ResultMessage: final result
-                                            elif hasattr(msg, "result") and msg.result:
+                                async with AgentSession(options) as agent_session:
+                                    async for msg in agent_session.run(prompt):  # noqa: E501
+                                        _cls = type(msg).__name__
+                                        if _cls == "ResultMessage":
+                                            if getattr(msg, "result", None):
                                                 full_output.append(msg.result)
                                                 await _log_agent(
                                                     http, task_node.id, task_name,
                                                     "result", msg.result[:500],
+                                                    model=model,
                                                 )
-                                            # Auth/billing errors reported on AssistantMessage
-                                            if getattr(msg, "error", None):
-                                                raise RuntimeError(
-                                                    f"Agent error: {msg.error} — "
-                                                    "check `claude login` or verify API key in .env"
+                                            continue
+                                        if _cls != "AssistantMessage":
+                                            continue
+                                        content = getattr(msg, "content", None)
+                                        if not isinstance(content, list):
+                                            continue
+                                        for block in content:
+                                            _bcls = type(block).__name__
+                                            if _bcls == "TextBlock":
+                                                full_output.append(block.text)
+                                                await _log_agent(
+                                                    http, task_node.id, task_name,
+                                                    "assistant", block.text[:500],
+                                                    model=model,
                                                 )
-                                finally:
-                                    if _saved_claudecode is not None:
-                                        os.environ["CLAUDECODE"] = _saved_claudecode
+                                            elif _bcls == "ToolUseBlock":
+                                                _tn = getattr(block, "name", "?")
+                                                _raw = getattr(block, "input", {})
+                                                _ti = _fmt_tool(_tn, _raw)
+                                                await _log_agent(
+                                                    http, task_node.id, task_name,
+                                                    "tool_use", f"{_tn} → {_ti}",
+                                                    model=model,
+                                                )
+                                            elif _bcls == "ToolResultBlock":
+                                                _is_err = getattr(block, "is_error", False)
+                                                _tc = str(getattr(block, "content", ""))[:300]
+                                                await _log_agent(
+                                                    http, task_node.id, task_name,
+                                                    "tool_result", _tc,
+                                                    level="error" if _is_err else "info",
+                                                    model=model,
+                                                )
+                                        if getattr(msg, "error", None):
+                                            raise RuntimeError(
+                                                f"Agent error: {msg.error} — "
+                                                "check `claude login` or verify API key in .env"
+                                            )
                                 output = "\n".join(full_output)
-                                # Verify agent produced meaningful output
                                 if not output.strip():
                                     raise RuntimeError(
                                         "Agent produced no output — "
@@ -746,6 +746,12 @@ def run(
                             except Exception as sdk_exc:
                                 output = str(sdk_exc)
                                 success = False
+                                await _log_agent(
+                                    http, task_node.id, task_name,
+                                    "error", str(sdk_exc)[:500],
+                                    level="error",
+                                    model=model,
+                                )
 
                         # ── Option 2: direct API call via provider pool ───────────────
                         # Used when claude CLI is not installed (API-only mode).
@@ -763,6 +769,7 @@ def run(
                             await _log_agent(
                                 http, task_node.id, task_name,
                                 "assistant", "Sending request to provider pool…",
+                                model=model,
                             )
                             response = await pool.execute(
                                 model=model,
@@ -774,6 +781,7 @@ def run(
                             await _log_agent(
                                 http, task_node.id, task_name,
                                 "result", output[:500],
+                                model=model,
                             )
 
                             # Write any code blocks to disk (BUG-11)
@@ -862,18 +870,26 @@ def run(
             else:
                 console.print("  🎉 All tasks succeeded!")
 
+    # Pop CLAUDECODE once for the entire run — prevents the claude CLI
+    # from refusing to start (it detects nesting via this env var).
+    # Restored in finally so the parent session is unaffected.
+    _saved_claudecode = os.environ.pop("CLAUDECODE", None)
     try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        running_loop = None
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
 
-    if running_loop is not None:
-        import concurrent.futures
+        if running_loop is not None:
+            import concurrent.futures
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            pool.submit(asyncio.run, main()).result()
-    else:
-        asyncio.run(main())
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(asyncio.run, main()).result()
+        else:
+            asyncio.run(main())
+    finally:
+        if _saved_claudecode is not None:
+            os.environ["CLAUDECODE"] = _saved_claudecode
 
 
 @app.command()
@@ -1551,13 +1567,21 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
         info = _get_info(port)
         if info is not None:
             svc_project_raw = info.get("project_path", "")
+            svc_version = info.get("claw_forge_version", "")
             if svc_project_raw:
                 svc_project = str(Path(str(svc_project_raw)).resolve())
                 if svc_project == want_project:
-                    console.print(f"[dim]State service already running on port {port}[/dim]")
-                    return port  # already running for this project — nothing to do
-                # Claw-forge running but wrong project → shut down and restart
-                console.print(f"[dim]State service switching project → {want_project}[/dim]")
+                    if svc_version == __version__:
+                        console.print(f"[dim]State service already running on port {port}[/dim]")
+                        return port  # same project, same version — nothing to do
+                    # Same project but stale version → restart to pick up code changes
+                    console.print(
+                        f"[dim]State service outdated "
+                        f"({svc_version} → {__version__}), restarting…[/dim]"
+                    )
+                else:
+                    # Claw-forge running but wrong project → shut down and restart
+                    console.print(f"[dim]State service switching project → {want_project}[/dim]")
                 try:
                     with _req.urlopen(  # noqa: S310
                         _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),

@@ -63,6 +63,13 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
   const [regressionRunNumber, setRegressionRunNumber] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
+  // task_id (string) → assigned slot number (1-based)
+  const agentSlotMapRef = useRef<Map<string, number>>(new Map());
+  // freed slot numbers available for reuse, kept sorted ascending
+  const freeSlotsRef = useRef<number[]>([]);
+  // next slot to assign when no free slots remain
+  const nextSlotRef = useRef(1);
+  const seenAgentLogsRef = useRef<Set<string>>(new Set());
   const onCommandEventRef = useRef(options.onCommandEvent);
   onCommandEventRef.current = options.onCommandEvent;
   const onRegressionResultRef = useRef(options.onRegressionResult);
@@ -89,6 +96,28 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
   }, []);
 
   const addLogEntry = useCallback((event: WsEvent) => {
+    let agentIndex: number | undefined;
+    if (event.type === "agent_log") {
+      // Dedup: skip agent_log events we've already rendered
+      const fp = `${event.task_id}:${event.role}:${event.content}`;
+      const seen = seenAgentLogsRef.current;
+      if (seen.has(fp)) return;
+      seen.add(fp);
+      // Cap set size to prevent memory leak
+      if (seen.size > 1000) seen.clear();
+
+      const slotMap = agentSlotMapRef.current;
+      const taskId = event.task_id;
+      if (!slotMap.has(taskId)) {
+        // Reuse lowest freed slot, or allocate next
+        const slot = freeSlotsRef.current.length > 0
+          ? freeSlotsRef.current.shift()!
+          : nextSlotRef.current++;
+        slotMap.set(taskId, slot);
+      }
+      agentIndex = slotMap.get(taskId);
+    }
+
     const entry: ActivityLogEntry = {
       id: ++logIdCounter,
       timestamp: new Date(),
@@ -97,6 +126,10 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
       ...(event.type === "agent_log" && {
         taskName: event.task_name,
         role: event.role,
+        level: event.level,
+        agentIndex,
+        // event.model may be null (JSON null from Python None) — coerce to undefined
+        model: event.model ?? undefined,
       }),
     };
     setActivityLog((prev) => {
@@ -108,9 +141,20 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
   const connect = useCallback(() => {
     if (!activeRef.current) return;
 
+    // Close any existing socket to prevent orphaned connections
+    if (socketRef.current) {
+      socketRef.current.onclose = null; // prevent reconnect from old socket
+      socketRef.current.close();
+      socketRef.current = null;
+    }
+
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
+    }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
     setReconnectCountdown(0);
     setConnectionStatus("connecting");
@@ -119,11 +163,12 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
     socketRef.current = ws;
 
     ws.onopen = () => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || socketRef.current !== ws) return;
       setConnectionStatus("connected");
     };
 
     ws.onmessage = (evt: MessageEvent<string>) => {
+      if (socketRef.current !== ws) return; // ignore stale sockets
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let raw: Record<string, any>;
       try {
@@ -167,6 +212,16 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
         if (event.feature.status === "failed") {
           addToast(`❌ Feature failed: ${event.feature.name}`, "error");
         }
+        // Free the agent slot when a task finishes so the number can be reused
+        if (event.feature.status === "completed" || event.feature.status === "failed") {
+          const taskId = String((event.feature as any).id);
+          const slot = agentSlotMapRef.current.get(taskId);
+          if (slot !== undefined) {
+            agentSlotMapRef.current.delete(taskId);
+            freeSlotsRef.current.push(slot);
+            freeSlotsRef.current.sort((a, b) => a - b);
+          }
+        }
       } else if (event.type === "agent_completed") {
         void queryClient.invalidateQueries({
           queryKey: ["features", sessionId],
@@ -206,7 +261,7 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
     };
 
     ws.onclose = () => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || socketRef.current !== ws) return;
       setConnectionStatus("disconnected");
       const delay = 5;
       setReconnectCountdown(delay);

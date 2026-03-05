@@ -130,52 +130,76 @@ class TestConfigPathResolution:
         assert "Config not found" in (result.output or "") or result.exception is not None
 
 
-# ── Bug 4: claude CLI subprocess concurrency (SIGCHLD race) ──────────────────
+# ── Parallel CLI agent execution (env lock pattern) ──────────────────────────
 
-class TestCliSubprocessConcurrency:
-    """Ensure the _cli_semaphore serialises AgentSession invocations."""
+class TestCliParallelExecution:
+    """Verify the _env_lock allows parallel agent sessions."""
 
     @pytest.mark.asyncio
-    async def test_semaphore_serialises_sessions(self) -> None:
-        """Only one AgentSession runs at a time when claude CLI is available."""
-        semaphore = asyncio.Semaphore(1)
-        order: list[str] = []
+    async def test_env_lock_allows_parallel_sessions(self) -> None:
+        """Multiple AgentSessions run concurrently after options are built."""
+        env_lock = asyncio.Lock()
+        timeline: list[tuple[str, float]] = []
 
         async def fake_session(name: str) -> None:
-            async with semaphore:
-                order.append(f"start:{name}")
-                await asyncio.sleep(0.01)
-                order.append(f"end:{name}")
+            async with env_lock:
+                # Options construction (brief, serialized)
+                pass
+            # Agent execution (parallel)
+            timeline.append((f"start:{name}", asyncio.get_event_loop().time()))
+            await asyncio.sleep(0.05)
+            timeline.append((f"end:{name}", asyncio.get_event_loop().time()))
 
         await asyncio.gather(
             fake_session("A"),
             fake_session("B"),
             fake_session("C"),
         )
-        # Each session must fully complete before the next starts
-        for i in range(0, len(order), 2):
-            assert order[i].startswith("start:"), order
-            assert order[i + 1].startswith("end:"), order
-            assert order[i].split(":")[1] == order[i + 1].split(":")[1], order
+        # All three should START before any END (parallel execution)
+        starts = [t for tag, t in timeline if tag.startswith("start:")]
+        ends = [t for tag, t in timeline if tag.startswith("end:")]
+        # The last start should happen before the first end
+        assert max(starts) < min(ends), (
+            f"Sessions did not run in parallel: {timeline}"
+        )
 
     @pytest.mark.asyncio
-    async def test_semaphore_on_exception_releases(self) -> None:
-        """Semaphore is released even when AgentSession raises."""
-        semaphore = asyncio.Semaphore(1)
-        released = False
+    async def test_env_lock_serialises_options_construction(self) -> None:
+        """The env lock prevents concurrent env reads."""
+        env_lock = asyncio.Lock()
+        in_critical: list[bool] = []
+        overlap_detected = False
 
-        async def failing_session() -> None:
-            nonlocal released
-            async with semaphore:
-                raise RuntimeError("claude crashed")
+        async def fake_session(name: str) -> None:
+            nonlocal overlap_detected
+            async with env_lock:
+                if any(in_critical):
+                    overlap_detected = True
+                in_critical.append(True)
+                await asyncio.sleep(0.01)  # simulate options construction
+                in_critical.pop()
+
+        await asyncio.gather(
+            fake_session("A"),
+            fake_session("B"),
+            fake_session("C"),
+        )
+        assert not overlap_detected, "Lock failed to prevent concurrent access"
+
+    @pytest.mark.asyncio
+    async def test_env_lock_on_exception_releases(self) -> None:
+        """Lock is released even when options construction raises."""
+        env_lock = asyncio.Lock()
+
+        async def failing_setup() -> None:
+            async with env_lock:
+                raise RuntimeError("bad env")
 
         with pytest.raises(RuntimeError):
-            await failing_session()
+            await failing_setup()
 
-        # Semaphore must be acquirable again
-        assert semaphore._value == 1  # noqa: SLF001
-        released = True
-        assert released
+        # Lock must be acquirable again
+        assert not env_lock.locked()
 
 
 # ── WebSocket proxy: double-close guard ──────────────────────────────────────

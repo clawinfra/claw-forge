@@ -5,18 +5,18 @@ import react from "@vitejs/plugin-react";
 // VITE_API_PORT is injected by `claw-forge ui --dev` (defaults to 8420).
 const statePort = process.env.VITE_API_PORT ?? "8420";
 
-// Custom logger that silences the WS proxy disconnect noise that occurs when
-// the state service restarts (uvicorn --reload on file save).  The frontend
-// useWebSocket hook already handles reconnection automatically; these messages
-// are harmless but fill the terminal on every hot-reload.
+// Custom logger that silences WS proxy disconnect noise when the state service
+// restarts (uvicorn --reload on file save).  Checked via opts.error so ANSI
+// codes in the formatted message string never interfere with the match.
+// useWebSocket.ts handles reconnection automatically — these are harmless.
 const logger = createLogger();
 const _origError = logger.error.bind(logger);
 logger.error = (msg, opts) => {
+  const err = opts?.error as (NodeJS.ErrnoException & { code?: string }) | undefined;
   if (
-    msg.includes("[vite] ws proxy error") &&
-    (msg.includes("ended by the other party") ||
-      msg.includes("ECONNRESET") ||
-      msg.includes("ECONNREFUSED"))
+    err?.message?.includes("ended by the other party") ||
+    err?.code === "ECONNRESET" ||
+    err?.code === "ECONNREFUSED"
   ) {
     return; // suppress routine state-service disconnect noise
   }

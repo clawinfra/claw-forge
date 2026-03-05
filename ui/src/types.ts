@@ -132,6 +132,8 @@ export interface AgentLogEvent {
   task_name: string;
   role: "assistant" | "tool_use" | "tool_result" | "result" | "error";
   content: string;
+  level: "info" | "warning" | "error";
+  model?: string;
 }
 
 export type WsEvent =
@@ -221,6 +223,12 @@ export interface ActivityLogEntry {
   taskName?: string;
   /** Agent role: assistant, tool_use, tool_result, result, error */
   role?: string;
+  /** Log level: info, warning, error */
+  level?: "info" | "warning" | "error";
+  /** Sequential index of the agent (1-based, slot-reusing) */
+  agentIndex?: number;
+  /** LLM model identifier used by this agent */
+  model?: string;
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────

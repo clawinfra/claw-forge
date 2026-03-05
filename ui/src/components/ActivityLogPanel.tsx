@@ -3,6 +3,7 @@
  *
  * Agent log entries are rendered with role-specific badges (LLM, TOOL, OK, DONE)
  * and a dimmed task-name tag for quick visual scanning.
+ * The panel height is resizable by dragging the top edge; size persists in localStorage.
  */
 import { useEffect, useRef, useState } from "react";
 import { Copy, ChevronDown, ChevronUp } from "lucide-react";
@@ -47,6 +48,30 @@ const ROLE_TEXT: Record<string, string> = {
   error:        "text-red-400",
 };
 
+/* ── Per-agent label colors (cycles when > 8 agents) ─────────────────────── */
+
+const AGENT_COLORS = [
+  "text-violet-400",
+  "text-sky-400",
+  "text-rose-400",
+  "text-lime-400",
+  "text-orange-400",
+  "text-pink-400",
+  "text-cyan-400",
+  "text-yellow-400",
+];
+
+/* ── Log level styling ────────────────────────────────────────────────────── */
+
+const LEVEL_STYLE: Record<string, { color: string; icon: string }> = {
+  info:    { color: "text-slate-500", icon: "·" },
+  warning: { color: "text-yellow-400", icon: "▲" },
+  error:   { color: "text-red-400", icon: "✖" },
+};
+
+const MIN_HEIGHT = 80;
+const DEFAULT_HEIGHT = 160;
+
 function formatTimestamp(d: Date): string {
   return d.toLocaleTimeString("en-US", {
     hour12: false,
@@ -63,12 +88,50 @@ export function ActivityLogPanel({
 }: ActivityLogPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [panelHeight, setPanelHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("activityLogHeight");
+    return saved ? parseInt(saved, 10) : DEFAULT_HEIGHT;
+  });
+  const dragState = useRef<{ startY: number; startHeight: number } | null>(null);
 
   useEffect(() => {
     if (!isPaused && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [entries, isPaused]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragState.current) return;
+      const maxHeight = window.innerHeight * 0.8;
+      const delta = dragState.current.startY - e.clientY;
+      const newHeight = Math.min(maxHeight, Math.max(MIN_HEIGHT, dragState.current.startHeight + delta));
+      setPanelHeight(newHeight);
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (!dragState.current) return;
+      const maxHeight = window.innerHeight * 0.8;
+      const delta = dragState.current.startY - e.clientY;
+      const finalHeight = Math.min(maxHeight, Math.max(MIN_HEIGHT, dragState.current.startHeight + delta));
+      localStorage.setItem("activityLogHeight", String(finalHeight));
+      dragState.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const onDragHandleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragState.current = { startY: e.clientY, startHeight: panelHeight };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ns-resize";
+  };
 
   const copyAll = () => {
     const text = entries
@@ -82,9 +145,16 @@ export function ActivityLogPanel({
 
   return (
     <div
-      className={`border-t border-slate-200 dark:border-slate-700 bg-slate-900 dark:bg-slate-950
-        transition-all duration-300 ${isOpen ? "h-52" : "h-0"} overflow-hidden`}
+      className="border-t border-slate-200 dark:border-slate-700 bg-slate-900 dark:bg-slate-950 overflow-hidden transition-[height] duration-300"
+      style={{ height: isOpen ? panelHeight : 0 }}
     >
+      {/* Drag handle */}
+      <div
+        className="h-1 cursor-ns-resize bg-slate-700 hover:bg-slate-500 active:bg-blue-500 transition-colors shrink-0"
+        onMouseDown={onDragHandleMouseDown}
+        title="Drag to resize"
+      />
+
       {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-slate-800 dark:bg-slate-900 border-b border-slate-700">
         <button
@@ -115,7 +185,7 @@ export function ActivityLogPanel({
       {/* Log entries */}
       <div
         ref={scrollRef}
-        className="h-[calc(100%-32px)] overflow-y-auto px-4 py-1 font-mono text-xs"
+        className="h-[calc(100%-36px)] overflow-y-auto px-4 py-1 font-mono text-xs"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
@@ -136,11 +206,20 @@ export function ActivityLogPanel({
                 ? ROLE_TEXT[entry.role] ?? "text-slate-300"
                 : "text-slate-300";
 
+            const lvl = entry.level ?? "info";
+            const levelStyle = LEVEL_STYLE[lvl] ?? LEVEL_STYLE.info;
+            const rowBg = lvl === "error" ? "bg-red-950/30" : lvl === "warning" ? "bg-yellow-950/20" : "";
+
             return (
               <div
                 key={entry.id}
-                className="flex items-start gap-2 py-0.5 leading-relaxed"
+                className={`flex items-start gap-2 py-0.5 leading-relaxed ${rowBg}`}
               >
+                {/* Level indicator */}
+                <span className={`${levelStyle.color} shrink-0 w-3 text-center`} title={lvl}>
+                  {levelStyle.icon}
+                </span>
+
                 {/* Timestamp */}
                 <span className="text-slate-500 shrink-0">
                   {formatTimestamp(entry.timestamp)}
@@ -153,10 +232,18 @@ export function ActivityLogPanel({
                   {badge.label}
                 </span>
 
-                {/* Task name tag (agent_log only) */}
-                {entry.taskName && (
-                  <span className="text-slate-500 shrink-0 max-w-[160px] truncate" title={entry.taskName}>
-                    {entry.taskName}
+                {/* Agent label + model + task name (agent_log only) */}
+                {entry.agentIndex !== undefined && (
+                  <span
+                    className={`shrink-0 font-semibold text-[10px] ${AGENT_COLORS[(entry.agentIndex - 1) % AGENT_COLORS.length]}`}
+                  >
+                    agent #{entry.agentIndex}
+                    {entry.model && (
+                      <span className="text-slate-500 font-normal ml-1 italic">{entry.model}</span>
+                    )}
+                    {entry.taskName && (
+                      <span className="text-slate-400 font-normal ml-1">{entry.taskName}</span>
+                    )}
                   </span>
                 )}
 
