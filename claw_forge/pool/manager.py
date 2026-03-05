@@ -68,6 +68,11 @@ class ProviderPoolManager:
         self._backoff_base = backoff_base
         self._backoff_max = backoff_max
         self._lock = asyncio.Lock()
+        # Per-provider active tier list (ordered model_map alias names, cheapest → smartest).
+        # Empty list = use caller-supplied model (no tier routing).
+        self._active_tiers: dict[str, list[str]] = {
+            p.name: list(p.config.active_tiers) for p in self._providers
+        }
 
     @property
     def providers(self) -> list[BaseProvider]:
@@ -83,6 +88,7 @@ class ProviderPoolManager:
         messages: list[dict[str, Any]],
         *,
         provider_hint: str | None = None,
+        complexity: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         system: str | None = None,
@@ -99,6 +105,10 @@ class ProviderPoolManager:
         Without ``provider_hint``, tries providers in order determined by the
         routing strategy.  On failure, records the error, trips circuit breaker
         if needed, and falls through to the next provider.
+
+        ``complexity`` is an optional hint ("low", "medium", "high") that
+        selects a model tier from the provider's active_tiers list.  When None,
+        the caller-supplied ``model`` is used directly.
         """
         # ── Pinned-provider fast path ─────────────────────────────────────
         if provider_hint is not None:
@@ -117,10 +127,11 @@ class ProviderPoolManager:
                 )
             if cb.state == CircuitState.HALF_OPEN:
                 cb.record_half_open_attempt()
+            effective_model = self.get_model_for_complexity(provider_hint, complexity) or model
             pinned_resp: ProviderResponse = cast(
                 ProviderResponse,
                 await pinned.execute(  # type: ignore[attr-defined]
-                    model=model,
+                    model=effective_model,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -158,10 +169,13 @@ class ProviderPoolManager:
                     cb.record_half_open_attempt()
 
                 try:
+                    effective_model = (
+                        self.get_model_for_complexity(provider.name, complexity) or model
+                    )
                     response: ProviderResponse = cast(
                         ProviderResponse,
                         await provider.execute(  # type: ignore[attr-defined]  # subclasses implement execute
-                            model=model,
+                            model=effective_model,
                             messages=messages,
                             max_tokens=max_tokens,
                             temperature=temperature,
@@ -267,6 +281,8 @@ class ProviderPoolManager:
                 "total_cost_usd": round(float(p_usage.get("total_cost_usd", 0) or 0), 6),
                 "avg_latency_ms": round(float(p_usage.get("avg_latency_ms", 0) or 0), 1),
                 "model": p.config.model or "",
+                "model_map": dict(p.config.model_map),
+                "active_tiers": list(self._active_tiers.get(p.name, [])),
             })
         result: dict[str, Any] = {
             "providers": providers,
@@ -316,3 +332,48 @@ class ProviderPoolManager:
             if p.name == name:
                 return p.config.enabled
         return None
+
+    def get_model_for_complexity(self, provider_name: str, complexity: str | None) -> str | None:
+        """Return the appropriate model ID for this provider based on task complexity.
+
+        ``active_tiers`` is an ordered list of model_map alias names where the
+        first entry is the cheapest/least-capable tier and the last is the
+        most capable.  The complexity hint maps to a position in that list:
+
+        - "low"    → first tier (cheapest)
+        - "medium" → middle tier
+        - "high"   → last tier (most capable)
+        - None     → no tier routing; caller-supplied model is used
+
+        Returns None when complexity is None, the provider has no active tiers,
+        or the selected alias is not in model_map.
+        """
+        if complexity is None:
+            return None
+        tiers = self._active_tiers.get(provider_name)
+        if not tiers:
+            return None
+        provider = next((p for p in self._providers if p.name == provider_name), None)
+        if provider is None:
+            return None
+        if complexity == "low":
+            alias = tiers[0]
+        elif complexity == "high":
+            alias = tiers[-1]
+        else:  # "medium" or unrecognised
+            alias = tiers[len(tiers) // 2]
+        return provider.config.model_map.get(alias)
+
+    def set_provider_tiers(self, name: str, active_tiers: list[str]) -> bool:
+        """Update the active tier list for a provider at runtime.
+
+        ``active_tiers`` is an ordered list of model_map alias names
+        (cheapest first, most capable last).  Returns True if the provider
+        was found.
+        """
+        for p in self._providers:
+            if p.name == name:
+                self._active_tiers[name] = list(active_tiers)
+                p.config.active_tiers = list(active_tiers)
+                return True
+        return False

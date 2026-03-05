@@ -117,6 +117,14 @@ export async function persistProvider(name: string, enabled: boolean): Promise<v
   });
 }
 
+/** Update the active tier list for a provider (ordered cheapest → most capable). */
+export async function setProviderTiers(name: string, activeTiers: string[]): Promise<void> {
+  await fetchJSON<unknown>(`/pool/providers/${encodeURIComponent(name)}/models`, {
+    method: "PATCH",
+    body: JSON.stringify({ active_tiers: activeTiers }),
+  });
+}
+
 // ── WebSocket factory ─────────────────────────────────────────────────────────
 
 /**

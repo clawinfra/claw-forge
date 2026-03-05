@@ -62,6 +62,10 @@ export interface ProviderStatus {
   model?: string;
   /** Routing priority (lower = higher priority) */
   priority?: number;
+  /** Map of logical alias → model ID (from config model_map) */
+  model_map?: Record<string, string>;
+  /** Ordered list of active tier aliases (cheapest → most capable) */
+  active_tiers?: string[];
 }
 
 // ── Project summary ───────────────────────────────────────────────────────────

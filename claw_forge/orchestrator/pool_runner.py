@@ -24,6 +24,7 @@ class AgentRun:
         max_tokens: int = 4096,
         temperature: float = 0.0,
         tools: list[dict[str, Any]] | None = None,
+        complexity: str | None = None,
     ) -> None:
         self.agent_id = agent_id
         self.model = model
@@ -32,6 +33,7 @@ class AgentRun:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.tools = tools
+        self.complexity = complexity
         self.response: ProviderResponse | None = None
         self.error: str | None = None
 
@@ -69,6 +71,7 @@ class PoolRunner:
                     temperature=run.temperature,
                     system=run.system,
                     tools=run.tools,
+                    complexity=run.complexity,
                 )
             except ProviderPoolExhausted as e:
                 run.error = str(e)

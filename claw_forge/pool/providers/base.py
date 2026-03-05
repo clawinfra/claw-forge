@@ -44,6 +44,7 @@ class ProviderConfig:
     model_deployment: str | None = None
     model: str | None = None
     model_map: dict[str, str] = field(default_factory=dict)
+    active_tiers: list[str] = field(default_factory=list)
     # OAuth token support (Claude CLI `claude login`)
     oauth_token: str | None = None
     oauth_token_file: str | None = None
