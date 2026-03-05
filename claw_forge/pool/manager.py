@@ -68,6 +68,12 @@ class ProviderPoolManager:
         self._backoff_base = backoff_base
         self._backoff_max = backoff_max
         self._lock = asyncio.Lock()
+        # Per-provider model pool for round-robin model selection.
+        # Initialized from config.active_models; empty list = use caller-supplied model.
+        self._model_pools: dict[str, list[str]] = {
+            p.name: list(p.config.active_models) for p in self._providers
+        }
+        self._model_rr: dict[str, int] = {p.name: 0 for p in self._providers}
 
     @property
     def providers(self) -> list[BaseProvider]:
@@ -117,10 +123,11 @@ class ProviderPoolManager:
                 )
             if cb.state == CircuitState.HALF_OPEN:
                 cb.record_half_open_attempt()
+            effective_model = self.get_next_model(provider_hint) or model
             pinned_resp: ProviderResponse = cast(
                 ProviderResponse,
                 await pinned.execute(  # type: ignore[attr-defined]
-                    model=model,
+                    model=effective_model,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -158,10 +165,11 @@ class ProviderPoolManager:
                     cb.record_half_open_attempt()
 
                 try:
+                    effective_model = self.get_next_model(provider.name) or model
                     response: ProviderResponse = cast(
                         ProviderResponse,
                         await provider.execute(  # type: ignore[attr-defined]  # subclasses implement execute
-                            model=model,
+                            model=effective_model,
                             messages=messages,
                             max_tokens=max_tokens,
                             temperature=temperature,
@@ -267,6 +275,8 @@ class ProviderPoolManager:
                 "total_cost_usd": round(float(p_usage.get("total_cost_usd", 0) or 0), 6),
                 "avg_latency_ms": round(float(p_usage.get("avg_latency_ms", 0) or 0), 1),
                 "model": p.config.model or "",
+                "model_map": dict(p.config.model_map),
+                "active_models": list(self._model_pools.get(p.name, [])),
             })
         result: dict[str, Any] = {
             "providers": providers,
@@ -316,3 +326,29 @@ class ProviderPoolManager:
             if p.name == name:
                 return p.config.enabled
         return None
+
+    def get_next_model(self, provider_name: str) -> str | None:
+        """Return the next active model for this provider in round-robin order.
+
+        Returns None if the provider has no model pool (caller-supplied model used).
+        """
+        pool = self._model_pools.get(provider_name)
+        if not pool:
+            return None
+        idx = self._model_rr.get(provider_name, 0)
+        model = pool[idx % len(pool)]
+        self._model_rr[provider_name] = (idx + 1) % len(pool)
+        return model
+
+    def set_provider_models(self, name: str, active_models: list[str]) -> bool:
+        """Update the active model pool for a provider at runtime.
+
+        Resets the round-robin index. Returns True if the provider was found.
+        """
+        for p in self._providers:
+            if p.name == name:
+                self._model_pools[name] = list(active_models)
+                self._model_rr[name] = 0
+                p.config.active_models = list(active_models)
+                return True
+        return False
