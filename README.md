@@ -521,7 +521,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge status` | Project progress, phase bars, active agents, next action | `--config` |
 | `claw-forge analyze` | Scan codebase → `brownfield_manifest.json` (stack, tests, conventions) | `--project` |
 | `claw-forge ui` | Launch real-time Kanban board (React + WebSocket) | `--port`, `--session`, `--dev` |
-| `claw-forge dev` | Start API (hot-reload) + UI (Vite HMR) for local development | `--state-port`, `--ui-port`, `--project` |
+| `claw-forge dev` | Start API (hot-reload) + UI (Vite HMR) for local development; add `--run` to also launch the agent orchestrator | `--state-port`, `--ui-port`, `--project`, `--run` |
 | `claw-forge pool-status` | Provider health table (status, RPM, latency, cost) | `--config` |
 | `claw-forge pause` | Drain mode — finish in-flight agents, start no new ones | — |
 | `claw-forge resume` | Resume a paused project | — |

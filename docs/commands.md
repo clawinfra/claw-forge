@@ -168,7 +168,7 @@ drives the full implementation loop (code → test → review → merge).
 #### When to use
 - After `claw-forge plan` to begin building a new project
 - After `claw-forge add` or `/expand-project` to build newly added features
-- When resuming after an interruption (detects in-progress features automatically)
+- When resuming after an interruption — orphaned `running` tasks from the previous session are automatically reset to `pending` and retried
 - For controlled feature sprints with `--concurrency` tuned to your provider tier
 
 #### Usage
@@ -206,12 +206,13 @@ claw-forge run --config claw-forge.premium.yaml
 #### What it does internally
 1. Loads `claw-forge.yaml`, expands `${ENV_VAR}` placeholders.
 2. Connects to the state service (starts one if not running).
-3. Pulls the feature queue ordered by dependency wave and priority.
-4. Spawns up to `--concurrency` Claude Code agent sessions via the provider pool.
-5. Each agent runs the TDD loop: write tests → make them pass → commit.
-6. On completion, updates feature status in the state DB (Passing / Failed / Blocked).
-7. If a feature is Blocked, prompts for human input (unless `--yolo`).
-8. Continues until the queue is empty or all remaining features are Blocked/Failed.
+3. Pulls the feature queue: tasks with status `pending`, `failed`, or `running` (orphaned from a previous interrupted run).
+4. Resets any orphaned `running` tasks back to `pending` in the DB so the UI reflects the true state.
+5. Spawns up to `--concurrency` Claude Code agent sessions via the provider pool.
+6. Each agent runs the TDD loop: write tests → make them pass → commit.
+7. On completion, updates feature status in the state DB (Passing / Failed / Blocked).
+8. If a feature is Blocked, prompts for human input (unless `--yolo`).
+9. Continues until the queue is empty or all remaining features are Blocked/Failed.
 
 #### Real-world example
 TaskFlow API has 59 features across 4 waves. You run:
@@ -708,6 +709,84 @@ Browser shows:
 #### Related commands
 - **Requires:** `claw-forge state` (state service must be running)
 - **During:** `claw-forge run`, `claw-forge status`
+
+---
+
+### `claw-forge dev`
+
+#### Purpose
+Starts the FastAPI state service (with uvicorn `--reload`) and the Vite HMR dev server in a
+single command. Both processes restart automatically on file changes. Optionally also launches
+the agent orchestrator with `--run`.
+
+#### When to use
+- Developing claw-forge itself and you want hot-reload for both the API and the UI
+- Running a project and you want all three processes (state service + UI + agents) from one terminal
+- Pointing at a specific project directory to inspect its live state via the Kanban UI
+
+> **Note:** Without `--run`, `claw-forge dev` only starts the servers — it does **not** execute
+> agents. Tasks shown as "In Progress" in the UI are from a previous session. Run
+> `claw-forge dev --run` (or a separate `claw-forge run`) to drive task execution.
+
+#### Usage
+```bash
+# State service (hot-reload) + Vite UI only
+claw-forge dev
+
+# Also launch the agent orchestrator
+claw-forge dev --project /path/to/project --run
+
+# Custom ports
+claw-forge dev --state-port 9000 --ui-port 3000
+
+# Point at a different project
+claw-forge dev --project ~/projects/my-app
+
+# Don't auto-open browser
+claw-forge dev --no-open
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--ui-port` | int | `5173` | Port for the Vite dev server |
+| `--state-port` | int | `8420` | Port for the state service API |
+| `--project`, `-p` | path | `.` | Project directory (sets DB path and passes to `run`) |
+| `--open/--no-open` | flag | `True` | Auto-open browser after 3s |
+| `--session`, `-s` | string | `""` | Session UUID to pre-select on the board |
+| `--run/--no-run` | flag | `False` | Also launch `claw-forge run` to execute agents |
+
+#### What it does internally
+1. Validates that `ui/` source dir and Node.js are present (requires a source checkout).
+2. Runs `npm install` if `ui/node_modules` is missing.
+3. Launches `claw-forge state --reload` as a subprocess with `CLAW_FORGE_DB_URL` set.
+4. Launches `npm run dev` in `ui/` with `VITE_API_PORT` and `VITE_WS_PORT` set.
+5. If `--run` is passed, waits 2 seconds for the state service to start, then launches
+   `claw-forge run --project <project>` as a third subprocess.
+6. On Ctrl+C, terminates all child processes cleanly.
+
+#### Output example
+```
+🔥 claw-forge dev (API + UI hot-reload)
+   UI:        http://localhost:5173  (Vite HMR)
+   State API: http://localhost:8420  (uvicorn --reload)
+   Database:  /path/to/project/.claw-forge/state.db
+   Session:   a1b2c3d4-...
+   Agents:    enabled (--run)
+   Press Ctrl+C to stop all servers
+```
+
+#### Pro tips
+- Use `--run` for a one-command workflow: `claw-forge dev --project . --run` starts everything.
+- Without `--run`, tasks stuck in "In Progress" are orphaned from a previous run — re-run
+  `claw-forge run` (or use `--run`) to resume them. They will be automatically reset to pending.
+- `--reload` means any change to `claw_forge/` Python files restarts the state service instantly.
+
+#### Related commands
+- **Requires source checkout:** `ui/` directory must exist
+- **Alternative (production UI):** `claw-forge ui` (serves pre-built assets, no Node.js HMR)
+- **Agents only:** `claw-forge run` (no UI server)
 
 ---
 

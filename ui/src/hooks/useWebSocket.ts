@@ -23,14 +23,6 @@ const TOAST_DURATION = 3000;
 let logIdCounter = 0;
 let toastIdCounter = 0;
 
-const ROLE_PREFIX: Record<string, string> = {
-  assistant: "LLM",
-  tool_use: "Tool",
-  tool_result: "Result",
-  result: "Done",
-  error: "Error",
-};
-
 function eventToMessage(event: WsEvent): string {
   switch (event.type) {
     case "feature_update":
@@ -49,10 +41,8 @@ function eventToMessage(event: WsEvent): string {
       return event.passed
         ? `Regression #${event.run_number}: ${event.total} passing (${event.duration_ms}ms)`
         : `Regression #${event.run_number}: ${event.failed} failed — ${event.failed_tests.join(", ")}`;
-    case "agent_log": {
-      const prefix = ROLE_PREFIX[event.role] ?? event.role;
-      return `[${event.task_name}] ${prefix}: ${event.content}`;
-    }
+    case "agent_log":
+      return event.content;
   }
 }
 
@@ -104,6 +94,10 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
       timestamp: new Date(),
       type: event.type,
       message: eventToMessage(event),
+      ...(event.type === "agent_log" && {
+        taskName: event.task_name,
+        role: event.role,
+      }),
     };
     setActivityLog((prev) => {
       const next = [...prev, entry];

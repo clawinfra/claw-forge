@@ -217,6 +217,10 @@ export interface ActivityLogEntry {
   timestamp: Date;
   type: WsEvent["type"];
   message: string;
+  /** Short task label (only for agent_log events) */
+  taskName?: string;
+  /** Agent role: assistant, tool_use, tool_result, result, error */
+  role?: string;
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────

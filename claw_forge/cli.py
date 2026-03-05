@@ -546,6 +546,50 @@ def run(
                         json=fields, timeout=5,
                     )
 
+            def _short_name(desc: str) -> str:
+                """Extract a short label from a task description.
+
+                Strips common prefixes like "Task X:" or "Feature N:" and
+                truncates to 40 chars so the activity log stays scannable.
+                """
+                import re
+
+                # Remove "Task <word>: " or "Feature <word>: " prefix
+                cleaned = re.sub(
+                    r"^(?:task|feature)\s+\S+:\s*",
+                    "",
+                    desc,
+                    flags=re.IGNORECASE,
+                )
+                if len(cleaned) > 40:
+                    return cleaned[:37] + "…"
+                return cleaned
+
+            def _first_line(text: str, max_len: int = 120) -> str:
+                """Return the first non-empty line, truncated."""
+                line = text.strip().split("\n", 1)[0].strip()
+                if len(line) > max_len:
+                    return line[:max_len - 1] + "…"
+                return line
+
+            # Map tool names to the input key that best describes what they do
+            _TOOL_KEY: dict[str, str] = {
+                "Write": "file_path", "Edit": "file_path",
+                "Read": "file_path", "Bash": "command",
+                "Glob": "pattern", "Grep": "pattern",
+            }
+
+            def _fmt_tool(name: str, raw: object) -> str:
+                """Format tool input into a short human-readable string."""
+                if isinstance(raw, dict):
+                    key = _TOOL_KEY.get(name)
+                    if key and key in raw:
+                        val = str(raw[key])
+                        if name == "Bash":
+                            val = val[:80]
+                        return val
+                return str(raw)[:80]
+
             async def _log_agent(
                 client: httpx.AsyncClient,
                 task_id: str,
@@ -559,8 +603,8 @@ def run(
                         f"{_state_base}/tasks/{task_id}/agent-log",
                         json={
                             "role": role,
-                            "content": content,
-                            "task_name": task_name,
+                            "content": _first_line(content),
+                            "task_name": _short_name(task_name),
                         },
                         timeout=5,
                     )
@@ -661,10 +705,11 @@ def run(
                                                         )
                                                     elif hasattr(block, "tool_name"):
                                                         _tn = getattr(block, "tool_name", "?")
-                                                        _ti = str(getattr(block, "input", ""))[:200]
+                                                        _raw = getattr(block, "input", {})
+                                                        _ti = _fmt_tool(_tn, _raw)
                                                         await _log_agent(
                                                             http, task_node.id, task_name,
-                                                            "tool_use", f"{_tn}: {_ti}",
+                                                            "tool_use", f"{_tn} → {_ti}",
                                                         )
                                             # ToolResultMessage
                                             elif hasattr(msg, "tool_results"):
