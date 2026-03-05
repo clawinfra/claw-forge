@@ -584,7 +584,10 @@ def run(
                                 # subprocess is running at a time.
                                 _saved_claudecode = os.environ.pop("CLAUDECODE", None)
                                 try:
-                                    async with _cli_semaphore, AgentSession(options) as agent_session:
+                                    async with (
+                                        _cli_semaphore,
+                                        AgentSession(options) as agent_session,
+                                    ):
                                         async for msg in agent_session.run(prompt):
                                             if hasattr(msg, "text"):
                                                 full_output.append(msg.text)
