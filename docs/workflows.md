@@ -128,6 +128,10 @@ a 4-wave dependency DAG, and registers them in the state DB.
 ### Step 4: Run the agents
 
 ```bash
+# Option A — one command (state service + UI + agents together)
+claw-forge dev --project . --run
+
+# Option B — three separate terminals (more control)
 # Terminal 1: start the state service
 claw-forge state &
 
@@ -746,15 +750,15 @@ the interrupted session and shows the exact state at shutdown:
 ### Step 2: Resume the run
 
 ```bash
-# Restart state service
-claw-forge state &
-
-# Resume — claw-forge detects the interrupted session and continues
+# claw-forge run auto-starts the state service if not running, then resumes
 claw-forge run --concurrency 5
 ```
 
 **What happens:**
-- The 5 interrupted features are moved back to "Pending" status.
+- `claw-forge run` queries tasks with status `pending`, `failed`, **and `running`** — so orphaned
+  tasks from the interrupted session are always picked up.
+- The orphaned `running` tasks are reset to `pending` in the DB (and `started_at` cleared)
+  so the Kanban UI shows the correct state before agents re-execute them.
 - Features that had partial work are retried from scratch (agents are stateless).
 - The 28 passing features are NOT re-run.
 - The remaining 17 pending features are queued as normal.
@@ -762,7 +766,7 @@ claw-forge run --concurrency 5
 **You see:**
 ```
 Resuming session: saas-platform (28/50 passing, 22 remaining)
-  Resetting 5 interrupted features to pending…
+  Resetting 5 orphaned task(s) from previous interrupted run
 
 Dispatching wave 3/6 (4 remaining features)…
   [1/5] Agent x1y2z3 → "Webhook processes invoice.paid events"

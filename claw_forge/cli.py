@@ -904,11 +904,7 @@ def pool_status(
 
 @app.command()
 def state(
-    port: int = typer.Option(
-        int(os.environ.get("CLAW_FORGE_STATE_PORT", "8420")),
-        "--port",
-        help="Port to bind the state service on [default: 8420 or $CLAW_FORGE_STATE_PORT].",
-    ),
+    port: int = typer.Option(8420, "--port", help="Port to bind the state service on."),
     host: str = typer.Option(
         "0.0.0.0", "--host",
         help="Host to bind (use 127.0.0.1 for local-only).",
@@ -1482,8 +1478,8 @@ def _build_session_redirect_js(session_id: str) -> str:
 def _ensure_state_service(project_path: Path, port: int) -> int:
     """Start state service if not running or serving the wrong project.
 
-    When the configured port is held by a non-claw-forge process, that process
-    is killed (SIGKILL via lsof / fuser) and the state service takes the port.
+    If the requested port is occupied, tries port+1 … port+4 and starts on
+    the first free one.  The chosen port is always printed to the console.
     Returns the port the state service is listening on.
     """
     import json as _json
@@ -1531,29 +1527,6 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
         except Exception:  # noqa: BLE001
             return None
 
-    def _kill_port(p: int) -> None:
-        """Kill every process listening on TCP port *p* (SIGKILL)."""
-        import signal as _sig
-        try:
-            result = _sp.run(
-                ["lsof", "-ti", f"tcp:{p}"],
-                capture_output=True, text=True, timeout=5,
-            )
-            for pid_str in result.stdout.strip().splitlines():
-                if pid_str.strip().isdigit():
-                    try:
-                        os.kill(int(pid_str.strip()), _sig.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-        except FileNotFoundError:
-            # lsof absent (rare) — fall back to fuser (Linux)
-            _sp.run(
-                ["fuser", "-k", "-KILL", f"{p}/tcp"],
-                capture_output=True, timeout=5,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
     def _start_on(p: int) -> bool:
         """Launch state service on *p*. Return True if /info responds correctly."""
         project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
@@ -1581,6 +1554,7 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
             if svc_project_raw:
                 svc_project = str(Path(str(svc_project_raw)).resolve())
                 if svc_project == want_project:
+                    console.print(f"[dim]State service already running on port {port}[/dim]")
                     return port  # already running for this project — nothing to do
                 # Claw-forge running but wrong project → shut down and restart
                 console.print(f"[dim]State service switching project → {want_project}[/dim]")
@@ -1594,26 +1568,38 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
                     pass
                 _wait_for_port_free(port)
                 if _start_on(port):
+                    console.print(f"[dim]State service restarted on port {port}[/dim]")
                     return port
-        # Port blocked by a non-claw-forge process — kill it and take the port.
-        console.print(
-            f"[dim]Port {port} occupied by another process — reclaiming…[/dim]"
-        )
-        _kill_port(port)
-        _wait_for_port_free(port)
-        if _start_on(port):
-            return port
+        # Port is blocked by a non-claw-forge process — find the next free port.
+        for p in range(port + 1, port + 5):
+            if _listening(p):
+                # Check if it's already our service on this alternate port
+                alt_info = _get_info(p)
+                if alt_info is not None:
+                    alt_raw = alt_info.get("project_path", "")
+                    if alt_raw and str(Path(str(alt_raw)).resolve()) == want_project:
+                        console.print(f"[dim]State service already running on port {p}[/dim]")
+                        return p
+                continue  # also blocked
+            if _start_on(p):
+                console.print(
+                    f"[yellow]Port {port} is occupied — "
+                    f"state service started on port [bold]{p}[/bold][/yellow]"
+                )
+                return p
         import contextlib as _ctx
         log_tail = ""
         with _ctx.suppress(OSError):
             log_tail = log_path.read_text()[-500:]
         raise RuntimeError(
-            f"State service failed to start on port {port} after reclaiming it.\n"
+            f"Port {port} and the next 4 alternatives are all occupied.\n"
+            f"Fix: add 'state:\\n  port: <free_port>' to claw-forge.yaml.\n"
             f"Log: {log_path}\n{log_tail}"
         )
 
     # ── Port is free — start normally ─────────────────────────────────────────
     if _start_on(port):
+        console.print(f"[dim]State service started on port {port}[/dim]")
         return port
     import contextlib as _ctx
     log_tail = ""
