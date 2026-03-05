@@ -281,6 +281,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   // setter can be passed as onRegressionResult callback
   const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<number[]>([]);
 
+
   // Shared WebSocket
   const {
     connectionStatus,

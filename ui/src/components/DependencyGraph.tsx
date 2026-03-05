@@ -51,6 +51,7 @@ const STATUS_COLORS_DARK: Record<Feature["status"], StatusColorSet> = {
   blocked: { fill: "#451a03", stroke: "#fbbf24", text: "#fde68a" },
 };
 
+
 function computeLayout(features: Feature[]): { nodes: GraphNode[]; width: number; height: number } {
   // Build adjacency map
   const featureMap = new Map(features.map((f) => [f.id, f]));
