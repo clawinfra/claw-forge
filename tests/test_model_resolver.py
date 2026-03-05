@@ -219,8 +219,7 @@ class TestProviderHintInPool:
         pm._backoff_base = 1.0
         pm._backoff_max = 30.0
         pm._lock = asyncio.Lock()
-        pm._model_pools = {p.name: [] for p in providers}
-        pm._model_rr = {p.name: 0 for p in providers}
+        pm._active_tiers = {p.name: [] for p in providers}
         return pm
 
     def _make_provider(self, name: str, enabled: bool = True) -> MagicMock:

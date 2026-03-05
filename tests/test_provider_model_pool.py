@@ -1,4 +1,4 @@
-"""Tests for per-provider model pool round-robin in ProviderPoolManager."""
+"""Tests for per-provider complexity-based model tier selection in ProviderPoolManager."""
 from __future__ import annotations
 
 import pytest
@@ -28,12 +28,18 @@ class RecordingProvider(BaseProvider):
         return True
 
 
-def make_mgr_with_pool(active_models: list[str]) -> tuple[ProviderPoolManager, RecordingProvider]:
+def make_mgr_with_tiers(
+    active_tiers: list[str],
+    model_map: dict[str, str] | None = None,
+) -> tuple[ProviderPoolManager, RecordingProvider]:
+    if model_map is None:
+        model_map = {"fast": "claude-haiku-4-5", "medium": "claude-sonnet-4-6", "smart": "claude-opus-4-6"}
     cfg = ProviderConfig(
         name="p1",
         provider_type=ProviderType.ANTHROPIC,
         api_key="k",
-        active_models=active_models,
+        model_map=model_map,
+        active_tiers=active_tiers,
     )
     mgr = ProviderPoolManager([cfg])
     provider = RecordingProvider(cfg)
@@ -42,69 +48,100 @@ def make_mgr_with_pool(active_models: list[str]) -> tuple[ProviderPoolManager, R
     return mgr, provider
 
 
-class TestGetNextModel:
-    def test_returns_none_when_pool_empty(self):
-        mgr, _ = make_mgr_with_pool([])
-        assert mgr.get_next_model("p1") is None
+class TestGetModelForComplexity:
+    def test_returns_none_when_no_tiers(self):
+        mgr, _ = make_mgr_with_tiers([])
+        assert mgr.get_model_for_complexity("p1", "low") is None
 
     def test_returns_none_for_unknown_provider(self):
-        mgr, _ = make_mgr_with_pool(["m1"])
-        assert mgr.get_next_model("ghost") is None
+        mgr, _ = make_mgr_with_tiers(["fast"])
+        assert mgr.get_model_for_complexity("ghost", "low") is None
 
-    def test_single_model_pool_always_returns_same(self):
-        mgr, _ = make_mgr_with_pool(["claude-haiku-4-5"])
-        assert mgr.get_next_model("p1") == "claude-haiku-4-5"
-        assert mgr.get_next_model("p1") == "claude-haiku-4-5"
+    def test_low_complexity_picks_first_tier(self):
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
+        assert mgr.get_model_for_complexity("p1", "low") == "claude-haiku-4-5"
 
-    def test_two_model_pool_round_robins(self):
-        mgr, _ = make_mgr_with_pool(["haiku", "sonnet"])
-        results = [mgr.get_next_model("p1") for _ in range(4)]
-        assert results == ["haiku", "sonnet", "haiku", "sonnet"]
+    def test_high_complexity_picks_last_tier(self):
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
+        assert mgr.get_model_for_complexity("p1", "high") == "claude-opus-4-6"
+
+    def test_medium_complexity_picks_middle_tier(self):
+        mgr, _ = make_mgr_with_tiers(["fast", "medium", "smart"])
+        assert mgr.get_model_for_complexity("p1", "medium") == "claude-sonnet-4-6"
+
+    def test_single_tier_all_complexities_return_same(self):
+        mgr, _ = make_mgr_with_tiers(["smart"])
+        assert mgr.get_model_for_complexity("p1", "low") == "claude-opus-4-6"
+        assert mgr.get_model_for_complexity("p1", "medium") == "claude-opus-4-6"
+        assert mgr.get_model_for_complexity("p1", "high") == "claude-opus-4-6"
+
+    def test_two_tiers_medium_picks_second(self):
+        """With 2 tiers, medium (index len//2=1) picks the last."""
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
+        assert mgr.get_model_for_complexity("p1", "medium") == "claude-opus-4-6"
+
+    def test_alias_not_in_model_map_returns_none(self):
+        mgr, _ = make_mgr_with_tiers(["unknown-alias"])
+        assert mgr.get_model_for_complexity("p1", "low") is None
+
+    def test_none_complexity_returns_none(self):
+        """None complexity means caller-supplied model; no tier lookup."""
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
+        assert mgr.get_model_for_complexity("p1", None) is None
 
 
-class TestSetProviderModels:
-    def test_set_models_found_returns_true(self):
-        mgr, _ = make_mgr_with_pool([])
-        assert mgr.set_provider_models("p1", ["m1", "m2"]) is True
+class TestSetProviderTiers:
+    def test_set_tiers_found_returns_true(self):
+        mgr, _ = make_mgr_with_tiers([])
+        assert mgr.set_provider_tiers("p1", ["fast", "smart"]) is True
 
-    def test_set_models_not_found_returns_false(self):
-        mgr, _ = make_mgr_with_pool([])
-        assert mgr.set_provider_models("ghost", ["m1"]) is False
+    def test_set_tiers_not_found_returns_false(self):
+        mgr, _ = make_mgr_with_tiers([])
+        assert mgr.set_provider_tiers("ghost", ["fast"]) is False
 
-    def test_set_models_resets_rr_index(self):
-        mgr, _ = make_mgr_with_pool(["a", "b"])
-        mgr.get_next_model("p1")  # advance index to 1
-        mgr.set_provider_models("p1", ["x", "y", "z"])
-        # After reset, should start from "x"
-        assert mgr.get_next_model("p1") == "x"
+    def test_set_tiers_updates_config(self):
+        mgr, provider = make_mgr_with_tiers([])
+        mgr.set_provider_tiers("p1", ["fast", "smart"])
+        assert provider.config.active_tiers == ["fast", "smart"]
 
-    def test_set_empty_models_clears_pool(self):
-        mgr, _ = make_mgr_with_pool(["a", "b"])
-        mgr.set_provider_models("p1", [])
-        assert mgr.get_next_model("p1") is None
+    def test_set_empty_tiers_clears_pool(self):
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
+        mgr.set_provider_tiers("p1", [])
+        assert mgr.get_model_for_complexity("p1", "low") is None
 
 
-class TestExecuteUsesModelPool:
+class TestExecuteUsesComplexity:
     @pytest.mark.asyncio
-    async def test_execute_uses_pool_model_not_caller_model(self):
-        mgr, provider = make_mgr_with_pool(["claude-haiku-4-5", "claude-sonnet-4-6"])
-        await mgr.execute("caller-supplied-model", [{"role": "user", "content": "hi"}])
-        await mgr.execute("caller-supplied-model", [{"role": "user", "content": "hi"}])
-        assert provider.calls == ["claude-haiku-4-5", "claude-sonnet-4-6"]
+    async def test_low_complexity_uses_cheapest_model(self):
+        mgr, provider = make_mgr_with_tiers(["fast", "smart"])
+        await mgr.execute("caller-model", [{"role": "user", "content": "hi"}], complexity="low")
+        assert provider.calls == ["claude-haiku-4-5"]
 
     @pytest.mark.asyncio
-    async def test_execute_uses_caller_model_when_pool_empty(self):
-        mgr, provider = make_mgr_with_pool([])
+    async def test_high_complexity_uses_smartest_model(self):
+        mgr, provider = make_mgr_with_tiers(["fast", "smart"])
+        await mgr.execute("caller-model", [{"role": "user", "content": "hi"}], complexity="high")
+        assert provider.calls == ["claude-opus-4-6"]
+
+    @pytest.mark.asyncio
+    async def test_no_complexity_uses_caller_model(self):
+        mgr, provider = make_mgr_with_tiers(["fast", "smart"])
         await mgr.execute("caller-model", [{"role": "user", "content": "hi"}])
         assert provider.calls == ["caller-model"]
 
     @pytest.mark.asyncio
-    async def test_get_pool_status_includes_active_models(self):
-        mgr, _ = make_mgr_with_pool(["haiku", "sonnet"])
+    async def test_no_tiers_falls_back_to_caller_model(self):
+        mgr, provider = make_mgr_with_tiers([])
+        await mgr.execute("caller-model", [{"role": "user", "content": "hi"}], complexity="high")
+        assert provider.calls == ["caller-model"]
+
+    @pytest.mark.asyncio
+    async def test_get_pool_status_includes_active_tiers(self):
+        mgr, _ = make_mgr_with_tiers(["fast", "smart"])
         status = await mgr.get_pool_status()
         p = status["providers"][0]
-        assert "active_models" in p
-        assert p["active_models"] == ["haiku", "sonnet"]
+        assert "active_tiers" in p
+        assert p["active_tiers"] == ["fast", "smart"]
 
 
 # ── Service endpoint tests ─────────────────────────────────────────────────────
@@ -122,7 +159,7 @@ def make_mgr_for_service() -> ProviderPoolManager:
     cfg = ProviderConfig(
         name="p1", provider_type=ProviderType.ANTHROPIC, api_key="k",
         model_map={"fast": "claude-haiku-4-5", "smart": "claude-opus-4-6"},
-        active_models=["claude-haiku-4-5"],
+        active_tiers=["fast"],
     )
     mgr = ProviderPoolManager([cfg])
     mgr._providers = [RecordingProvider(cfg)]  # type: ignore[assignment]
@@ -130,7 +167,7 @@ def make_mgr_for_service() -> ProviderPoolManager:
     return mgr
 
 
-class TestSetModelsEndpoint:
+class TestSetTiersEndpoint:
     @pytest.fixture
     def client_and_mgr(self):
         mgr = make_mgr_for_service()
@@ -139,39 +176,39 @@ class TestSetModelsEndpoint:
         client = TestClient(app, raise_server_exceptions=True)
         return client, mgr
 
-    def test_set_models_updates_pool(self, client_and_mgr):
+    def test_set_tiers_updates_pool(self, client_and_mgr):
         client, mgr = client_and_mgr
         resp = client.patch(
             "/pool/providers/p1/models",
-            json={"active_models": ["claude-haiku-4-5", "claude-opus-4-6"]},
+            json={"active_tiers": ["fast", "smart"]},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["active_models"] == ["claude-haiku-4-5", "claude-opus-4-6"]
-        assert mgr._model_pools["p1"] == ["claude-haiku-4-5", "claude-opus-4-6"]
+        assert data["active_tiers"] == ["fast", "smart"]
+        assert mgr._active_tiers["p1"] == ["fast", "smart"]
 
-    def test_set_models_unknown_provider_404(self, client_and_mgr):
+    def test_set_tiers_unknown_provider_404(self, client_and_mgr):
         client, _ = client_and_mgr
         resp = client.patch(
             "/pool/providers/ghost/models",
-            json={"active_models": ["m1"]},
+            json={"active_tiers": ["fast"]},
         )
         assert resp.status_code == 404
 
-    def test_set_models_no_pool_manager_503(self):
+    def test_set_tiers_no_pool_manager_503(self):
         svc = AgentStateService(database_url="sqlite+aiosqlite:///:memory:", pool_manager=None)
         app = svc.create_app()
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.patch("/pool/providers/p1/models", json={"active_models": []})
+        resp = client.patch("/pool/providers/p1/models", json={"active_tiers": []})
         assert resp.status_code == 503
 
-    def test_pool_status_includes_model_map_and_active_models(self, client_and_mgr):
+    def test_pool_status_includes_model_map_and_active_tiers(self, client_and_mgr):
         client, _ = client_and_mgr
         resp = client.get("/pool/status")
         assert resp.status_code == 200
         providers = resp.json()["providers"]
         p = next(x for x in providers if x["name"] == "p1")
         assert "model_map" in p
-        assert "active_models" in p
+        assert "active_tiers" in p
         assert p["model_map"] == {"fast": "claude-haiku-4-5", "smart": "claude-opus-4-6"}
-        assert p["active_models"] == ["claude-haiku-4-5"]
+        assert p["active_tiers"] == ["fast"]
