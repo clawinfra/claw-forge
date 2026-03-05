@@ -1,14 +1,23 @@
 """Tests for per-provider complexity-based model tier selection in ProviderPoolManager."""
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from claw_forge.pool.health import CircuitBreaker
 from claw_forge.pool.manager import ProviderPoolManager
 from claw_forge.pool.providers.base import (
-    ProviderConfig, ProviderResponse, ProviderType,
+    BaseProvider,
+    ProviderConfig,
+    ProviderResponse,
+    ProviderType,
 )
-from claw_forge.pool.providers.base import BaseProvider
+
+# Mock claude_agent_sdk before importing service modules that depend on it transitively.
+if "claude_agent_sdk" not in sys.modules:
+    sys.modules["claude_agent_sdk"] = types.ModuleType("claude_agent_sdk")
 
 
 class RecordingProvider(BaseProvider):
@@ -33,7 +42,11 @@ def make_mgr_with_tiers(
     model_map: dict[str, str] | None = None,
 ) -> tuple[ProviderPoolManager, RecordingProvider]:
     if model_map is None:
-        model_map = {"fast": "claude-haiku-4-5", "medium": "claude-sonnet-4-6", "smart": "claude-opus-4-6"}
+        model_map = {
+            "fast": "claude-haiku-4-5",
+            "medium": "claude-sonnet-4-6",
+            "smart": "claude-opus-4-6",
+        }
     cfg = ProviderConfig(
         name="p1",
         provider_type=ProviderType.ANTHROPIC,
@@ -146,12 +159,8 @@ class TestExecuteUsesComplexity:
 
 # ── Service endpoint tests ─────────────────────────────────────────────────────
 
-import sys
-import types
-if "claude_agent_sdk" not in sys.modules:
-    sys.modules["claude_agent_sdk"] = types.ModuleType("claude_agent_sdk")
-
 from fastapi.testclient import TestClient  # noqa: E402
+
 from claw_forge.state.service import AgentStateService  # noqa: E402
 
 

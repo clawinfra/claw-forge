@@ -169,7 +169,9 @@ class ProviderPoolManager:
                     cb.record_half_open_attempt()
 
                 try:
-                    effective_model = self.get_model_for_complexity(provider.name, complexity) or model
+                    effective_model = (
+                        self.get_model_for_complexity(provider.name, complexity) or model
+                    )
                     response: ProviderResponse = cast(
                         ProviderResponse,
                         await provider.execute(  # type: ignore[attr-defined]  # subclasses implement execute
