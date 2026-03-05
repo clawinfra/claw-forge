@@ -105,3 +105,73 @@ class TestExecuteUsesModelPool:
         p = status["providers"][0]
         assert "active_models" in p
         assert p["active_models"] == ["haiku", "sonnet"]
+
+
+# ── Service endpoint tests ─────────────────────────────────────────────────────
+
+import sys
+import types
+if "claude_agent_sdk" not in sys.modules:
+    sys.modules["claude_agent_sdk"] = types.ModuleType("claude_agent_sdk")
+
+from fastapi.testclient import TestClient  # noqa: E402
+from claw_forge.state.service import AgentStateService  # noqa: E402
+
+
+def make_mgr_for_service() -> ProviderPoolManager:
+    cfg = ProviderConfig(
+        name="p1", provider_type=ProviderType.ANTHROPIC, api_key="k",
+        model_map={"fast": "claude-haiku-4-5", "smart": "claude-opus-4-6"},
+        active_models=["claude-haiku-4-5"],
+    )
+    mgr = ProviderPoolManager([cfg])
+    mgr._providers = [RecordingProvider(cfg)]  # type: ignore[assignment]
+    mgr._circuits = {"p1": CircuitBreaker("p1")}
+    return mgr
+
+
+class TestSetModelsEndpoint:
+    @pytest.fixture
+    def client_and_mgr(self):
+        mgr = make_mgr_for_service()
+        svc = AgentStateService(database_url="sqlite+aiosqlite:///:memory:", pool_manager=mgr)
+        app = svc.create_app()
+        client = TestClient(app, raise_server_exceptions=True)
+        return client, mgr
+
+    def test_set_models_updates_pool(self, client_and_mgr):
+        client, mgr = client_and_mgr
+        resp = client.patch(
+            "/pool/providers/p1/models",
+            json={"active_models": ["claude-haiku-4-5", "claude-opus-4-6"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active_models"] == ["claude-haiku-4-5", "claude-opus-4-6"]
+        assert mgr._model_pools["p1"] == ["claude-haiku-4-5", "claude-opus-4-6"]
+
+    def test_set_models_unknown_provider_404(self, client_and_mgr):
+        client, _ = client_and_mgr
+        resp = client.patch(
+            "/pool/providers/ghost/models",
+            json={"active_models": ["m1"]},
+        )
+        assert resp.status_code == 404
+
+    def test_set_models_no_pool_manager_503(self):
+        svc = AgentStateService(database_url="sqlite+aiosqlite:///:memory:", pool_manager=None)
+        app = svc.create_app()
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.patch("/pool/providers/p1/models", json={"active_models": []})
+        assert resp.status_code == 503
+
+    def test_pool_status_includes_model_map_and_active_models(self, client_and_mgr):
+        client, _ = client_and_mgr
+        resp = client.get("/pool/status")
+        assert resp.status_code == 200
+        providers = resp.json()["providers"]
+        p = next(x for x in providers if x["name"] == "p1")
+        assert "model_map" in p
+        assert "active_models" in p
+        assert p["model_map"] == {"fast": "claude-haiku-4-5", "smart": "claude-opus-4-6"}
+        assert p["active_models"] == ["claude-haiku-4-5"]
