@@ -131,7 +131,8 @@ class AgentSession:
     async def mcp_health(self) -> dict[str, Any]:
         """Return the current MCP server health status dict."""
         assert self._client is not None
-        return await self._client.get_mcp_status()
+        # SDK ≥0.1.46 returns McpStatusResponse (TypedDict); dict() normalises both
+        return dict(await self._client.get_mcp_status())
 
     async def get_server_info(self) -> dict[str, Any] | None:
         """Return server info from the connected Claude CLI instance."""
