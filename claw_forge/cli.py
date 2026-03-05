@@ -538,7 +538,11 @@ def run(
                             from claw_forge.agent.session import AgentSession
                             # Resolve auth: ANTHROPIC_API_KEY env → pool provider key.
                             # Pass as env so the claude CLI subprocess uses our key.
-                            sdk_env: dict[str, str] = {}
+                            # Override CLAUDECODE="" so the claude CLI subprocess is not
+                            # blocked by the "nested session" guard (Claude Code sets
+                            # CLAUDECODE=1 in the parent process; the SDK merges envs as
+                            # {**os.environ, **options.env} so we can override it here).
+                            sdk_env: dict[str, str] = {"CLAUDECODE": ""}
                             _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
                             if not _api_key and pool is not None:
                                 # Extract key from first healthy provider
