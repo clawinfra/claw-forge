@@ -582,12 +582,48 @@ class AgentStateService:
 
         @app.get("/pool/status")
         async def pool_status() -> dict[str, Any]:
-            """Return pool provider status. Returns empty list when no run is active."""
+            """Return pool provider status.
+
+            When a run is active, returns live stats from the pool manager.
+            When idle, reads provider config from claw-forge.yaml so the UI
+            can still display and toggle providers.
+            """
             pm = self._pool_manager
-            if pm is None:
+            if pm is not None:
+                status = await pm.get_pool_status()
+                return {**status, "active": True}
+
+            # Fallback: read provider config from YAML so the UI isn't empty
+            config_path = self._find_config_path()
+            if config_path is None:
                 return {"providers": [], "active": False}
-            status = await pm.get_pool_status()
-            return {**status, "active": True}
+            try:
+                text = config_path.read_text()
+                data = yaml.safe_load(text) or {}
+                providers_cfg = data.get("providers", {})
+                providers = []
+                for name, cfg in providers_cfg.items():
+                    if not isinstance(cfg, dict):
+                        continue
+                    providers.append({
+                        "name": name,
+                        "type": cfg.get("type", "unknown"),
+                        "priority": cfg.get("priority", 99),
+                        "enabled": cfg.get("enabled", True),
+                        "health": "unknown",
+                        "circuit_state": "closed",
+                        "circuit": {"name": name, "state": "closed", "failure_count": 0,
+                                    "failure_threshold": 5, "recovery_timeout": 60.0},
+                        "rpm": 0,
+                        "max_rpm": cfg.get("max_rpm", 60),
+                        "total_cost_usd": 0,
+                        "avg_latency_ms": 0,
+                        "model": cfg.get("model", ""),
+                    })
+                strategy = data.get("pool", {}).get("strategy", "priority")
+                return {"providers": providers, "active": False, "strategy": strategy}
+            except Exception:  # noqa: BLE001
+                return {"providers": [], "active": False}
 
         # ── Provider toggle endpoints ─────────────────────────────────────
 
