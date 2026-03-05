@@ -389,7 +389,7 @@ class TestLoadConfigsFromYaml:
         configs = load_configs_from_yaml(data)
         assert isinstance(configs, list)
 
-    def test_active_models_loaded_from_yaml(self) -> None:
+    def test_active_tiers_loaded_from_yaml(self) -> None:
         from claw_forge.pool.providers.registry import load_configs_from_yaml
         data = {
             "providers": {
@@ -397,15 +397,15 @@ class TestLoadConfigsFromYaml:
                     "type": "anthropic",
                     "api_key": "sk-test",
                     "model_map": {"fast": "claude-haiku-4-5", "smart": "claude-opus-4-6"},
-                    "active_models": ["claude-haiku-4-5", "claude-opus-4-6"],
+                    "active_tiers": ["fast", "smart"],
                 }
             }
         }
         configs = load_configs_from_yaml(data)
-        assert configs[0].active_models == ["claude-haiku-4-5", "claude-opus-4-6"]
+        assert configs[0].active_tiers == ["fast", "smart"]
 
-    def test_active_models_defaults_to_empty(self) -> None:
+    def test_active_tiers_defaults_to_empty(self) -> None:
         from claw_forge.pool.providers.registry import load_configs_from_yaml
         data = {"providers": {"p": {"type": "anthropic", "api_key": "k"}}}
         configs = load_configs_from_yaml(data)
-        assert configs[0].active_models == []
+        assert configs[0].active_tiers == []
