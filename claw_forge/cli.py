@@ -24,6 +24,15 @@ from claw_forge.pool.providers.registry import load_configs_from_yaml
 app = typer.Typer(name="claw-forge", help="Multi-provider autonomous coding agent harness")
 console = Console()
 
+# Maps plugin name → complexity tier for model-tier routing.
+_PLUGIN_COMPLEXITY: dict[str, str] = {
+    "initializer": "high",
+    "reviewer": "high",
+    "coding": "medium",
+    "bugfix": "medium",
+    "testing": "low",
+}
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -771,11 +780,15 @@ def run(
                                 "assistant", "Sending request to provider pool…",
                                 model=model,
                             )
+                            task_complexity = _PLUGIN_COMPLEXITY.get(
+                                db_task.plugin_name or "", "medium"
+                            )
                             response = await pool.execute(
                                 model=model,
                                 messages=[{"role": "user", "content": prompt}],
                                 system=system_prompt,
                                 max_tokens=8192,
+                                complexity=task_complexity,
                             )
                             output = response.content or ""
                             await _log_agent(
