@@ -99,6 +99,20 @@ export async function patchTaskStatus(
   });
 }
 
+// ── Task stop controls ────────────────────────────────────────────────────────
+
+/** Stop a running task and reset it to pending. */
+export async function stopTask(taskId: string): Promise<void> {
+  await fetchJSON<unknown>(`/tasks/${taskId}/stop`, { method: "POST" });
+}
+
+/** Stop all running tasks in a session and reset them to pending. */
+export async function stopAllRunning(sessionId: string): Promise<void> {
+  await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/stop-all`, {
+    method: "POST",
+  });
+}
+
 // ── Provider toggle ───────────────────────────────────────────────────────────
 
 /** Runtime-toggle a provider (does NOT write to disk). */

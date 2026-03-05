@@ -66,7 +66,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -411,6 +411,55 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     [sessionId, qc, addToast],
   );
 
+  // Stop-task controls
+  const [stoppingTasks, setStoppingTasks] = useState<Set<string>>(new Set());
+
+  const handleStopTask = useCallback(
+    (taskId: string) => {
+      setStoppingTasks((prev) => new Set(prev).add(taskId));
+      void stopTask(taskId).catch(() => {
+        setStoppingTasks((prev) => {
+          const s = new Set(prev);
+          s.delete(taskId);
+          return s;
+        });
+        addToast("Failed to stop task", "error");
+      });
+    },
+    [addToast],
+  );
+
+  const handleStopAll = useCallback(() => {
+    const runningIds = (features ?? [])
+      .filter((f) => f.status === "running")
+      .map((f) => f.id);
+    setStoppingTasks((prev) => {
+      const s = new Set(prev);
+      runningIds.forEach((id) => s.add(id));
+      return s;
+    });
+    void stopAllRunning(sessionId).catch(() => {
+      setStoppingTasks((prev) => {
+        const s = new Set(prev);
+        runningIds.forEach((id) => s.delete(id));
+        return s;
+      });
+      addToast("Failed to stop all tasks", "error");
+    });
+  }, [features, sessionId, addToast]);
+
+  // Remove task IDs from stoppingTasks once they leave the "running" state
+  useEffect(() => {
+    if (!features) return;
+    const runningIds = new Set(
+      features.filter((f) => f.status === "running").map((f) => f.id),
+    );
+    setStoppingTasks((prev) => {
+      const next = new Set([...prev].filter((id) => runningIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [features]);
+
   // FAB handlers
   const handleRefresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["features"] });
@@ -748,9 +797,22 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                         className={`flex items-center justify-between px-3 py-2 rounded-t-xl ${col.headerClass} ${col.darkHeaderClass} transition-colors duration-200`}
                       >
                         <span className="text-sm font-semibold">{col.label}</span>
-                        <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
-                          {cards.length}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {col.id === "in_progress" && cards.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={handleStopAll}
+                              className="text-[10px] font-medium text-red-500 hover:text-red-700 dark:text-red-400
+                                dark:hover:text-red-300 transition-colors flex items-center gap-0.5"
+                              title="Stop all running tasks"
+                            >
+                              ■ Stop All
+                            </button>
+                          )}
+                          <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
+                            {cards.length}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Cards */}
@@ -769,6 +831,8 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                                 onClick={() => setSelectedFeatureId(feature.id)}
                                 onLongPress={(f) => setLongPressFeature(f)}
                                 implicatedFeatureIds={implicatedFeatureIds}
+                                onStop={col.id === "in_progress" ? () => handleStopTask(feature.id) : undefined}
+                                isStopping={stoppingTasks.has(feature.id)}
                               />
                             ))}
                         {!featuresLoading && cards.length === 0 && (

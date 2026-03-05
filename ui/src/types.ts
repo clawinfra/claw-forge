@@ -18,6 +18,8 @@ export interface Feature {
   id: string;
   name: string;
   category: string;
+  /** Raw plugin name from backend (e.g. "coding", "testing", "reviewer") */
+  plugin_name?: string;
   status: FeatureStatus;
   priority: number;
   /** List of task IDs this feature depends on */
@@ -38,6 +40,8 @@ export interface Feature {
   description?: string;
   /** Steps list (optional) */
   steps?: string[];
+  /** Structured result from agent execution */
+  result_json?: Record<string, unknown> | null;
 }
 
 // ── Provider / Pool ───────────────────────────────────────────────────────────

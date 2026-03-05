@@ -37,6 +37,10 @@ interface FeatureCardProps {
   onQuickCommand?: (commandId: string, args: Record<string, unknown>) => void;
   /** Called on long-press — opens task detail modal */
   onLongPress?: (feature: Feature) => void;
+  /** Called to stop this running task */
+  onStop?: () => void;
+  /** True while a stop request is in-flight for this task */
+  isStopping?: boolean;
 }
 
 const STATUS_BADGE: Record<Feature["status"], string> = {
@@ -82,6 +86,8 @@ export function FeatureCard({
   implicatedInRegression = false,
   onQuickCommand,
   onLongPress,
+  onStop,
+  isStopping = false,
 }: FeatureCardProps) {
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [tapped, setTapped] = useState(false);
@@ -161,8 +167,23 @@ export function FeatureCard({
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[feature.status]}`}
           >
-            {feature.status}
+            {isStopping ? "stopping…" : feature.status}
           </span>
+          {feature.status === "running" && onStop && (
+            <button
+              type="button"
+              title="Stop task"
+              disabled={isStopping}
+              className="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300
+                disabled:opacity-40 transition-colors text-[10px] leading-none px-0.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                onStop();
+              }}
+            >
+              ■
+            </button>
+          )}
           {onQuickCommand && (
             <div className="relative">
               <button

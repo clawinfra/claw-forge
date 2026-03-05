@@ -238,6 +238,8 @@ class AgentStateService:
         self._executions: dict[str, dict[str, Any]] = {}
         # Provider pool manager (optional, used by toggle endpoints)
         self._pool_manager: ProviderPoolManager | None = pool_manager
+        # In-memory set of task IDs requested to stop; polled and cleared by dispatcher
+        self._stop_requested: set[str] = set()
         # Derive project root from DB path for config discovery
         # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
         try:
@@ -462,8 +464,9 @@ class AgentStateService:
                 return [
                     {
                         "id": t.id,
-                        "name": t.description,
+                        "name": t.description or t.plugin_name,
                         "plugin_name": t.plugin_name,
+                        "category": t.plugin_name,
                         "description": t.description,
                         "status": t.status,
                         "priority": t.priority,
@@ -572,6 +575,68 @@ class AgentStateService:
                 if not session:
                     raise HTTPException(404, "Session not found")
                 return {"session_id": session_id, "paused": bool(session.project_paused)}
+
+        # ── Stop task endpoints ──────────────────────────────────────────────
+
+        @app.post("/tasks/{task_id}/stop")
+        async def stop_task(task_id: str) -> dict[str, Any]:
+            """Stop a running task and reset it to pending.
+
+            Immediately resets the task status to ``pending`` in the DB and
+            records the task ID in the in-memory ``_stop_requested`` set.
+            The dispatcher polls ``GET /stop-poll`` and cancels the matching
+            asyncio task within ~2 s.
+            """
+            async with self._session_factory() as db:
+                task = await db.get(Task, task_id)
+                if not task:
+                    raise HTTPException(404, "Task not found")
+                task.status = "pending"
+                task.started_at = None
+                task.error_message = None
+                await db.commit()
+            self._stop_requested.add(task_id)
+            await self.ws_manager.broadcast_feature_update(
+                {"id": task_id, "status": "pending"}
+            )
+            return {"task_id": task_id, "status": "pending"}
+
+        @app.post("/sessions/{session_id}/tasks/stop-all")
+        async def stop_all_running(session_id: str) -> dict[str, Any]:
+            """Stop all running tasks in a session and reset them to pending."""
+            async with self._session_factory() as db:
+                result = await db.execute(
+                    select(Task).where(
+                        Task.session_id == session_id,
+                        Task.status == "running",
+                    )
+                )
+                running_tasks = result.scalars().all()
+                stopped_ids: list[str] = []
+                for task in running_tasks:
+                    task.status = "pending"
+                    task.started_at = None
+                    task.error_message = None
+                    stopped_ids.append(str(task.id))
+                await db.commit()
+            for task_id in stopped_ids:
+                self._stop_requested.add(task_id)
+                await self.ws_manager.broadcast_feature_update(
+                    {"id": task_id, "status": "pending"}
+                )
+            return {"stopped": stopped_ids}
+
+        @app.get("/stop-poll")
+        async def stop_poll() -> dict[str, Any]:
+            """Return and clear the pending stop-request set.
+
+            Called by the dispatcher every ~2 s to discover task IDs that
+            the UI has requested to stop.  The set is cleared atomically so
+            each stop request is delivered exactly once.
+            """
+            task_ids = list(self._stop_requested)
+            self._stop_requested.clear()
+            return {"task_ids": task_ids}
 
         # ── Human input endpoints ────────────────────────────────────────────
 

@@ -14,6 +14,9 @@ import {
   Layers,
   Coins,
   FileText,
+  Zap,
+  ArrowUpDown,
+  ScrollText,
 } from "lucide-react";
 import type { Feature } from "../types";
 
@@ -108,22 +111,28 @@ export function FeatureDetailDrawer({
 
             {/* Body */}
             <div className="flex-1 p-5 space-y-5 overflow-y-auto">
-              {/* Status + Category */}
+              {/* Status + Category + Priority */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_BADGE_STYLE[feature.status]}`}
                 >
                   {feature.status}
                 </span>
-                {feature.category && (
+                {(feature.category || feature.plugin_name) && (
                   <span className="rounded-full px-3 py-1 text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                    {feature.category}
+                    {feature.category || feature.plugin_name}
+                  </span>
+                )}
+                {feature.priority !== undefined && feature.priority !== 0 && (
+                  <span className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300">
+                    <ArrowUpDown size={10} />
+                    P{feature.priority}
                   </span>
                 )}
               </div>
 
-              {/* Description */}
-              {feature.description && (
+              {/* Description — only if different from the name */}
+              {feature.description && feature.description !== feature.name && (
                 <div>
                   <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                     <FileText size={12} />
@@ -272,6 +281,66 @@ export function FeatureDetailDrawer({
                 </div>
               )}
 
+              {/* Result output */}
+              {feature.result_json && Object.keys(feature.result_json).length > 0 && (
+                <div>
+                  <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                    <Zap size={12} />
+                    Result
+                  </h4>
+                  <div className="space-y-2">
+                    {Object.entries(feature.result_json).map(([key, val]) => {
+                      if (val === null || val === undefined) return null;
+                      const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                      if (typeof val === "object") {
+                        return (
+                          <div key={key} className="relative group">
+                            <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mb-0.5">{label}</p>
+                            <pre className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-words">
+                              {JSON.stringify(val, null, 2)}
+                            </pre>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(JSON.stringify(val, null, 2))}
+                              className="absolute top-6 right-2 p-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Copy"
+                            >
+                              <Copy size={10} />
+                            </button>
+                          </div>
+                        );
+                      }
+                      const strVal = String(val);
+                      const isLong = strVal.length > 120;
+                      return (
+                        <div key={key} className={isLong ? "relative group" : "flex items-start gap-2 justify-between"}>
+                          <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">{label}</span>
+                          {isLong ? (
+                            <>
+                              <pre className="mt-0.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-words">
+                                {strVal}
+                              </pre>
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(strVal)}
+                                className="absolute top-0 right-0 p-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Copy"
+                              >
+                                <Copy size={10} />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200 text-right max-w-[60%] break-words">
+                              {typeof val === "boolean" ? (val ? "Yes" : "No") : strVal}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Agent session */}
               {feature.session_id && (
                 <div>
@@ -313,6 +382,30 @@ export function FeatureDetailDrawer({
                   </span>
                 </div>
               )}
+
+              {/* Task metadata footer */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  <ScrollText size={12} />
+                  Metadata
+                </h4>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500">Task ID</span>
+                    <span className="font-mono text-slate-500 dark:text-slate-400 truncate ml-4">{feature.id}</span>
+                  </div>
+                  {(feature.plugin_name || feature.category) && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-400 dark:text-slate-500">Plugin</span>
+                      <span className="font-mono text-slate-500 dark:text-slate-400">{feature.plugin_name || feature.category}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500">Priority</span>
+                    <span className="font-mono text-slate-500 dark:text-slate-400">{feature.priority}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

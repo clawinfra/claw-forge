@@ -850,6 +850,7 @@ def run(
                 handler=task_handler,
                 max_concurrency=concurrency,
                 yolo=yolo,
+                state_url=_state_base,
             )
 
             for node in task_nodes:

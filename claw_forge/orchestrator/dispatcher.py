@@ -10,6 +10,7 @@ Supports:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -103,6 +104,7 @@ class Dispatcher:
         *,
         yolo: bool = False,
         config: DispatcherConfig | None = None,
+        state_url: str | None = None,
     ) -> None:
         if config is not None:
             self._config = config
@@ -117,6 +119,10 @@ class Dispatcher:
         self._scheduler = Scheduler()
         self._paused: bool = False
         self._reviewer: ParallelReviewer | None = None
+        # URL of the state service for stop-poll; enables cancel monitor when set
+        self._state_url: str | None = state_url
+        # Registry of currently-running asyncio Tasks keyed by task ID
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
         if self._config.yolo:
             logger.warning(_YOLO_WARNING)
@@ -212,34 +218,45 @@ class Dispatcher:
         result = DispatchResult()
         waves = self._scheduler.get_execution_order()
 
-        for wave_idx, wave in enumerate(waves):
-            # Drain mode: stop dispatching new waves
-            if self._paused:
-                logger.info("Dispatcher is paused — stopping before wave %d", wave_idx)
-                break
+        # Start background cancel monitor if state service URL is known
+        monitor: asyncio.Task[None] | None = None
+        if self._state_url:
+            monitor = asyncio.create_task(self._cancel_monitor())
 
-            logger.info("Dispatching wave %d: %s", wave_idx, wave)
+        try:
+            for wave_idx, wave in enumerate(waves):
+                # Drain mode: stop dispatching new waves
+                if self._paused:
+                    logger.info("Dispatcher is paused — stopping before wave %d", wave_idx)
+                    break
 
-            async with asyncio.TaskGroup() as tg:
-                wave_futures: dict[str, asyncio.Task[dict[str, Any] | None]] = {}
-                for task_id in wave:
-                    task_node = self._scheduler._tasks[task_id]
-                    wave_futures[task_id] = tg.create_task(
-                        self._run_task(task_node)
-                    )
+                logger.info("Dispatching wave %d: %s", wave_idx, wave)
 
-            for task_id, future in wave_futures.items():
-                exc = future.exception() if future.done() else None
-                if exc:
-                    result.failed[task_id] = str(exc)
-                    self._scheduler.mark_failed(task_id)
-                else:
-                    task_result = future.result()
-                    result.completed[task_id] = task_result or {}
-                    self._scheduler.mark_completed(task_id)
-                    # Notify reviewer of feature completion
-                    if self._reviewer is not None:
-                        self._reviewer.notify_feature_completed()
+                async with asyncio.TaskGroup() as tg:
+                    wave_futures: dict[str, asyncio.Task[dict[str, Any] | None]] = {}
+                    for task_id in wave:
+                        task_node = self._scheduler._tasks[task_id]
+                        wave_futures[task_id] = tg.create_task(
+                            self._run_task(task_node)
+                        )
+
+                for task_id, future in wave_futures.items():
+                    exc = future.exception() if future.done() else None
+                    if exc:
+                        result.failed[task_id] = str(exc)
+                        self._scheduler.mark_failed(task_id)
+                    else:
+                        task_result = future.result()
+                        result.completed[task_id] = task_result or {}
+                        self._scheduler.mark_completed(task_id)
+                        # Notify reviewer of feature completion
+                        if self._reviewer is not None:
+                            self._reviewer.notify_feature_completed()
+        finally:
+            if monitor is not None:
+                monitor.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await monitor
 
         return result
 
@@ -248,28 +265,80 @@ class Dispatcher:
 
         Retries up to ``retry_attempts`` times with exponential back-off.
         YOLO mode is handled before scheduling (see ``run()``).
+
+        If the task's asyncio.Task is cancelled (via the stop UI control), the
+        cancellation is caught gracefully and ``None`` is returned — the state
+        service has already reset the task to ``pending``.
         """
-        async with self._semaphore:
-            logger.info("Running task %s (%s)", task.id, task.plugin_name)
-            last_exc: Exception | None = None
+        self._running_tasks[task.id] = asyncio.current_task()  # type: ignore[assignment]
+        try:
+            async with self._semaphore:
+                logger.info("Running task %s (%s)", task.id, task.plugin_name)
+                last_exc: Exception | None = None
 
-            for attempt in range(1, self._config.retry_attempts + 1):
-                try:
-                    return await self._handler(task)
-                except Exception as exc:
-                    last_exc = exc
-                    if attempt < self._config.retry_attempts:
-                        wait = 2 ** (attempt - 1)  # exponential backoff: 1s, 2s, 4s …
-                        logger.warning(
-                            "Task %s failed (attempt %d/%d) — retrying in %ds: %s",
-                            task.id,
-                            attempt,
-                            self._config.retry_attempts,
-                            wait,
-                            exc,
+                for attempt in range(1, self._config.retry_attempts + 1):
+                    try:
+                        return await self._handler(task)
+                    except asyncio.CancelledError:
+                        logger.info(
+                            "Task %s stopped by user — resetting to pending", task.id
                         )
-                        await asyncio.sleep(wait)
-                    else:
-                        logger.exception("Task %s failed after %d attempts", task.id, attempt)
+                        return None
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < self._config.retry_attempts:
+                            wait = 2 ** (attempt - 1)  # exponential backoff: 1s, 2s, 4s …
+                            logger.warning(
+                                "Task %s failed (attempt %d/%d) — retrying in %ds: %s",
+                                task.id,
+                                attempt,
+                                self._config.retry_attempts,
+                                wait,
+                                exc,
+                            )
+                            try:
+                                await asyncio.sleep(wait)
+                            except asyncio.CancelledError:
+                                logger.info(
+                                    "Task %s stopped during retry wait — resetting to pending",
+                                    task.id,
+                                )
+                                return None
+                        else:
+                            logger.exception(
+                                "Task %s failed after %d attempts", task.id, attempt
+                            )
 
-            raise last_exc  # type: ignore[misc]
+                raise last_exc  # type: ignore[misc]
+        except asyncio.CancelledError:
+            # Cancelled while waiting to acquire the semaphore
+            logger.info(
+                "Task %s stopped before acquiring semaphore — resetting to pending", task.id
+            )
+            return None
+        finally:
+            self._running_tasks.pop(task.id, None)
+
+    async def _cancel_monitor(self) -> None:
+        """Poll the state service for stop requests and cancel matching tasks.
+
+        Runs as a background asyncio.Task for the duration of ``run()``.
+        Polls ``GET {state_url}/stop-poll`` every 2 s; for each returned task
+        ID that is currently running, calls ``asyncio.Task.cancel()``.
+        """
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            while True:
+                await asyncio.sleep(2)
+                try:
+                    resp = await client.get(
+                        f"{self._state_url}/stop-poll", timeout=3.0
+                    )
+                    data: dict[str, Any] = resp.json()
+                    for task_id in data.get("task_ids", []):
+                        t = self._running_tasks.get(task_id)
+                        if t is not None:
+                            t.cancel()
+                except Exception:  # noqa: BLE001
+                    pass  # transient errors are fine — we'll retry next cycle
