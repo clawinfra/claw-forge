@@ -267,7 +267,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   // FAB handlers
   const handleRefresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["features"] });
-    void qc.invalidateQueries({ queryKey: ["pool-status"] });
+    void qc.invalidateQueries({ queryKey: ["pool", "status"] });
   }, [qc]);
 
   const handleResetZoom = useCallback(() => {
