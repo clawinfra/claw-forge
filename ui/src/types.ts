@@ -58,6 +58,10 @@ export interface ProviderStatus {
   /** Average latency in ms */
   avg_latency_ms: number;
   enabled: boolean;
+  /** Model identifier (e.g. "claude-sonnet-4-20250514") */
+  model?: string;
+  /** Routing priority (lower = higher priority) */
+  priority?: number;
 }
 
 // ── Project summary ───────────────────────────────────────────────────────────

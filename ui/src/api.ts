@@ -43,9 +43,18 @@ export async function fetchSession(
 
 // ── Pool status ───────────────────────────────────────────────────────────────
 
-/** Fetch current provider pool health. */
+/** Response shape from GET /pool/status */
+interface PoolStatusResponse {
+  providers: ProviderStatus[];
+  active: boolean;
+  usage?: Record<string, unknown>;
+  strategy?: string;
+}
+
+/** Fetch current provider pool health (extracts providers from wrapper). */
 export async function fetchPoolStatus(): Promise<ProviderStatus[]> {
-  return fetchJSON<ProviderStatus[]>("/pool/status");
+  const data = await fetchJSON<PoolStatusResponse>("/pool/status");
+  return data.providers ?? [];
 }
 
 // ── Project summary ───────────────────────────────────────────────────────────
@@ -73,6 +82,20 @@ export async function executeCommand(
   return fetchJSON<{ execution_id: string; status: string }>("/commands/execute", {
     method: "POST",
     body: JSON.stringify({ command, args, project_dir }),
+  });
+}
+
+// ── Task status ───────────────────────────────────────────────────────────────
+
+/** PATCH a task's status (e.g. reset failed/blocked → pending for retry). */
+export async function patchTaskStatus(
+  sessionId: string,
+  taskId: string,
+  status: string,
+): Promise<void> {
+  await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
 }
 

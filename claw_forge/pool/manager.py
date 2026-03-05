@@ -230,22 +230,47 @@ class ProviderPoolManager:
         error_summary = "; ".join(f"{n}: {e}" for n, e in errors)
         raise ProviderPoolExhausted(f"All providers exhausted. Errors: {error_summary}")
 
+    def _derive_health(self, circuit_state: str) -> str:
+        """Map circuit breaker state to a UI health label."""
+        if circuit_state == "closed":
+            return "healthy"
+        if circuit_state == "half_open":
+            return "degraded"
+        return "unhealthy"
+
     async def get_pool_status(
         self, *, model_aliases: dict[str, str] | None = None
     ) -> dict[str, Any]:
-        """Return current pool status including circuits, usage, and optional model aliases."""
+        """Return current pool status including circuits, usage, and optional model aliases.
+
+        Each provider dict is flattened to include usage stats, health,
+        rpm, max_rpm, circuit_state, model, and avg_latency_ms so the
+        frontend can consume the data directly.
+        """
+        usage = self._tracker.get_all_stats()
+        providers = []
+        for p in self._providers:
+            cb = self._circuits[p.name]
+            cb_dict = cb.to_dict()
+            circuit_state = str(cb_dict.get("state", "closed"))
+            p_usage = usage.get(p.name, {})
+            providers.append({
+                "name": p.name,
+                "type": p.config.provider_type.value,
+                "priority": p.config.priority,
+                "enabled": p.config.enabled,
+                "health": self._derive_health(circuit_state) if p.config.enabled else "unknown",
+                "circuit_state": circuit_state,
+                "circuit": cb_dict,
+                "rpm": self._tracker.get_rpm(p.name),
+                "max_rpm": p.config.max_rpm,
+                "total_cost_usd": round(float(p_usage.get("total_cost_usd", 0) or 0), 6),
+                "avg_latency_ms": round(float(p_usage.get("avg_latency_ms", 0) or 0), 1),
+                "model": p.config.model or "",
+            })
         result: dict[str, Any] = {
-            "providers": [
-                {
-                    "name": p.name,
-                    "type": p.config.provider_type.value,
-                    "priority": p.config.priority,
-                    "enabled": p.config.enabled,
-                    "circuit": self._circuits[p.name].to_dict(),
-                }
-                for p in self._providers
-            ],
-            "usage": self._tracker.get_all_stats(),
+            "providers": providers,
+            "usage": usage,
             "strategy": self._router.strategy.value,
         }
         if model_aliases is not None:

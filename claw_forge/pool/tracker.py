@@ -67,6 +67,14 @@ class UsageTracker:
         recent = sum(1 for t in stats.request_timestamps if t > cutoff)
         return recent >= max_rpm
 
+    def get_rpm(self, provider_name: str) -> int:
+        """Return requests in the last 60 seconds for the given provider."""
+        stats = self._stats.get(provider_name)
+        if not stats or not stats.request_timestamps:
+            return 0
+        cutoff = time.monotonic() - 60.0
+        return sum(1 for t in stats.request_timestamps if t > cutoff)
+
     def get_avg_latency(self, provider_name: str) -> float:
         stats = self._stats.get(provider_name)
         if not stats:
