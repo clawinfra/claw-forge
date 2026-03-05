@@ -213,9 +213,9 @@ class ToggleProviderRequest(BaseModel):
 
 
 class SetProviderModelsRequest(BaseModel):
-    """Request to update the active model pool for a provider."""
+    """Request to update the active tier list for a provider."""
 
-    active_models: list[str]
+    active_tiers: list[str]
 
 
 class AgentStateService:
@@ -723,7 +723,7 @@ class AgentStateService:
                         "avg_latency_ms": 0,
                         "model": cfg.get("model", ""),
                         "model_map": cfg.get("model_map", {}) or {},
-                        "active_models": cfg.get("active_models", []) or [],
+                        "active_tiers": cfg.get("active_tiers", []) or [],
                     })
                 strategy = data.get("pool", {}).get("strategy", "priority")
                 return {
@@ -794,16 +794,16 @@ class AgentStateService:
 
         @app.patch("/pool/providers/{name}/models")
         async def set_provider_models(name: str, req: SetProviderModelsRequest) -> dict[str, Any]:
-            """Update the active model pool for a provider at runtime."""
+            """Update the active tier list for a provider at runtime."""
             pm = self._pool_manager
             if pm is None:
                 raise HTTPException(503, "Pool manager not available")
-            found = pm.set_provider_models(name, req.active_models)
+            found = pm.set_provider_tiers(name, req.active_tiers)
             if not found:
                 raise HTTPException(404, f"Provider {name!r} not found")
             status = await pm.get_pool_status()
             await self.ws_manager.broadcast_pool_update(status["providers"])
-            return {"name": name, "active_models": req.active_models}
+            return {"name": name, "active_tiers": req.active_tiers}
 
         # ── Command palette endpoints ─────────────────────────────────────
 
