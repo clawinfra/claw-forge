@@ -3,13 +3,15 @@
  *
  * Each provider row shows: toggle, name, type badge, model, health, cost.
  * Toggle = soft (runtime). Persist = hard (writes claw-forge.yaml).
- * Model aliases are shown as a collapsible summary below the provider list.
+ * Model tier accordion: expandable checkboxes to enable/disable model tiers
+ * per-provider; checked tiers form the ordered pool used for complexity routing
+ * (low → first tier, high → last tier).
  */
 
 import { useState, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProviderStatus } from "../types";
-import { toggleProvider, persistProvider } from "../api";
+import { toggleProvider, persistProvider, setProviderTiers } from "../api";
 import type { PoolStatusResponse } from "../api";
 import { POOL_KEY } from "../hooks/usePoolStatus";
 
@@ -53,16 +55,34 @@ const TYPE_COLORS: Record<string, string> = {
 /** Strip ${VAR:-default} or ${VAR} to show a human-friendly model name. */
 function displayModel(raw: string | undefined): string {
   if (!raw) return "";
-  // ${VAR:-default} → default
   if (raw.startsWith("${") && raw.includes(":-")) {
     return raw.split(":-")[1].replace(/}$/, "");
   }
-  // ${VAR} → VAR (env not resolved)
   if (raw.startsWith("${") && raw.endsWith("}")) {
     return raw.slice(2, -1);
   }
   return raw;
 }
+
+/**
+ * Return "LOW", "MED", or "HIGH" based on position within activeTiers.
+ * Returns "" when the alias is not active.
+ */
+function complexityLabel(alias: string, activeTiers: string[]): string {
+  const idx = activeTiers.indexOf(alias);
+  if (idx === -1) return "";
+  if (activeTiers.length === 1) return "ALL";
+  if (idx === 0) return "LOW";
+  if (idx === activeTiers.length - 1) return "HIGH";
+  return "MED";
+}
+
+const COMPLEXITY_COLORS: Record<string, string> = {
+  LOW: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  MED: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  HIGH: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  ALL: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+};
 
 // ── ProviderRow ───────────────────────────────────────────────────────────────
 
@@ -74,6 +94,8 @@ interface ProviderRowProps {
   onToggleResult: (name: string, success: boolean, newEnabled: boolean) => void;
   onPersist: (name: string) => void;
   onToast: (msg: string, kind: ToastKind) => void;
+  onTierToggle: (name: string, activeTiers: string[]) => void;
+  onTierToggleResult: (name: string, success: boolean, activeTiers: string[]) => void;
 }
 
 function ProviderRow({
@@ -84,8 +106,17 @@ function ProviderRow({
   onToggleResult,
   onPersist,
   onToast,
+  onTierToggle,
+  onTierToggleResult,
 }: ProviderRowProps) {
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [togglingTier, setTogglingTier] = useState(false);
+
+  const modelMap = provider.model_map ?? {};
+  const modelMapEntries = Object.entries(modelMap); // [alias, modelId]
+  const activeTiers = provider.active_tiers ?? [];
+  const hasModelMap = modelMapEntries.length > 0;
 
   const handleToggle = useCallback(async () => {
     if (toggling) return;
@@ -118,6 +149,29 @@ function ProviderRow({
     }
   }, [provider.name, provider.enabled, onPersist, onToast]);
 
+  const handleTierCheck = useCallback(async (alias: string, checked: boolean) => {
+    if (togglingTier) return;
+    // Rebuild active list in model_map definition order so complexity routing
+    // always follows the user's intended cheapest→most-capable hierarchy.
+    const allAliases = Object.keys(modelMap);
+    const newTiers = checked
+      ? allAliases.filter((a) => activeTiers.includes(a) || a === alias)
+      : activeTiers.filter((a) => a !== alias);
+    setTogglingTier(true);
+    onTierToggle(provider.name, newTiers);
+    try {
+      await setProviderTiers(provider.name, newTiers);
+      onTierToggleResult(provider.name, true, newTiers);
+      onToast(`${provider.name}: model tier pool updated`, "success");
+    } catch (err) {
+      onTierToggle(provider.name, activeTiers); // revert
+      onTierToggleResult(provider.name, false, activeTiers);
+      onToast(`Tier update failed: ${String(err)}`, "error");
+    } finally {
+      setTogglingTier(false);
+    }
+  }, [provider.name, activeTiers, modelMap, togglingTier, onTierToggle, onTierToggleResult, onToast]);
+
   const typeClass = TYPE_COLORS[provider.type] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
   const model = displayModel(provider.model);
 
@@ -127,6 +181,7 @@ function ProviderRow({
         bg-white dark:bg-slate-800 text-xs transition-all duration-200
         ${provider.enabled ? "" : "opacity-60"}`}
     >
+      {/* ── Summary row ─────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2">
         {/* Toggle switch (soft / runtime) */}
         <button
@@ -195,7 +250,63 @@ function ProviderRow({
             {saving ? "Saving\u2026" : "Persist"}
           </button>
         )}
+
+        {/* Expand chevron — only when model_map has entries */}
+        {hasModelMap && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className={`${pendingPersist ? "" : "ml-auto"} p-0.5 text-slate-400 hover:text-slate-600
+              dark:hover:text-slate-300 transition-colors`}
+            aria-label={expanded ? "Collapse model tiers" : "Expand model tiers"}
+            title={expanded ? "Hide model tiers" : "Show model tiers"}
+          >
+            <span className="text-xs">{expanded ? "\u25B2" : "\u25BC"}</span>
+          </button>
+        )}
       </div>
+
+      {/* ── Model tier accordion ─────────────────────────────────── */}
+      {hasModelMap && expanded && (
+        <div className="border-t border-slate-100 dark:border-slate-700 px-3 py-2 flex flex-col gap-1.5">
+          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-wide mb-0.5">
+            Model tiers — checked tiers form the active pool (low → high)
+          </div>
+          {modelMapEntries.map(([alias, modelId]) => {
+            const isActive = activeTiers.includes(alias);
+            const label = complexityLabel(alias, activeTiers);
+            const labelColor = COMPLEXITY_COLORS[label] ?? "";
+            return (
+              <label
+                key={alias}
+                className="flex items-center gap-2 cursor-pointer group"
+              >
+                <input
+                  type="checkbox"
+                  checked={isActive}
+                  disabled={togglingTier}
+                  onChange={(e) => handleTierCheck(alias, e.target.checked)}
+                  className="h-3 w-3 rounded border-slate-300 text-emerald-500 focus:ring-emerald-400
+                    disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+                {/* Complexity badge (only shown when active) */}
+                {label && (
+                  <span className={`px-1 py-0.5 rounded text-[9px] font-bold leading-none ${labelColor}`}>
+                    {label}
+                  </span>
+                )}
+                {!label && <span className="w-[26px]" />}
+                <span className="font-semibold text-slate-700 dark:text-slate-200 text-[11px] min-w-[48px]">
+                  {alias}
+                </span>
+                <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                  {modelId}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -288,9 +399,6 @@ export function ProviderPoolStatus({
     onProvidersChange?.(providers.map((p) => (p.name === name ? { ...p, enabled } : p)));
   }, [providers, onProvidersChange]);
 
-  // Called by ProviderRow after the API call completes (success or failure).
-  // Clears the toggling lock and, on success, patches the query cache so the
-  // useEffect sync doesn't revert the optimistic update before the next poll.
   const handleToggleResult = useCallback(
     (name: string, success: boolean, newEnabled: boolean) => {
       setToggling((prev) => {
@@ -320,6 +428,29 @@ export function ProviderPoolStatus({
       return next;
     });
   }, []);
+
+  const handleTierToggle = useCallback((name: string, activeTiers: string[]) => {
+    setProviders((prev) =>
+      prev.map((p) => (p.name === name ? { ...p, active_tiers: activeTiers } : p)),
+    );
+  }, []);
+
+  const handleTierToggleResult = useCallback(
+    (name: string, success: boolean, activeTiers: string[]) => {
+      if (success) {
+        qc.setQueryData<PoolStatusResponse>(POOL_KEY, (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            providers: old.providers.map((p) =>
+              p.name === name ? { ...p, active_tiers: activeTiers } : p,
+            ),
+          };
+        });
+      }
+    },
+    [qc],
+  );
 
   if (isLoading) {
     return (
@@ -354,6 +485,8 @@ export function ProviderPoolStatus({
           onToggleResult={handleToggleResult}
           onPersist={handlePersistSuccess}
           onToast={handleToast}
+          onTierToggle={handleTierToggle}
+          onTierToggleResult={handleTierToggleResult}
         />
       ))}
       <ModelAliasesSection aliases={modelAliases} />
