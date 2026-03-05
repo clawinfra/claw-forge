@@ -7,17 +7,18 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchPoolStatus } from "../api";
+import type { PoolStatusResponse } from "../api";
 
-const POOL_KEY = ["pool", "status"];
+export const POOL_KEY = ["pool", "status"];
 
 /**
  * Subscribe to provider pool health.
  *
- * Returns react-query result: `{ data: ProviderStatus[], isLoading, error }`.
+ * Returns react-query result with `{ data: PoolStatusResponse, isLoading, error }`.
  * Real-time updates arrive via the shared useWebSocket hook.
  */
 export function usePoolStatus() {
-  return useQuery({
+  return useQuery<PoolStatusResponse>({
     queryKey: POOL_KEY,
     queryFn: fetchPoolStatus,
     staleTime: 10_000,

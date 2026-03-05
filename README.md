@@ -520,12 +520,13 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge fix` | TDD bug-fix: write failing test → fix → regression suite | `--report`, `--branch/--no-branch` |
 | `claw-forge status` | Project progress, phase bars, active agents, next action | `--config` |
 | `claw-forge analyze` | Scan codebase → `brownfield_manifest.json` (stack, tests, conventions) | `--project` |
-| `claw-forge ui` | Launch real-time Kanban board (React + WebSocket) | `--port`, `--session`, `--no-open` |
+| `claw-forge ui` | Launch real-time Kanban board (React + WebSocket) | `--port`, `--session`, `--dev` |
+| `claw-forge dev` | Start API (hot-reload) + UI (Vite HMR) for local development | `--state-port`, `--ui-port`, `--project` |
 | `claw-forge pool-status` | Provider health table (status, RPM, latency, cost) | `--config` |
 | `claw-forge pause` | Drain mode — finish in-flight agents, start no new ones | — |
 | `claw-forge resume` | Resume a paused project | — |
 | `claw-forge input` | Answer human-input questions from blocked agents | — |
-| `claw-forge state` | Start the state service REST API (port 8420) | `--port`, `--host` |
+| `claw-forge state` | Start the state service REST API (port 8420) | `--port`, `--host`, `--reload` |
 
 ### Slash Commands (Claude Code)
 
@@ -601,9 +602,10 @@ Real-time board tracking feature progress across all agents.
 ![Dark mode](website/assets/screenshots/kanban-dark.png)
 
 ```bash
-claw-forge state &          # start REST + WebSocket server on :8888
-cd ui && npm install
-npm run dev                  # http://localhost:5173/?session=<uuid>
+claw-forge dev               # API (:8420, hot-reload) + UI (:5173, HMR) in one command
+# or separately:
+claw-forge state --reload &  # start REST + WebSocket server on :8420 with hot-reload
+claw-forge ui --dev          # http://localhost:5173/?session=<uuid>
 ```
 
 **Columns:** Pending · In Progress · Passing · Failed · Blocked
@@ -773,13 +775,83 @@ class MyAgentPlugin(AgentPlugin):
 
 ## Development
 
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Node.js 18+ (for the Kanban UI)
+
+### Setup
+
 ```bash
 git clone https://github.com/clawinfra/claw-forge.git
 cd claw-forge
-uv sync --extra dev
-uv run pytest tests/ -v --cov --cov-report=term-missing
-uv run ruff check claw_forge/
-uv run mypy claw_forge/
+uv sync --extra dev          # install Python deps (including dev tools)
+npm install --prefix ui      # install UI deps
+```
+
+### Local Dev (API + UI with hot-reload)
+
+The fastest way to develop locally — one command starts both servers with automatic reload on file changes:
+
+```bash
+claw-forge dev
+```
+
+This starts:
+- **State API** on `http://localhost:8420` — uvicorn with `--reload`, restarts on any Python file change under `claw_forge/`
+- **Kanban UI** on `http://localhost:5173` — Vite dev server with HMR, instant updates on React/TypeScript changes
+
+Options:
+
+```bash
+claw-forge dev --state-port 9000    # custom API port
+claw-forge dev --ui-port 3000       # custom UI port
+claw-forge dev --project /path/to/app  # point at a different project directory
+claw-forge dev --no-open            # don't auto-open the browser
+```
+
+Press `Ctrl+C` to stop both servers.
+
+### Running servers separately
+
+If you prefer separate terminals (useful for cleaner log output):
+
+```bash
+# Terminal 1 — API with hot-reload
+claw-forge state --reload
+
+# Terminal 2 — UI with Vite HMR
+claw-forge ui --dev
+```
+
+The `--reload` flag on `state` enables uvicorn file watching. The `--dev` flag on `ui` runs Vite instead of serving the pre-built static bundle.
+
+### Running Vite directly (without the CLI)
+
+If you want to run `npm run dev` from the `ui/` directory without going through `claw-forge ui --dev`, set the proxy target port via environment variables:
+
+```bash
+cd ui
+VITE_API_PORT=8420 npm run dev
+```
+
+Or create `ui/.env.local`:
+
+```env
+VITE_API_PORT=8420
+VITE_WS_PORT=8420
+```
+
+### Tests & linting
+
+```bash
+uv run pytest tests/ -q                                          # full test suite
+uv run pytest tests/path/to/test.py::Class::test_name -v         # single test
+uv run pytest tests/ -q --cov=claw_forge --cov-report=term-missing  # with coverage (must reach 90%)
+uv run ruff check claw_forge/ tests/                             # lint
+uv run ruff check claw_forge/ tests/ --fix                       # auto-fix
+uv run mypy claw_forge/ --ignore-missing-imports                 # type check
 ```
 
 ---

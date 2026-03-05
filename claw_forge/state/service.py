@@ -28,6 +28,24 @@ from claw_forge.state.models import Base, Event, Session, Task
 logger = logging.getLogger(__name__)
 
 
+def create_app_from_env() -> FastAPI:
+    """App factory for ``uvicorn --reload``.
+
+    Reads configuration from environment variables so uvicorn can re-import
+    and reconstruct the app on every file change::
+
+        CLAW_FORGE_DB_URL   – SQLAlchemy async database URL
+                              (default: sqlite+aiosqlite:///./state.db)
+    """
+    import os
+
+    db_url = os.environ.get(
+        "CLAW_FORGE_DB_URL", "sqlite+aiosqlite:///./state.db"
+    )
+    svc = AgentStateService(database_url=db_url)
+    return svc.create_app()
+
+
 class ConnectionManager:
     """Manages active WebSocket connections and broadcasts structured events.
 
@@ -106,6 +124,24 @@ class ConnectionManager:
             }
         )
 
+    async def broadcast_agent_log(
+        self,
+        task_id: str,
+        task_name: str,
+        role: str,
+        content: str,
+    ) -> None:
+        """Broadcast an agent streaming log entry to all connected Kanban UIs."""
+        await self.broadcast(
+            {
+                "type": "agent_log",
+                "task_id": task_id,
+                "task_name": task_name,
+                "role": role,
+                "content": content,
+            }
+        )
+
     async def broadcast_cost_update(
         self, total_cost: float, session_cost: float
     ) -> None:
@@ -156,6 +192,14 @@ class ExecuteCommandRequest(BaseModel):
     project_dir: str = "."
 
 
+class AgentLogRequest(BaseModel):
+    """Agent streaming log entry — tool use, assistant text, or result."""
+
+    role: str  # "assistant" | "tool_use" | "tool_result" | "result" | "error"
+    content: str
+    task_name: str | None = None
+
+
 class ToggleProviderRequest(BaseModel):
     """Request to enable or disable a provider at runtime."""
 
@@ -182,10 +226,22 @@ class AgentStateService:
         self._executions: dict[str, dict[str, Any]] = {}
         # Provider pool manager (optional, used by toggle endpoints)
         self._pool_manager: ProviderPoolManager | None = pool_manager
+        # Derive project root from DB path for config discovery
+        # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
+        try:
+            _db_file = str(self._engine.url).split("///")[-1]
+            self._project_path: Path | None = Path(_db_file).resolve().parent.parent
+        except Exception:  # noqa: BLE001
+            self._project_path = None
 
-    @staticmethod
-    def _find_config_path() -> Path | None:
-        """Search CWD and up to 3 parent dirs for claw-forge.yaml."""
+    def _find_config_path(self) -> Path | None:
+        """Search project dir, then CWD, then up to 3 parent dirs for claw-forge.yaml."""
+        # Prefer the project directory the service was started for
+        if self._project_path is not None:
+            p = self._project_path / "claw-forge.yaml"
+            if p.exists():
+                return p
+        # Fallback: walk up from CWD
         candidate = Path.cwd()
         for _ in range(4):
             p = candidate / "claw-forge.yaml"
@@ -244,15 +300,8 @@ class AgentStateService:
         return app
 
     def _register_routes(self, app: FastAPI) -> None:
-        # Normalise DB URL to a canonical project path for the /info endpoint.
-        # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
         _db_url_str = str(self._engine.url)
-        try:
-            from pathlib import Path as _Path
-            _db_file = _db_url_str.split("///")[-1]
-            _svc_project = str(_Path(_db_file).resolve().parent.parent)
-        except Exception:  # noqa: BLE001
-            _svc_project = ""
+        _svc_project = str(self._project_path) if self._project_path else ""
 
         @app.get("/info")
         async def service_info() -> dict[str, str]:
@@ -362,9 +411,29 @@ class AgentStateService:
                     task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
                 await db.commit()
                 await self._emit_event(
-                    str(task.session_id), str(task.id), "task.updated", {"status": str(task.status)}
+                    str(task.session_id),
+                    str(task.id),
+                    "task.updated",
+                    {
+                        "id": str(task.id),
+                        "name": task.description or task.plugin_name,
+                        "status": str(task.status),
+                        "category": task.plugin_name,
+                    },
                 )
                 return {"id": task.id, "status": task.status}
+
+        @app.post("/tasks/{task_id}/agent-log")
+        async def post_agent_log(task_id: str, req: AgentLogRequest) -> dict[str, str]:
+            """Accept an agent streaming log entry and broadcast it via WebSocket."""
+            task_name = req.task_name or task_id[:8]
+            await self.ws_manager.broadcast_agent_log(
+                task_id=task_id,
+                task_name=task_name,
+                role=req.role,
+                content=req.content,
+            )
+            return {"status": "ok"}
 
         @app.get("/sessions/{session_id}/tasks")
         async def list_tasks(session_id: str) -> list[dict[str, Any]]:
@@ -572,12 +641,15 @@ class AgentStateService:
             Used by the Kanban health bar to poll for regression state.
             """
             reviewer = self._reviewer
-            if reviewer is None or reviewer.run_count == 0:
-                return {"run_count": 0, "last_result": None}
+            if reviewer is None:
+                return {"run_count": 0, "last_result": None, "has_test_command": False}
+            if reviewer.run_count == 0:
+                return {"run_count": 0, "last_result": None, "has_test_command": True}
             last = reviewer.last_result
             return {
                 "run_count": reviewer.run_count,
                 "last_result": last.to_dict() if last else None,
+                "has_test_command": True,
             }
 
         @app.get("/pool/status")
@@ -596,11 +668,19 @@ class AgentStateService:
             # Fallback: read provider config from YAML so the UI isn't empty
             config_path = self._find_config_path()
             if config_path is None:
-                return {"providers": [], "active": False}
+                return {"providers": [], "model_aliases": {}, "active": False}
             try:
                 text = config_path.read_text()
                 data = yaml.safe_load(text) or {}
                 providers_cfg = data.get("providers", {})
+                # Resolve model_aliases (strip ${VAR:-default} to just default)
+                raw_aliases = data.get("model_aliases", {})
+                model_aliases: dict[str, str] = {}
+                for alias, val in (raw_aliases or {}).items():
+                    v = str(val)
+                    if v.startswith("${") and ":-" in v:
+                        v = v.split(":-", 1)[1].rstrip("}")
+                    model_aliases[alias] = v
                 providers = []
                 for name, cfg in providers_cfg.items():
                     if not isinstance(cfg, dict):
@@ -610,10 +690,14 @@ class AgentStateService:
                         "type": cfg.get("type", "unknown"),
                         "priority": cfg.get("priority", 99),
                         "enabled": cfg.get("enabled", True),
-                        "health": "unknown",
+                        "health": "healthy" if cfg.get("enabled", True) else "unknown",
                         "circuit_state": "closed",
-                        "circuit": {"name": name, "state": "closed", "failure_count": 0,
-                                    "failure_threshold": 5, "recovery_timeout": 60.0},
+                        "circuit": {
+                            "name": name, "state": "closed",
+                            "failure_count": 0,
+                            "failure_threshold": 5,
+                            "recovery_timeout": 60.0,
+                        },
                         "rpm": 0,
                         "max_rpm": cfg.get("max_rpm", 60),
                         "total_cost_usd": 0,
@@ -621,25 +705,43 @@ class AgentStateService:
                         "model": cfg.get("model", ""),
                     })
                 strategy = data.get("pool", {}).get("strategy", "priority")
-                return {"providers": providers, "active": False, "strategy": strategy}
+                return {
+                    "providers": providers,
+                    "model_aliases": model_aliases,
+                    "active": False,
+                    "strategy": strategy,
+                }
             except Exception:  # noqa: BLE001
-                return {"providers": [], "active": False}
+                return {"providers": [], "model_aliases": {}, "active": False}
 
         # ── Provider toggle endpoints ─────────────────────────────────────
 
         @app.patch("/pool/providers/{name}")
         async def toggle_provider(name: str, req: ToggleProviderRequest) -> dict[str, Any]:
-            """Runtime enable/disable of a provider. Does NOT write to disk."""
+            """Runtime enable/disable of a provider.
+
+            When a run is active, toggles the live pool manager.
+            When idle, writes directly to claw-forge.yaml so the change
+            persists for the next run.
+            """
             pm = self._pool_manager
-            if pm is None:
-                raise HTTPException(503, "Pool manager not available")
-            found = pm.enable_provider(name) if req.enabled else pm.disable_provider(name)
-            if not found:
-                raise HTTPException(404, f"Provider {name!r} not found")
-            # Broadcast pool_update so the UI refreshes immediately
-            status = await pm.get_pool_status()
-            await self.ws_manager.broadcast_pool_update(status["providers"])
-            return {"name": name, "enabled": req.enabled, "persisted": False}
+            if pm is not None:
+                found = pm.enable_provider(name) if req.enabled else pm.disable_provider(name)
+                if not found:
+                    raise HTTPException(404, f"Provider {name!r} not found")
+                status = await pm.get_pool_status()
+                await self.ws_manager.broadcast_pool_update(status["providers"])
+                return {"name": name, "enabled": req.enabled, "persisted": False}
+
+            # No active run — persist to YAML so next run picks it up
+            config_path = self._find_config_path()
+            if config_path is None:
+                raise HTTPException(422, "No claw-forge.yaml found")
+            try:
+                self._persist_provider_enabled(config_path, name, req.enabled)
+            except ValueError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            return {"name": name, "enabled": req.enabled, "persisted": True}
 
         @app.post("/pool/providers/{name}/persist")
         async def persist_provider(name: str, req: ToggleProviderRequest) -> dict[str, Any]:

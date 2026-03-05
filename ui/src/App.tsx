@@ -17,6 +17,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DndContext,
+  DragOverlay,
+  useDroppable,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
   QueryClient,
   QueryClientProvider,
   useQuery,
@@ -59,7 +66,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchSessions, fetchCommands, executeCommand } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -128,6 +135,101 @@ function applyFilters(features: Feature[], filters: FilterState): Feature[] {
   });
 }
 
+// ── PendingDropColumn ─────────────────────────────────────────────────────────
+
+interface PendingDropColumnProps {
+  col: (typeof KANBAN_COLUMNS)[number];
+  cards: Feature[];
+  colIdx: number;
+  setColumnRef: (el: HTMLDivElement | null, idx: number) => void;
+  isMobile: boolean;
+  featuresLoading: boolean;
+  setSelectedFeatureId: (id: string) => void;
+  setLongPressFeature: (f: Feature) => void;
+  implicatedFeatureIds: number[];
+}
+
+function PendingDropColumn({
+  col,
+  cards,
+  colIdx,
+  setColumnRef,
+  isMobile,
+  featuresLoading,
+  setSelectedFeatureId,
+  setLongPressFeature,
+  implicatedFeatureIds,
+}: PendingDropColumnProps) {
+  const { isOver, setNodeRef } = useDroppable({ id: "pending" });
+
+  return (
+    <div
+      ref={(el) => {
+        setNodeRef(el);
+        setColumnRef(el, colIdx);
+      }}
+      className={`flex flex-col rounded-xl border transition-colors duration-200
+        ${col.colorClass} ${col.darkColorClass}
+        ${isMobile ? "w-full min-w-0" : "min-w-[240px] w-64 flex-shrink-0"}
+        ${isOver ? "ring-2 ring-blue-400 ring-dashed bg-blue-50 dark:bg-blue-950/30" : ""}`}
+      data-testid={`kanban-column-${col.id}`}
+    >
+      {/* Column header */}
+      <div
+        className={`flex items-center justify-between px-3 py-2 rounded-t-xl transition-colors duration-200
+          ${col.headerClass} ${col.darkHeaderClass}`}
+      >
+        <span className="text-sm font-semibold">{col.label}</span>
+        <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
+          {cards.length}
+        </span>
+      </div>
+
+      {/* Cards */}
+      <div
+        className={`flex flex-col gap-2 p-2 overflow-y-auto ${
+          isMobile ? "max-h-[calc(100vh-340px)]" : "max-h-[calc(100vh-280px)]"
+        }`}
+      >
+        {isOver && (
+          <div className="rounded-lg border-2 border-dashed border-blue-400 py-3 text-center text-xs text-blue-500 dark:text-blue-400">
+            Drop here to retry
+          </div>
+        )}
+        {featuresLoading
+          ? Array.from({ length: 3 }, (_, i) => (
+              <div
+                key={i}
+                className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
+              />
+            ))
+          : cards.map((feature) => (
+              <FeatureCard
+                key={feature.id}
+                feature={feature}
+                onClick={() => setSelectedFeatureId(feature.id)}
+                onLongPress={(f) => setLongPressFeature(f)}
+                implicatedFeatureIds={implicatedFeatureIds}
+              />
+            ))}
+        {!featuresLoading && cards.length === 0 && !isOver && (
+          <div className="px-2 py-6 text-center">
+            <Inbox
+              size={24}
+              className="mx-auto text-slate-300 dark:text-slate-600 mb-1"
+            />
+            <p className="text-xs text-slate-400 dark:text-slate-500 italic">
+              Nothing here
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── KanbanBoard ───────────────────────────────────────────────────────────────
+
 interface KanbanBoardProps {
   sessionId: string;
 }
@@ -139,7 +241,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     isLoading: featuresLoading,
     error: featuresError,
   } = useFeatures(sessionId);
-  const { data: providers = [], isLoading: poolLoading } = usePoolStatus();
+  const { data: poolData, isLoading: poolLoading } = usePoolStatus();
+  const providers = poolData?.providers ?? [];
+  const modelAliases = poolData?.model_aliases ?? {};
   const { data: sessionData } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => fetchSession(sessionId),
@@ -180,6 +284,10 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     }
   }, []);
 
+  // Regression implicated feature IDs — declared before useWebSocket so the
+  // setter can be passed as onRegressionResult callback
+  const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<number[]>([]);
+
   // Shared WebSocket
   const {
     connectionStatus,
@@ -190,7 +298,12 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     forceReconnect,
     addToast,
     removeToast,
-  } = useWebSocket(sessionId, { onCommandEvent: handleCommandEvent });
+    regressionIsRunning,
+    regressionRunNumber,
+  } = useWebSocket(sessionId, {
+    onCommandEvent: handleCommandEvent,
+    onRegressionResult: setImplicatedFeatureIds,
+  });
 
   // Dark mode
   const [isDark, toggleDark] = useDarkMode();
@@ -218,10 +331,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   });
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Regression implicated feature IDs
-  const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<number[]>(
-    [],
-  );
 
   // Activity log panel
   const [logOpen, setLogOpen] = useState(false);
@@ -264,10 +373,49 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     clearSwipe();
   }, [swipeDirection, clearSwipe, isMobile]);
 
+  // ── Drag-and-drop (retry failed/blocked tasks) ───────────────────────────
+  const [activeFeature, setActiveFeature] = useState<Feature | null>(null);
+
+  const handleDragStart = useCallback(
+    ({ active }: DragStartEvent) => {
+      const feat = (features ?? []).find((f) => f.id === active.id);
+      setActiveFeature(feat ?? null);
+    },
+    [features],
+  );
+
+  const handleDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      setActiveFeature(null);
+      if (!over || over.id !== "pending") return;
+      const data = active.data.current as { status: string } | undefined;
+      if (!data || (data.status !== "failed" && data.status !== "blocked")) return;
+      const taskId = active.id as string;
+
+      // Optimistic update: move the card to pending immediately
+      qc.setQueryData<Feature[]>(["features", sessionId], (prev) =>
+        (prev ?? []).map((f) =>
+          f.id === taskId ? { ...f, status: "pending" as const } : f,
+        ),
+      );
+
+      void patchTaskStatus(sessionId, taskId, "pending")
+        .then(() => {
+          addToast("Task reset to pending — will retry on next run", "success");
+        })
+        .catch(() => {
+          void qc.invalidateQueries({ queryKey: ["features"] });
+          addToast("Failed to reset task status", "error");
+        });
+    },
+    [sessionId, qc, addToast],
+  );
+
   // FAB handlers
   const handleRefresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["features"] });
     void qc.invalidateQueries({ queryKey: ["pool", "status"] });
+    void qc.invalidateQueries({ queryKey: ["regression", "status"] });
   }, [qc]);
 
   const handleResetZoom = useCallback(() => {
@@ -472,18 +620,21 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
           </div>
 
           {/* Row 3: provider pool */}
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs text-slate-400 dark:text-slate-500 font-medium shrink-0">
-              Providers:
-            </span>
-            <ProviderPoolStatus providers={providers} isLoading={poolLoading} onToast={addToast} />
+          <div className="mt-2">
+            <ProviderPoolStatus
+              providers={providers}
+              modelAliases={modelAliases}
+              isLoading={poolLoading}
+              onToast={addToast}
+            />
           </div>
         </div>
       </header>
 
       {/* ── Regression health bar ────────────────────────────────────── */}
       <RegressionHealthBar
-        onImplicatedUpdate={setImplicatedFeatureIds}
+        isRunning={regressionIsRunning}
+        runNumber={regressionRunNumber}
       />
 
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
@@ -555,65 +706,97 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
             )}
 
             {/* Columns: flex on desktop, stacked/single on mobile */}
-            <div className={isMobile ? "flex flex-col gap-4" : "flex gap-4 items-start h-full"} data-testid="kanban-columns">
-              {KANBAN_COLUMNS.map((col, colIdx) => {
-                const cards = columnFeatures[col.id] ?? [];
-                // On mobile, only show the active column
-                if (isMobile && colIdx !== mobileColumnIndex) return null;
-                return (
-                  <div
-                    key={col.id}
-                    ref={(el) => {
-                      columnRefs.current[colIdx] = el;
-                    }}
-                    className={`flex flex-col rounded-xl border ${col.colorClass} ${col.darkColorClass} transition-colors duration-200
-                      ${isMobile ? "w-full min-w-0" : "min-w-[240px] w-64 flex-shrink-0"}`}
-                    data-testid={`kanban-column-${col.id}`}
-                  >
-                    {/* Column header */}
-                    <div
-                      className={`flex items-center justify-between px-3 py-2 rounded-t-xl ${col.headerClass} ${col.darkHeaderClass} transition-colors duration-200`}
-                    >
-                      <span className="text-sm font-semibold">{col.label}</span>
-                      <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
-                        {cards.length}
-                      </span>
-                    </div>
+            <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+              <div className={isMobile ? "flex flex-col gap-4" : "flex gap-4 items-start h-full"} data-testid="kanban-columns">
+                {KANBAN_COLUMNS.map((col, colIdx) => {
+                  const cards = columnFeatures[col.id] ?? [];
+                  // On mobile, only show the active column
+                  if (isMobile && colIdx !== mobileColumnIndex) return null;
 
-                    {/* Cards */}
-                    <div className={`flex flex-col gap-2 p-2 overflow-y-auto ${isMobile ? "max-h-[calc(100vh-340px)]" : "max-h-[calc(100vh-280px)]"}`}>
-                      {featuresLoading
-                        ? Array.from({ length: 3 }, (_, i) => (
-                            <div
-                              key={i}
-                              className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
+                  // Pending column is a drop target for retrying failed/blocked tasks
+                  if (col.id === "pending") {
+                    return (
+                      <PendingDropColumn
+                        key={col.id}
+                        col={col}
+                        cards={cards}
+                        colIdx={colIdx}
+                        setColumnRef={(el, idx) => {
+                          columnRefs.current[idx] = el;
+                        }}
+                        isMobile={isMobile}
+                        featuresLoading={featuresLoading}
+                        setSelectedFeatureId={setSelectedFeatureId}
+                        setLongPressFeature={setLongPressFeature}
+                        implicatedFeatureIds={implicatedFeatureIds}
+                      />
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={col.id}
+                      ref={(el) => {
+                        columnRefs.current[colIdx] = el;
+                      }}
+                      className={`flex flex-col rounded-xl border ${col.colorClass} ${col.darkColorClass} transition-colors duration-200
+                        ${isMobile ? "w-full min-w-0" : "min-w-[240px] w-64 flex-shrink-0"}`}
+                      data-testid={`kanban-column-${col.id}`}
+                    >
+                      {/* Column header */}
+                      <div
+                        className={`flex items-center justify-between px-3 py-2 rounded-t-xl ${col.headerClass} ${col.darkHeaderClass} transition-colors duration-200`}
+                      >
+                        <span className="text-sm font-semibold">{col.label}</span>
+                        <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
+                          {cards.length}
+                        </span>
+                      </div>
+
+                      {/* Cards */}
+                      <div className={`flex flex-col gap-2 p-2 overflow-y-auto ${isMobile ? "max-h-[calc(100vh-340px)]" : "max-h-[calc(100vh-280px)]"}`}>
+                        {featuresLoading
+                          ? Array.from({ length: 3 }, (_, i) => (
+                              <div
+                                key={i}
+                                className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
+                              />
+                            ))
+                          : cards.map((feature) => (
+                              <FeatureCard
+                                key={feature.id}
+                                feature={feature}
+                                onClick={() => setSelectedFeatureId(feature.id)}
+                                onLongPress={(f) => setLongPressFeature(f)}
+                                implicatedFeatureIds={implicatedFeatureIds}
+                              />
+                            ))}
+                        {!featuresLoading && cards.length === 0 && (
+                          <div className="px-2 py-6 text-center">
+                            <Inbox
+                              size={24}
+                              className="mx-auto text-slate-300 dark:text-slate-600 mb-1"
                             />
-                          ))
-                        : cards.map((feature) => (
-                            <FeatureCard
-                              key={feature.id}
-                              feature={feature}
-                              onClick={() => setSelectedFeatureId(feature.id)}
-                              onLongPress={(f) => setLongPressFeature(f)}
-                              implicatedFeatureIds={implicatedFeatureIds}
-                            />
-                          ))}
-                      {!featuresLoading && cards.length === 0 && (
-                        <div className="px-2 py-6 text-center">
-                          <Inbox
-                            size={24}
-                            className="mx-auto text-slate-300 dark:text-slate-600 mb-1"
-                          />
-                          <p className="text-xs text-slate-400 dark:text-slate-500 italic">
-                            Nothing here
-                          </p>
-                        </div>
-                      )}
+                            <p className="text-xs text-slate-400 dark:text-slate-500 italic">
+                              Nothing here
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Drag overlay: ghost card following the cursor during drag */}
+              <DragOverlay>
+                {activeFeature ? (
+                  <div className="shadow-xl opacity-90 rounded-lg">
+                    <FeatureCard feature={activeFeature} />
                   </div>
-                );
-              })}
-            </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </div>
         </main>
       ) : (

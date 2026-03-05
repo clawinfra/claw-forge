@@ -10,6 +10,8 @@
     "mock-server": "node scripts/mock-server.js"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-query": "^5.0.0",
     "lucide-react": "^0.400.0",
     "react": "^18.3.0",

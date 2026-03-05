@@ -159,12 +159,14 @@ class TestToggleEndpoint:
         resp = client.patch("/pool/providers/nonexistent", json={"enabled": False})
         assert resp.status_code == 404
 
-    def test_toggle_no_pool_manager_503(self):
+    def test_toggle_no_pool_manager_falls_back_to_yaml(self):
+        """Without a live pool manager, toggle persists to YAML."""
         svc = make_service_with_manager(None)
         app = svc.create_app()
         client = TestClient(app, raise_server_exceptions=False)
+        # Provider "alpha" doesn't exist in any config → 404 from YAML fallback
         resp = client.patch("/pool/providers/alpha", json={"enabled": False})
-        assert resp.status_code == 503
+        assert resp.status_code in (404, 422)  # 404 if config found, 422 if no config
 
     def test_toggle_broadcasts_ws(self, service_with_manager):
         """After toggle, broadcast_pool_update should be called."""
@@ -187,7 +189,7 @@ class TestPersistEndpoint:
                 "groq-backup": {"enabled": True},
             }
         }))
-        with patch.object(svc.__class__, "_find_config_path", staticmethod(lambda: cfg)):
+        with patch.object(svc.__class__, "_find_config_path", lambda self: cfg):
             resp = client.post("/pool/providers/anthropic-direct/persist", json={"enabled": False})
         assert resp.status_code == 200
         data = resp.json()
@@ -199,7 +201,7 @@ class TestPersistEndpoint:
 
     def test_persist_endpoint_config_not_found_422(self, app_client):
         client, svc, mgr = app_client
-        with patch.object(svc.__class__, "_find_config_path", staticmethod(lambda: None)):
+        with patch.object(svc.__class__, "_find_config_path", lambda self: None):
             resp = client.post("/pool/providers/anthropic-direct/persist", json={"enabled": False})
         assert resp.status_code == 422
 
@@ -207,7 +209,7 @@ class TestPersistEndpoint:
         client, svc, mgr = app_client
         cfg = tmp_path / "claw-forge.yaml"
         cfg.write_text(yaml.dump({"providers": {}}))
-        with patch.object(svc.__class__, "_find_config_path", staticmethod(lambda: cfg)):
+        with patch.object(svc.__class__, "_find_config_path", lambda self: cfg):
             resp = client.post("/pool/providers/ghost/persist", json={"enabled": False})
         assert resp.status_code == 404
 
@@ -223,7 +225,7 @@ class TestPersistEndpoint:
         client, svc, mgr = app_client
         cfg = tmp_path / "claw-forge.yaml"
         cfg.write_text(yaml.dump({"providers": {"other": {"enabled": True}}}))
-        with patch.object(svc.__class__, "_find_config_path", staticmethod(lambda: cfg)):
+        with patch.object(svc.__class__, "_find_config_path", lambda self: cfg):
             resp = client.post("/pool/providers/anthropic-direct/persist", json={"enabled": False})
         assert resp.status_code == 422
 
@@ -305,7 +307,7 @@ class TestTogglePersistFlow:
         assert mgr.get_provider_enabled("anthropic-direct") is False
 
         # Step 2: persist
-        with patch.object(svc.__class__, "_find_config_path", staticmethod(lambda: cfg)):
+        with patch.object(svc.__class__, "_find_config_path", lambda self: cfg):
             resp2 = client.post("/pool/providers/anthropic-direct/persist", json={"enabled": False})
         assert resp2.status_code == 200
         assert resp2.json()["persisted"] is True

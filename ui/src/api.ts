@@ -44,17 +44,17 @@ export async function fetchSession(
 // ── Pool status ───────────────────────────────────────────────────────────────
 
 /** Response shape from GET /pool/status */
-interface PoolStatusResponse {
+export interface PoolStatusResponse {
   providers: ProviderStatus[];
   active: boolean;
+  model_aliases?: Record<string, string>;
   usage?: Record<string, unknown>;
   strategy?: string;
 }
 
-/** Fetch current provider pool health (extracts providers from wrapper). */
-export async function fetchPoolStatus(): Promise<ProviderStatus[]> {
-  const data = await fetchJSON<PoolStatusResponse>("/pool/status");
-  return data.providers ?? [];
+/** Fetch current provider pool health and model aliases. */
+export async function fetchPoolStatus(): Promise<PoolStatusResponse> {
+  return fetchJSON<PoolStatusResponse>("/pool/status");
 }
 
 // ── Project summary ───────────────────────────────────────────────────────────
@@ -89,11 +89,11 @@ export async function executeCommand(
 
 /** PATCH a task's status (e.g. reset failed/blocked → pending for retry). */
 export async function patchTaskStatus(
-  sessionId: string,
+  _sessionId: string,
   taskId: string,
   status: string,
 ): Promise<void> {
-  await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/${taskId}`, {
+  await fetchJSON<unknown>(`/tasks/${taskId}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });

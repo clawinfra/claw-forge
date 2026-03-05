@@ -4,6 +4,8 @@ __pycache__/
 *.db
 coverage.xml
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.egg-info/
 uv.lock
 node_modules/

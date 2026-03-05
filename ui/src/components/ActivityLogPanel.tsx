@@ -14,6 +14,7 @@ interface ActivityLogPanelProps {
 const EVENT_BADGE: Record<WsEvent["type"], { bg: string; label: string }> = {
   agent_started: { bg: "bg-blue-500", label: "AGENT START" },
   agent_completed: { bg: "bg-emerald-500", label: "AGENT DONE" },
+  agent_log: { bg: "bg-cyan-500", label: "AGENT" },
   feature_update: { bg: "bg-purple-500", label: "FEATURE" },
   cost_update: { bg: "bg-amber-500", label: "COST" },
   pool_update: { bg: "bg-slate-400", label: "POOL" },

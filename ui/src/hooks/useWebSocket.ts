@@ -5,10 +5,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { openKanbanSocket } from "../api";
+import type { PoolStatusResponse } from "../api";
 import type {
   ActivityLogEntry,
   Feature,
-  ProviderStatus,
 
   Toast,
   WsEvent,
@@ -23,6 +23,14 @@ const TOAST_DURATION = 3000;
 let logIdCounter = 0;
 let toastIdCounter = 0;
 
+const ROLE_PREFIX: Record<string, string> = {
+  assistant: "LLM",
+  tool_use: "Tool",
+  tool_result: "Result",
+  result: "Done",
+  error: "Error",
+};
+
 function eventToMessage(event: WsEvent): string {
   switch (event.type) {
     case "feature_update":
@@ -36,16 +44,21 @@ function eventToMessage(event: WsEvent): string {
     case "pool_update":
       return `Pool update: ${event.providers.length} providers`;
     case "regression_started":
-      return `🔄 Regression run #${event.run_number} started`;
+      return `Regression run #${event.run_number} started`;
     case "regression_result":
       return event.passed
-        ? `✅ Regression #${event.run_number}: ${event.total} passing (${event.duration_ms}ms)`
-        : `❌ Regression #${event.run_number}: ${event.failed} failed — ${event.failed_tests.join(", ")}`;
+        ? `Regression #${event.run_number}: ${event.total} passing (${event.duration_ms}ms)`
+        : `Regression #${event.run_number}: ${event.failed} failed — ${event.failed_tests.join(", ")}`;
+    case "agent_log": {
+      const prefix = ROLE_PREFIX[event.role] ?? event.role;
+      return `[${event.task_name}] ${prefix}: ${event.content}`;
+    }
   }
 }
 
 export interface UseWebSocketOptions {
   onCommandEvent?: (event: Record<string, unknown>) => void;
+  onRegressionResult?: (implicatedIds: number[]) => void;
 }
 
 export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {}) {
@@ -56,10 +69,14 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
   const [costHistory, setCostHistory] = useState<number[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
+  const [regressionIsRunning, setRegressionIsRunning] = useState(false);
+  const [regressionRunNumber, setRegressionRunNumber] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
   const onCommandEventRef = useRef(options.onCommandEvent);
   onCommandEventRef.current = options.onCommandEvent;
+  const onRegressionResultRef = useRef(options.onRegressionResult);
+  onRegressionResultRef.current = options.onRegressionResult;
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
@@ -137,10 +154,16 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
         queryClient.setQueryData<Feature[]>(
           ["features", sessionId],
           (old = []) => {
-            const idx = old.findIndex((f) => f.id === event.feature.id);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const featureId = (event.feature as any).id ?? null;
+            // Partial payloads (e.g. task.updated with only {session_id, task_id, status})
+            // have no "id" field — skip them; the optimistic update already handled it.
+            if (featureId == null) return old;
+            const idx = old.findIndex((f) => f.id === featureId);
             if (idx >= 0) {
+              // Merge so that partial events don't wipe fields missing from the payload.
               const updated = [...old];
-              updated[idx] = event.feature;
+              updated[idx] = { ...old[idx], ...event.feature };
               return updated;
             }
             return [...old, event.feature];
@@ -162,9 +185,13 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
           queryKey: ["features", sessionId],
         });
       } else if (event.type === "pool_update") {
-        queryClient.setQueryData<ProviderStatus[]>(
+        queryClient.setQueryData<PoolStatusResponse>(
           ["pool", "status"],
-          event.providers,
+          (old) => ({
+            ...old,
+            providers: event.providers,
+            active: true,
+          } as PoolStatusResponse),
         );
       } else if (event.type === "cost_update") {
         setCostHistory((prev) => {
@@ -173,6 +200,13 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
             ? next.slice(-MAX_COST_HISTORY)
             : next;
         });
+      } else if (event.type === "regression_started") {
+        setRegressionIsRunning(true);
+        setRegressionRunNumber(event.run_number);
+      } else if (event.type === "regression_result") {
+        setRegressionIsRunning(false);
+        void queryClient.invalidateQueries({ queryKey: ["regression", "status"] });
+        onRegressionResultRef.current?.(event.implicated_feature_ids);
       }
 
     };
@@ -237,5 +271,7 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
     forceReconnect,
     addToast,
     removeToast,
+    regressionIsRunning,
+    regressionRunNumber,
   };
 }

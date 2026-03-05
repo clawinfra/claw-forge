@@ -1,28 +1,21 @@
 /**
- * ProviderPoolStatus — provider list with runtime enable/disable toggles.
+ * ProviderPoolStatus — provider list with model display and toggles.
  *
- * Each row shows: toggle | name + type | health badge | model | RPM | cost | latency | [Persist]
- *
- * Toggling calls PATCH /pool/providers/{name} immediately (runtime only — "soft" toggle).
- * "Persist" calls POST /pool/providers/{name}/persist to write claw-forge.yaml ("hard" toggle).
+ * Each provider row shows: toggle, name, type badge, model, health, cost.
+ * Toggle = soft (runtime). Persist = hard (writes claw-forge.yaml).
+ * Model aliases are shown as a collapsible summary below the provider list.
  */
 
 import { useState, useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ProviderStatus } from "../types";
 import { toggleProvider, persistProvider } from "../api";
+import type { PoolStatusResponse } from "../api";
+import { POOL_KEY } from "../hooks/usePoolStatus";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ToastKind = "success" | "error";
-
-interface ProviderRowProps {
-  provider: ProviderStatus;
-  pendingPersist: boolean;
-  toggling: boolean;
-  onToggle: (name: string, enabled: boolean) => void;
-  onPersist: (name: string) => void;
-  onToast: (msg: string, kind: ToastKind) => void;
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,7 +35,7 @@ function healthLabel(health: ProviderStatus["health"], enabled: boolean): string
     case "healthy": return "OK";
     case "degraded": return "SLOW";
     case "unhealthy": return "DOWN";
-    default: return "—";
+    default: return "IDLE";
   }
 }
 
@@ -57,13 +50,38 @@ const TYPE_COLORS: Record<string, string> = {
   ollama: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
 };
 
+/** Strip ${VAR:-default} or ${VAR} to show a human-friendly model name. */
+function displayModel(raw: string | undefined): string {
+  if (!raw) return "";
+  // ${VAR:-default} → default
+  if (raw.startsWith("${") && raw.includes(":-")) {
+    return raw.split(":-")[1].replace(/}$/, "");
+  }
+  // ${VAR} → VAR (env not resolved)
+  if (raw.startsWith("${") && raw.endsWith("}")) {
+    return raw.slice(2, -1);
+  }
+  return raw;
+}
+
 // ── ProviderRow ───────────────────────────────────────────────────────────────
+
+interface ProviderRowProps {
+  provider: ProviderStatus;
+  pendingPersist: boolean;
+  toggling: boolean;
+  onToggle: (name: string, enabled: boolean) => void;
+  onToggleResult: (name: string, success: boolean, newEnabled: boolean) => void;
+  onPersist: (name: string) => void;
+  onToast: (msg: string, kind: ToastKind) => void;
+}
 
 function ProviderRow({
   provider,
   pendingPersist,
   toggling,
   onToggle,
+  onToggleResult,
   onPersist,
   onToast,
 }: ProviderRowProps) {
@@ -75,15 +93,17 @@ function ProviderRow({
     onToggle(provider.name, newEnabled);
     try {
       await toggleProvider(provider.name, newEnabled);
+      onToggleResult(provider.name, true, newEnabled);
       onToast(
         `${provider.name} ${newEnabled ? "enabled" : "disabled"} (runtime)`,
         "success",
       );
     } catch (err) {
       onToggle(provider.name, provider.enabled);
+      onToggleResult(provider.name, false, provider.enabled);
       onToast(`Toggle failed: ${String(err)}`, "error");
     }
-  }, [provider.name, provider.enabled, toggling, onToggle, onToast]);
+  }, [provider.name, provider.enabled, toggling, onToggle, onToggleResult, onToast]);
 
   const handlePersist = useCallback(async () => {
     setSaving(true);
@@ -99,104 +119,125 @@ function ProviderRow({
   }, [provider.name, provider.enabled, onPersist, onToast]);
 
   const typeClass = TYPE_COLORS[provider.type] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
-  const rpmPct = provider.max_rpm > 0
-    ? Math.min(100, (provider.rpm / provider.max_rpm) * 100)
-    : 0;
+  const model = displayModel(provider.model);
 
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700
+      className={`rounded-lg border border-slate-200 dark:border-slate-700
         bg-white dark:bg-slate-800 text-xs transition-all duration-200
         ${provider.enabled ? "" : "opacity-60"}`}
     >
-      {/* Toggle switch (soft / runtime) */}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={provider.enabled}
-        aria-label={`${provider.enabled ? "Disable" : "Enable"} ${provider.name} (runtime)`}
-        disabled={toggling}
-        onClick={handleToggle}
-        title="Runtime toggle (soft)"
-        className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full
-          border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-forge-400
-          ${provider.enabled ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-600"}
-          ${toggling ? "opacity-60 cursor-not-allowed" : ""}`}
-      >
-        <span
-          className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow
-            transition duration-200 ease-in-out
-            ${provider.enabled ? "translate-x-3" : "translate-x-0"}`}
-        />
-      </button>
-
-      {/* Name + type badge */}
-      <div className="flex items-center gap-1.5 min-w-0 shrink">
-        <span className="font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[120px]">
-          {provider.name}
-        </span>
-        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium leading-none whitespace-nowrap ${typeClass}`}>
-          {provider.type.replace(/_/g, "-")}
-        </span>
-      </div>
-
-      {/* Health dot + label */}
-      <span className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300 shrink-0" title={`Circuit: ${provider.circuit_state}`}>
-        <span className="text-sm leading-none">{healthDot(provider.health, provider.enabled)}</span>
-        <span className="font-medium">{healthLabel(provider.health, provider.enabled)}</span>
-      </span>
-
-      {/* Model */}
-      {provider.model && provider.enabled && (
-        <span className="text-slate-400 dark:text-slate-500 truncate max-w-[100px]" title={provider.model}>
-          {provider.model}
-        </span>
-      )}
-
-      {/* RPM gauge */}
-      {provider.enabled && (
-        <span className="flex items-center gap-1 shrink-0" title={`${provider.rpm}/${provider.max_rpm} requests/min`}>
-          <span className="relative w-8 h-1.5 rounded-full bg-slate-200 dark:bg-slate-600 overflow-hidden">
-            <span
-              className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500
-                ${rpmPct > 80 ? "bg-red-400" : rpmPct > 50 ? "bg-amber-400" : "bg-emerald-400"}`}
-              style={{ width: `${rpmPct}%` }}
-            />
-          </span>
-          <span className="text-slate-500 dark:text-slate-400 tabular-nums">
-            {provider.rpm}/{provider.max_rpm === 0 ? "\u221E" : provider.max_rpm}
-          </span>
-        </span>
-      )}
-
-      {/* Cost */}
-      <span className="text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
-        {provider.enabled ? `$${provider.total_cost_usd.toFixed(2)}` : "—"}
-      </span>
-
-      {/* Latency */}
-      {provider.enabled && provider.avg_latency_ms > 0 && provider.avg_latency_ms < Infinity && (
-        <span className="text-slate-400 dark:text-slate-500 shrink-0 tabular-nums">
-          {provider.avg_latency_ms < 1000
-            ? `${Math.round(provider.avg_latency_ms)}ms`
-            : `${(provider.avg_latency_ms / 1000).toFixed(1)}s`}
-        </span>
-      )}
-
-      {/* Persist button (hard toggle — appears after unsaved runtime change) */}
-      {pendingPersist && (
+      <div className="flex items-center gap-2 px-3 py-2">
+        {/* Toggle switch (soft / runtime) */}
         <button
           type="button"
-          disabled={saving}
-          onClick={handlePersist}
-          title="Save to claw-forge.yaml (persist)"
-          className={`ml-auto px-2 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide
-            border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-300
-            hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors
-            ${saving ? "opacity-60 cursor-not-allowed" : ""}`}
+          role="switch"
+          aria-checked={provider.enabled}
+          aria-label={`${provider.enabled ? "Disable" : "Enable"} ${provider.name} (runtime)`}
+          disabled={toggling}
+          onClick={handleToggle}
+          title="Runtime toggle (soft)"
+          className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full
+            border-2 border-transparent transition-colors duration-200 focus:outline-none
+            ${provider.enabled ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-600"}
+            ${toggling ? "opacity-60 cursor-not-allowed" : ""}`}
         >
-          {saving ? "Saving\u2026" : "Persist"}
+          <span
+            className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow
+              transition duration-200 ease-in-out
+              ${provider.enabled ? "translate-x-3" : "translate-x-0"}`}
+          />
         </button>
+
+        {/* Name + type badge */}
+        <div className="flex items-center gap-1.5 min-w-0 shrink">
+          <span className="font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[120px]">
+            {provider.name}
+          </span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium leading-none whitespace-nowrap ${typeClass}`}>
+            {provider.type.replace(/_/g, "-")}
+          </span>
+        </div>
+
+        {/* Model name (if set) */}
+        {model && (
+          <span
+            className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[140px] shrink"
+            title={provider.model}
+          >
+            {model}
+          </span>
+        )}
+
+        {/* Health dot + label */}
+        <span className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300 shrink-0">
+          <span className="text-sm leading-none">{healthDot(provider.health, provider.enabled)}</span>
+          <span className="font-medium">{healthLabel(provider.health, provider.enabled)}</span>
+        </span>
+
+        {/* Cost */}
+        <span className="text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
+          {provider.enabled && provider.total_cost_usd > 0 ? `$${provider.total_cost_usd.toFixed(2)}` : ""}
+        </span>
+
+        {/* Persist button (hard toggle) */}
+        {pendingPersist && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handlePersist}
+            title="Save to claw-forge.yaml (persist)"
+            className={`ml-auto px-2 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide
+              border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-300
+              hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors
+              ${saving ? "opacity-60 cursor-not-allowed" : ""}`}
+          >
+            {saving ? "Saving\u2026" : "Persist"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ModelAliases section ──────────────────────────────────────────────────────
+
+function ModelAliasesSection({ aliases }: { aliases: Record<string, string> }) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = Object.entries(aliases);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-2 w-full px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors rounded-lg"
+      >
+        <span className="font-semibold text-slate-700 dark:text-slate-200">Model Aliases</span>
+        <span className="text-slate-400 dark:text-slate-500">
+          {entries.length} alias{entries.length !== 1 ? "es" : ""}
+        </span>
+        <span className="ml-auto text-slate-400">{expanded ? "\u25B2" : "\u25BC"}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-slate-100 dark:border-slate-700 px-3 py-2 bg-slate-50/50 dark:bg-slate-800/50 rounded-b-lg">
+          <div className="flex flex-wrap gap-1.5">
+            {entries.map(([alias, resolved]) => (
+              <span
+                key={alias}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md
+                  bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+              >
+                <span className="font-semibold">{alias}</span>
+                <span className="text-slate-400 dark:text-slate-500">{"\u2192"}</span>
+                <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[160px]">
+                  {resolved}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -206,24 +247,24 @@ function ProviderRow({
 
 interface ProviderPoolStatusProps {
   providers: ProviderStatus[];
+  modelAliases?: Record<string, string>;
   isLoading?: boolean;
   onProvidersChange?: (providers: ProviderStatus[]) => void;
-  /** Bubble toast events to the parent (global toast system) */
   onToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
 }
 
 export function ProviderPoolStatus({
   providers: initialProviders,
+  modelAliases = {},
   isLoading = false,
   onProvidersChange,
   onToast,
 }: ProviderPoolStatusProps) {
+  const qc = useQueryClient();
   const [providers, setProviders] = useState<ProviderStatus[]>(initialProviders);
   const [pendingPersist, setPendingPersist] = useState<Set<string>>(new Set());
   const [toggling, setToggling] = useState<Set<string>>(new Set());
 
-  // Keep local state in sync with prop updates (e.g. WebSocket refreshes)
-  // Only sync when not mid-toggle to avoid flicker
   useEffect(() => {
     if (toggling.size === 0) {
       setProviders(initialProviders);
@@ -244,15 +285,33 @@ export function ProviderPoolStatus({
       prev.map((p) => (p.name === name ? { ...p, enabled } : p)),
     );
     setPendingPersist((prev) => new Set([...prev, name]));
-    setTimeout(() => {
+    onProvidersChange?.(providers.map((p) => (p.name === name ? { ...p, enabled } : p)));
+  }, [providers, onProvidersChange]);
+
+  // Called by ProviderRow after the API call completes (success or failure).
+  // Clears the toggling lock and, on success, patches the query cache so the
+  // useEffect sync doesn't revert the optimistic update before the next poll.
+  const handleToggleResult = useCallback(
+    (name: string, success: boolean, newEnabled: boolean) => {
       setToggling((prev) => {
         const next = new Set(prev);
         next.delete(name);
         return next;
       });
-    }, 500);
-    onProvidersChange?.(providers.map((p) => (p.name === name ? { ...p, enabled } : p)));
-  }, [providers, onProvidersChange]);
+      if (success) {
+        qc.setQueryData<PoolStatusResponse>(POOL_KEY, (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            providers: old.providers.map((p) =>
+              p.name === name ? { ...p, enabled: newEnabled } : p,
+            ),
+          };
+        });
+      }
+    },
+    [qc],
+  );
 
   const handlePersistSuccess = useCallback((name: string) => {
     setPendingPersist((prev) => {
@@ -264,11 +323,11 @@ export function ProviderPoolStatus({
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-1">
-        {[1, 2, 3].map((i) => (
+      <div className="flex flex-col gap-1.5">
+        {[1, 2].map((i) => (
           <div
             key={i}
-            className="h-9 rounded-lg bg-slate-200 dark:bg-slate-700 animate-pulse"
+            className="h-10 rounded-lg bg-slate-200 dark:bg-slate-700 animate-pulse"
           />
         ))}
       </div>
@@ -284,7 +343,7 @@ export function ProviderPoolStatus({
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       {providers.map((p) => (
         <ProviderRow
           key={p.name}
@@ -292,10 +351,12 @@ export function ProviderPoolStatus({
           pendingPersist={pendingPersist.has(p.name)}
           toggling={toggling.has(p.name)}
           onToggle={handleToggle}
+          onToggleResult={handleToggleResult}
           onPersist={handlePersistSuccess}
           onToast={handleToast}
         />
       ))}
+      <ModelAliasesSection aliases={modelAliases} />
     </div>
   );
 }

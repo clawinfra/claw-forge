@@ -1,0 +1,15 @@
+# Ralph Progress Log
+
+## Codebase Patterns
+- UI stack: React 18 + Vite + TypeScript (strict) + TailwindCSS + @tanstack/react-query + lucide-react
+- State management: React Query for server state, useState for local UI state, no Redux/Context
+- WebSocket: Single shared connection via useWebSocket hook, patches React Query cache via setQueryData
+- Dark mode: Tailwind class strategy, useDarkMode hook with localStorage persistence
+- All components are functional React components with hooks
+- TypeScript check: run from ui/ directory: node node_modules/.bin/tsc --noEmit --project tsconfig.json
+- Default state service port: 8420 (configurable via VITE_API_PORT env var)
+- SVG components (DependencyGraph) use inline styles, not Tailwind classes
+
+---
+
+Started: 2026-03-05

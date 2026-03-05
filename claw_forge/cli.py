@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,18 @@ app = typer.Typer(name="claw-forge", help="Multi-provider autonomous coding agen
 console = Console()
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _load_env_file(directory: Path) -> None:
+    """Load a .env file from *directory* into ``os.environ`` (setdefault)."""
+    env_file = directory / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip())
 
 
 def _expand_env_vars(obj: object) -> object:
@@ -72,12 +85,12 @@ providers:
     priority: 1
     enabled: true
 
-  # Direct Anthropic API key
+  # Direct Anthropic API key (set enabled: true and add ANTHROPIC_API_KEY to .env)
   anthropic-direct:
     type: anthropic
     api_key: ${ANTHROPIC_API_KEY}
     priority: 2
-    enabled: true
+    enabled: false
 
   # Anthropic-compatible proxy (optional)
   # anthropic-proxy:
@@ -205,13 +218,7 @@ def _load_config(config_path: str, *, auto_scaffold: bool = False) -> dict[str, 
             )
             raise typer.Exit(1) from None
     # Auto-load .env file if present alongside the config
-    env_file = path.parent / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                os.environ.setdefault(key.strip(), val.strip())
+    _load_env_file(path.parent)
     raw = yaml.safe_load(path.read_text())
     return _expand_env_vars(raw)  # type: ignore[return-value]
 
@@ -442,11 +449,16 @@ def run(
                 await session.commit()
                 await session.refresh(db_session)
 
-            # Fetch pending or failed tasks (retry)
+            # Fetch pending, failed, or orphaned running tasks (retry)
+            # "running" tasks are orphaned from a previous interrupted run — treat as pending
             stmt_tasks = (
                 select(Task)
                 .where(Task.session_id == db_session.id)
-                .where((Task.status == "pending") | (Task.status == "failed"))
+                .where(
+                    (Task.status == "pending")
+                    | (Task.status == "failed")
+                    | (Task.status == "running")
+                )
             )
             result_tasks = await session.execute(stmt_tasks)
             tasks = result_tasks.scalars().all()
@@ -457,6 +469,19 @@ def run(
                 )
                 return
 
+            # Reset any orphaned "running" tasks back to "pending" in the DB
+            # so the UI shows the correct state before agents re-execute them
+            orphaned = [t for t in tasks if t.status == "running"]
+            if orphaned:
+                console.print(
+                    f"[yellow]Resetting {len(orphaned)} orphaned task(s) "
+                    "from previous interrupted run[/yellow]"
+                )
+                for t in orphaned:
+                    t.status = "pending"
+                    t.started_at = None
+                await session.commit()
+
             # Build TaskNode objects from DB tasks
             task_nodes: list[TaskNode] = []
             for t in tasks:
@@ -466,7 +491,7 @@ def run(
                     plugin_name=t.plugin_name,
                     priority=t.priority,
                     depends_on=depends_on,
-                    status=t.status,
+                    status="pending",  # reset failed/orphaned tasks to pending for retry
                 )
                 task_nodes.append(node)
 
@@ -507,24 +532,59 @@ def run(
             # API-only mode (pool) is unaffected and runs fully concurrently.
             _cli_semaphore = asyncio.Semaphore(1)
 
-            # Build task handler — each invocation gets its own session to
-            # avoid concurrent commit() collisions on a shared session.
+            # Build task handler — communicates with the state service via HTTP
+            # so that WebSocket events are broadcast to the Kanban UI.
+            _state_base = f"http://127.0.0.1:{_state_port}"
+
+            async def _patch_task(
+                client: httpx.AsyncClient, task_id: str, **fields: Any,
+            ) -> None:
+                """PATCH task status via HTTP (triggers WS broadcast)."""
+                with suppress(httpx.HTTPError):
+                    await client.patch(
+                        f"{_state_base}/tasks/{task_id}",
+                        json=fields, timeout=5,
+                    )
+
+            async def _log_agent(
+                client: httpx.AsyncClient,
+                task_id: str,
+                task_name: str,
+                role: str,
+                content: str,
+            ) -> None:
+                """POST agent log entry via HTTP (triggers WS broadcast)."""
+                with suppress(httpx.HTTPError):
+                    await client.post(
+                        f"{_state_base}/tasks/{task_id}/agent-log",
+                        json={
+                            "role": role,
+                            "content": content,
+                            "task_name": task_name,
+                        },
+                        timeout=5,
+                    )
+
             async def task_handler(task_node: TaskNode) -> dict[str, Any]:
-                async with async_session_maker() as task_session:
-                    # Mark task as running
-                    stmt_update = select(Task).where(Task.id == task_node.id)
-                    result = await task_session.execute(stmt_update)
-                    db_task = result.scalar_one()
-                    db_task.status = "running"
-                    db_task.started_at = datetime.now(UTC)
-                    await task_session.commit()
+                async with httpx.AsyncClient() as http:
+                    # Mark task as running in DB + notify UI via HTTP
+                    async with async_session_maker() as task_session:
+                        stmt_update = select(Task).where(Task.id == task_node.id)
+                        result = await task_session.execute(stmt_update)
+                        db_task = result.scalar_one()
+                        task_name = db_task.description or db_task.plugin_name
+                        prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
+                        db_task.status = "running"
+                        db_task.started_at = datetime.now(UTC)
+                        await task_session.commit()
+
+                    # Notify UI via state service HTTP (best-effort)
+                    await _patch_task(http, task_node.id, status="running")
 
                     output = ""
                     success = False
 
                     try:
-                        prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
-
                         # ── Option 1: claude_agent_sdk + claude CLI (full autonomous agent) ──
                         # claude_agent_sdk is a declared dependency so it's always installed.
                         # It requires the `claude` CLI in PATH to actually run agents.
@@ -588,9 +648,45 @@ def run(
                                         _cli_semaphore,
                                         AgentSession(options) as agent_session,
                                     ):
-                                        async for msg in agent_session.run(prompt):
-                                            if hasattr(msg, "text"):
-                                                full_output.append(msg.text)
+                                        async for msg in agent_session.run(prompt):  # noqa: E501
+                                            # AssistantMessage: content blocks
+                                            content = getattr(msg, "content", None)
+                                            if isinstance(content, list):
+                                                for block in content:
+                                                    if hasattr(block, "text"):
+                                                        full_output.append(block.text)
+                                                        await _log_agent(
+                                                            http, task_node.id, task_name,
+                                                            "assistant", block.text[:500],
+                                                        )
+                                                    elif hasattr(block, "tool_name"):
+                                                        _tn = getattr(block, "tool_name", "?")
+                                                        _ti = str(getattr(block, "input", ""))[:200]
+                                                        await _log_agent(
+                                                            http, task_node.id, task_name,
+                                                            "tool_use", f"{_tn}: {_ti}",
+                                                        )
+                                            # ToolResultMessage
+                                            elif hasattr(msg, "tool_results"):
+                                                for tr in getattr(msg, "tool_results", []):
+                                                    _tc = str(getattr(tr, "content", ""))[:300]
+                                                    await _log_agent(
+                                                        http, task_node.id, task_name,
+                                                        "tool_result", _tc,
+                                                    )
+                                            # ResultMessage: final result
+                                            elif hasattr(msg, "result") and msg.result:
+                                                full_output.append(msg.result)
+                                                await _log_agent(
+                                                    http, task_node.id, task_name,
+                                                    "result", msg.result[:500],
+                                                )
+                                            # Auth/billing errors reported on AssistantMessage
+                                            if getattr(msg, "error", None):
+                                                raise RuntimeError(
+                                                    f"Agent error: {msg.error} — "
+                                                    "check `claude login` or verify API key in .env"
+                                                )
                                 finally:
                                     if _saved_claudecode is not None:
                                         os.environ["CLAUDECODE"] = _saved_claudecode
@@ -619,6 +715,10 @@ def run(
                                 "```path/to/file.py\n<code>\n```\n\n"
                                 f"Project directory: {project_path}"
                             )
+                            await _log_agent(
+                                http, task_node.id, task_name,
+                                "assistant", "Sending request to provider pool…",
+                            )
                             response = await pool.execute(
                                 model=model,
                                 messages=[{"role": "user", "content": prompt}],
@@ -626,6 +726,10 @@ def run(
                                 max_tokens=8192,
                             )
                             output = response.content or ""
+                            await _log_agent(
+                                http, task_node.id, task_name,
+                                "result", output[:500],
+                            )
 
                             # Write any code blocks to disk (BUG-11)
                             from claw_forge.output_parser import write_code_blocks
@@ -656,11 +760,22 @@ def run(
                         success = False
 
                     finally:
-                        db_task.status = "completed" if success else "failed"
-                        db_task.completed_at = datetime.now(UTC)
-                        db_task.error_message = None if success else output
-                        db_task.result_json = {"output": output} if success else None
-                        await task_session.commit()
+                        # Persist final status directly to DB
+                        async with async_session_maker() as fin_session:
+                            stmt_fin = select(Task).where(Task.id == task_node.id)
+                            res_fin = await fin_session.execute(stmt_fin)
+                            fin_task = res_fin.scalar_one()
+                            fin_task.status = "completed" if success else "failed"
+                            fin_task.completed_at = datetime.now(UTC)
+                            fin_task.error_message = None if success else output
+                            fin_task.result_json = {"output": output} if success else None
+                            await fin_session.commit()
+                        # Notify UI via state service HTTP (best-effort)
+                        await _patch_task(
+                            http, task_node.id,
+                            status="completed" if success else "failed",
+                            **({"error_message": output} if not success else {}),
+                        )
 
                 return {"success": success, "output": output}
 
@@ -744,7 +859,11 @@ def pool_status(
 
 @app.command()
 def state(
-    port: int = typer.Option(8420, "--port", help="Port to bind the state service on."),
+    port: int = typer.Option(
+        int(os.environ.get("CLAW_FORGE_STATE_PORT", "8420")),
+        "--port",
+        help="Port to bind the state service on [default: 8420 or $CLAW_FORGE_STATE_PORT].",
+    ),
     host: str = typer.Option(
         "0.0.0.0", "--host",
         help="Host to bind (use 127.0.0.1 for local-only).",
@@ -753,6 +872,10 @@ def state(
     config: str = typer.Option(
         "claw-forge.yaml", "--config", "-c",
         help="Path to claw-forge.yaml (used for provider config and project metadata).",
+    ),
+    reload: bool = typer.Option(
+        False, "--reload",
+        help="Enable hot-reload — restart the server on Python file changes (dev only).",
     ),
 ) -> None:
     """Start the AgentStateService REST + WebSocket API.
@@ -765,6 +888,9 @@ def state(
         # Start on default port 8420
         claw-forge state
 
+        # Start with hot-reload for development
+        claw-forge state --reload
+
         # Start on a custom port, local-only
         claw-forge state --port 9000 --host 127.0.0.1
 
@@ -773,16 +899,30 @@ def state(
     """
     import uvicorn
 
-    from claw_forge.state.service import AgentStateService
-
     project_path = Path(project).resolve()
+    # Load .env from the project directory so API keys are available
+    _load_env_file(project_path)
     db_path = project_path / ".claw-forge" / "state.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite+aiosqlite:///{db_path}"
     console.print(f"[dim]Database: {db_path}[/dim]")
 
-    svc = AgentStateService(database_url=db_url)
-    uvicorn.run(svc.create_app(), host=host, port=port)
+    if reload:
+        console.print("[bold yellow]🔄 Hot-reload enabled[/bold yellow]")
+        os.environ["CLAW_FORGE_DB_URL"] = db_url
+        uvicorn.run(
+            "claw_forge.state.service:create_app_from_env",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=[str(Path(__file__).parent)],
+        )
+    else:
+        from claw_forge.state.service import AgentStateService
+
+        svc = AgentStateService(database_url=db_url)
+        uvicorn.run(svc.create_app(), host=host, port=port)
 
 
 @app.command()
@@ -1297,9 +1437,9 @@ def _build_session_redirect_js(session_id: str) -> str:
 def _ensure_state_service(project_path: Path, port: int) -> int:
     """Start state service if not running or serving the wrong project.
 
-    Returns the actual port the state service is listening on (may differ from
-    *port* if that port is blocked by another process such as an IDE).
-    Tries *port* then port+1 … port+4 before raising RuntimeError.
+    When the configured port is held by a non-claw-forge process, that process
+    is killed (SIGKILL via lsof / fuser) and the state service takes the port.
+    Returns the port the state service is listening on.
     """
     import json as _json
     import socket as _sock
@@ -1346,6 +1486,29 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
         except Exception:  # noqa: BLE001
             return None
 
+    def _kill_port(p: int) -> None:
+        """Kill every process listening on TCP port *p* (SIGKILL)."""
+        import signal as _sig
+        try:
+            result = _sp.run(
+                ["lsof", "-ti", f"tcp:{p}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for pid_str in result.stdout.strip().splitlines():
+                if pid_str.strip().isdigit():
+                    try:
+                        os.kill(int(pid_str.strip()), _sig.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+        except FileNotFoundError:
+            # lsof absent (rare) — fall back to fuser (Linux)
+            _sp.run(
+                ["fuser", "-k", "-KILL", f"{p}/tcp"],
+                capture_output=True, timeout=5,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def _start_on(p: int) -> bool:
         """Launch state service on *p*. Return True if /info responds correctly."""
         project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
@@ -1387,36 +1550,20 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
                 _wait_for_port_free(port)
                 if _start_on(port):
                     return port
-        # Port blocked by a non-claw-forge process (e.g. Cursor IDE) or startup
-        # failed — try the next 4 ports automatically.
+        # Port blocked by a non-claw-forge process — kill it and take the port.
         console.print(
-            f"[yellow]Port {port} is occupied by another process — "
-            f"trying fallback ports…[/yellow]"
+            f"[dim]Port {port} occupied by another process — reclaiming…[/dim]"
         )
-        for p in range(port + 1, port + 5):
-            if _listening(p):
-                # Check if it's already our service on this alternate port
-                alt_info = _get_info(p)
-                if alt_info is not None:
-                    alt_raw = alt_info.get("project_path", "")
-                    if alt_raw and str(Path(str(alt_raw)).resolve()) == want_project:
-                        return p
-                continue  # also blocked
-            if _start_on(p):
-                console.print(
-                    f"[yellow]State service started on port {p} "
-                    f"(port {port} blocked by another process).[/yellow]\n"
-                    f"[dim]Tip: add 'state:\\n  port: {p}' to claw-forge.yaml "
-                    f"to keep this port consistently.[/dim]"
-                )
-                return p
+        _kill_port(port)
+        _wait_for_port_free(port)
+        if _start_on(port):
+            return port
         import contextlib as _ctx
         log_tail = ""
         with _ctx.suppress(OSError):
             log_tail = log_path.read_text()[-500:]
         raise RuntimeError(
-            f"Port {port} and the next 4 alternatives are all occupied.\n"
-            f"Fix: add 'state:\\n  port: <free_port>' to claw-forge.yaml.\n"
+            f"State service failed to start on port {port} after reclaiming it.\n"
             f"Log: {log_path}\n{log_tail}"
         )
 
@@ -1715,6 +1862,172 @@ def ui(
         threading.Thread(target=_open_static, daemon=True).start()
 
     uvicorn.run(static_app, host="0.0.0.0", port=port, log_level="warning")  # noqa: S104
+
+
+@app.command()
+def dev(
+    ui_port: int = typer.Option(
+        int(os.environ.get("CLAW_FORGE_UI_PORT", "5173")),
+        "--ui-port",
+        help="Port for the Vite dev server",
+    ),
+    state_port: int = typer.Option(
+        int(os.environ.get("CLAW_FORGE_STATE_PORT", "8420")),
+        "--state-port",
+        help="Port for the state service API",
+    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser automatically"),
+    session: str = typer.Option("", "--session", "-s", help="Session UUID to open on the board"),
+    run_agents: bool = typer.Option(
+        False, "--run/--no-run",
+        help="Also launch the agent orchestrator (claw-forge run) alongside the dev servers.",
+    ),
+) -> None:
+    """Start both the API (with hot-reload) and the Kanban UI (Vite dev server).
+
+    This is the recommended way to develop locally — a single command that
+    runs the FastAPI state service with uvicorn --reload and the Vite HMR
+    dev server side by side.  Both restart automatically on file changes.
+
+    Examples:
+
+        # Start everything with defaults
+        claw-forge dev
+
+        # Custom ports
+        claw-forge dev --state-port 9000 --ui-port 3000
+
+        # Also run agents (orchestrator + UI + state service together)
+        claw-forge dev --project /path/to/project --run
+    """
+    import shutil
+    import signal
+    import subprocess
+    import threading
+    import time
+    import webbrowser
+
+    project_path = Path(project).resolve()
+    # Load .env from the project directory so API keys are available
+    _load_env_file(project_path)
+
+    # ── Validate prerequisites ──────────────────────────────────────────────
+    ui_dir = Path(__file__).parent.parent / "ui"
+    if not ui_dir.exists():
+        console.print(
+            "[red]ui/ source directory not found.[/red]\n"
+            "[dim]`claw-forge dev` requires a source checkout.[/dim]"
+        )
+        raise typer.Exit(1) from None
+    if not shutil.which("node"):
+        console.print("[red]Node.js not found. Install from https://nodejs.org/[/red]")
+        raise typer.Exit(1) from None
+
+    node_modules = ui_dir / "node_modules"
+    if not node_modules.exists():
+        console.print("[yellow]Installing UI dependencies (npm install)…[/yellow]")
+        subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
+
+    # ── Prepare state service database ──────────────────────────────────────
+    db_path = project_path / ".claw-forge" / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    # ── Resolve session for display ─────────────────────────────────────────
+    _session_id_dev = "(none — run `claw-forge run` to create a session)"
+    try:
+        import sqlite3 as _sqlite3_dev
+
+        if db_path.exists():
+            with _sqlite3_dev.connect(str(db_path)) as _conn:
+                _row = _conn.execute(
+                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if _row:
+                    _session_id_dev = _row[0]
+    except Exception:  # noqa: BLE001
+        pass
+
+    url = f"http://localhost:{ui_port}"
+    if session:
+        url += f"/?session={session}"
+
+    console.print("[bold green]🔥 claw-forge dev (API + UI hot-reload)[/bold green]")
+    console.print(f"   UI:        [cyan]{url}[/cyan]  (Vite HMR)")
+    console.print(f"   State API: [cyan]http://localhost:{state_port}[/cyan]  (uvicorn --reload)")
+    console.print(f"   Database:  [dim]{db_path}[/dim]")
+    console.print(f"   Session:   [yellow]{_session_id_dev}[/yellow]")
+    if run_agents:
+        console.print("   Agents:    [green]enabled (--run)[/green]")
+    else:
+        console.print("   Agents:    [dim]disabled — pass --run to launch orchestrator[/dim]")
+    console.print("   Press [bold]Ctrl+C[/bold] to stop all servers\n")
+
+    # ── Launch state service with --reload ──────────────────────────────────
+    state_env = os.environ.copy()
+    state_env["CLAW_FORGE_DB_URL"] = db_url
+    state_proc = subprocess.Popen(  # noqa: S603, S607
+        [
+            "claw-forge", "state",
+            "--project", str(project_path),
+            "--port", str(state_port),
+            "--reload",
+        ],
+        env=state_env,
+    )
+
+    # ── Launch Vite dev server ──────────────────────────────────────────────
+    ui_env = os.environ.copy()
+    ui_env["VITE_API_PORT"] = str(state_port)
+    ui_env["VITE_WS_PORT"] = str(state_port)
+    ui_proc = subprocess.Popen(  # noqa: S603, S607
+        ["npm", "run", "dev", "--", "--port", str(ui_port), "--host"],
+        cwd=ui_dir,
+        env=ui_env,
+    )
+
+    # ── Optionally launch the agent orchestrator ─────────────────────────────
+    run_proc: subprocess.Popen[bytes] | None = None
+    if run_agents:
+        # Give the state service a moment to start before the orchestrator connects
+        time.sleep(2)
+        run_env = os.environ.copy()
+        run_env["CLAW_FORGE_STATE_PORT"] = str(state_port)
+        run_proc = subprocess.Popen(  # noqa: S603, S607
+            ["claw-forge", "run", "--project", str(project_path)],
+            env=run_env,
+        )
+
+    # ── Open browser after a short delay ────────────────────────────────────
+    if open_browser:
+        def _open_browser() -> None:
+            time.sleep(3)
+            webbrowser.open(url)
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    # ── Wait for either process to exit or Ctrl+C ──────────────────────────
+    def _shutdown(*_args: object) -> None:
+        procs = [p for p in (run_proc, ui_proc, state_proc) if p is not None]
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+
+    signal.signal(signal.SIGINT, _shutdown)  # type: ignore[arg-type]
+    signal.signal(signal.SIGTERM, _shutdown)  # type: ignore[arg-type]
+
+    try:
+        # Wait for any watched process to finish
+        watched = [p for p in (run_proc, ui_proc, state_proc) if p is not None]
+        while all(p.poll() is None for p in watched):
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _shutdown()
+        for p in [p for p in (run_proc, ui_proc, state_proc) if p is not None]:
+            p.wait()
+        console.print("\n[dim]All servers stopped.[/dim]")
 
 
 @app.command()

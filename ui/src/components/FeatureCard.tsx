@@ -18,6 +18,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useDraggable } from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 import type { Feature } from "../types";
 import { AgentMascot } from "./AgentMascot";
 import { useLongPress } from "../hooks/useLongPress";
@@ -68,7 +70,8 @@ function categoryColour(category: string): string {
   return CATEGORY_COLOURS[category.toLowerCase()] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
 }
 
-function shortId(id: string): string {
+function shortId(id: string | undefined): string {
+  if (!id) return "?";
   return id.length > 8 ? `…${id.slice(-6)}` : id;
 }
 
@@ -84,7 +87,14 @@ export function FeatureCard({
   const [tapped, setTapped] = useState(false);
   const isMobile = useMobileDetect();
   const prevStatusRef = useRef(feature.status);
-  const depCount = feature.depends_on.length;
+
+  const isDraggable = feature.status === "failed" || feature.status === "blocked";
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: feature.id,
+    data: { status: feature.status, sessionId: feature.session_id ?? "" },
+    disabled: !isDraggable,
+  });
+  const depCount = (feature.depends_on ?? []).length;
   const featureNumId = Number(feature.id);
   const isImplicated =
     implicatedInRegression ||
@@ -121,11 +131,19 @@ export function FeatureCard({
 
   return (
     <div
+      ref={setNodeRef}
       onClick={isMobile ? undefined : onClick}
       {...(isMobile ? longPressHandlers : {})}
+      {...listeners}
+      {...attributes}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        opacity: isDragging ? 0.5 : undefined,
+      }}
       className={`group rounded-lg border-l-4 border bg-white dark:bg-slate-800 p-3 shadow-sm
-        hover:shadow-md transition-all duration-200 cursor-pointer touch-manipulation
+        hover:shadow-md transition-all duration-200 touch-manipulation
         border-slate-200 dark:border-slate-700
+        ${isDraggable ? (isDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-pointer"}
         ${STATUS_BORDER[feature.status]}
         ${feature.status === "failed" ? "border-r-red-200 dark:border-r-red-900" : ""}
         ${feature.status === "running" ? "border-r-blue-200 dark:border-r-blue-900" : ""}

@@ -1,0 +1,57 @@
+{
+  "project": "claw-forge-provider-panel-fix",
+  "branchName": "ralph/provider-panel-fix",
+  "description": "Fix the provider panel in the Kanban UI: backend returns nested data that doesn't match frontend ProviderStatus type, causing providers to never display. Add flattened pool status endpoint, transform layer in frontend, and enhanced UI with soft/hard toggle support.",
+  "complexity": {
+    "score": 12,
+    "category": "medium",
+    "estimated_iterations": 10
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Flatten backend pool status response to match frontend ProviderStatus type",
+      "description": "As a UI developer, I want the /pool/status endpoint to return a flat array of provider objects matching the frontend ProviderStatus interface, so the UI can display them without transformation.\n\nThe bug: get_pool_status() returns {providers: [...], usage: {...}} with usage stats in a separate dict. The frontend fetchPoolStatus() expects ProviderStatus[] directly but gets the nested object. Fields like health, rpm, max_rpm, circuit_state are missing or misplaced.\n\nFix: Enrich get_pool_status() to flatten usage stats into each provider dict, compute health from circuit state, compute RPM from request_timestamps, include max_rpm from config, and flatten circuit_state.",
+      "acceptanceCriteria": [
+        "get_pool_status() returns providers array where each provider includes: name, type, priority, enabled, health (derived from circuit state), rpm (60s window), max_rpm (from config), circuit_state (string), total_cost_usd, avg_latency_ms, model (from config)",
+        "health is derived: closed->healthy, half_open->degraded, open->unhealthy",
+        "rpm is computed from request_timestamps in the last 60 seconds",
+        "Existing tests still pass (uv run pytest tests/ -q)",
+        "No regressions in existing pool toggle tests"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Files: claw_forge/pool/manager.py, claw_forge/pool/tracker.py"
+    },
+    {
+      "id": "US-002",
+      "title": "Fix frontend fetchPoolStatus to handle backend response structure",
+      "description": "As a user viewing the Kanban UI, I want the provider list to actually populate from the backend data.\n\nThe bug: fetchPoolStatus() calls GET /api/pool/status and expects ProviderStatus[] but the endpoint returns {providers: [...], active: bool, usage: {...}, strategy: string}. The frontend needs to extract the providers array.\n\nFix: Update fetchPoolStatus() in api.ts to extract the providers array from the response wrapper. Also update the usePoolStatus hook and WebSocket handler if needed.",
+      "acceptanceCriteria": [
+        "fetchPoolStatus() extracts providers array from the {providers, active, ...} wrapper",
+        "usePoolStatus React Query hook returns ProviderStatus[] correctly",
+        "WebSocket pool_update handler correctly updates the React Query cache",
+        "TypeScript compiles with zero errors"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Files: ui/src/api.ts, ui/src/hooks/usePoolStatus.ts, ui/src/hooks/useWebSocket.ts"
+    },
+    {
+      "id": "US-003",
+      "title": "Redesign ProviderPoolStatus UI with expandable rows and soft/hard toggle",
+      "description": "As a user managing providers, I want to see each provider with its health, stats, and model info, with clear soft (runtime) and hard (persisted) toggle controls.\n\nFix: Redesign ProviderPoolStatus to show:\n- Provider name + type badge\n- Health indicator (dot + label)\n- RPM gauge, cost, latency\n- Toggle switch for runtime enable/disable (soft)\n- Save button that persists to config (hard)\n- Model name if available",
+      "acceptanceCriteria": [
+        "Each provider row shows: toggle, name, type badge, health dot+label, RPM, cost, latency, model",
+        "Toggle is clearly labeled as runtime-only (soft toggle)",
+        "Save/Persist button is clearly labeled as permanent (hard toggle)",
+        "Disabled providers show muted styling",
+        "Component works with empty provider list (shows placeholder)",
+        "TypeScript compiles with zero errors"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Files: ui/src/components/ProviderPoolStatus.tsx, ui/src/types.ts"
+    }
+  ]
+}

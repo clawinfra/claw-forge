@@ -126,6 +126,14 @@ export interface RegressionResultEvent {
   output: string;
 }
 
+export interface AgentLogEvent {
+  type: "agent_log";
+  task_id: string;
+  task_name: string;
+  role: "assistant" | "tool_use" | "tool_result" | "result" | "error";
+  content: string;
+}
+
 export type WsEvent =
   | FeatureUpdateEvent
   | PoolUpdateEvent
@@ -133,7 +141,8 @@ export type WsEvent =
   | AgentCompletedEvent
   | CostUpdateEvent
   | RegressionStartedEvent
-  | RegressionResultEvent;
+  | RegressionResultEvent
+  | AgentLogEvent;
 
 // ── Kanban columns ────────────────────────────────────────────────────────────
 

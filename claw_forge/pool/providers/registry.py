@@ -50,6 +50,12 @@ def create_provider(config: ProviderConfig) -> BaseProvider:
         if token:
             # Inject the OAuth token so AnthropicProvider uses Bearer auth.
             config = dataclasses.replace(config, oauth_token=token)
+        elif config.oauth_token:
+            # oauth_token supplied directly in YAML config — use as-is.
+            logger.debug(
+                "anthropic_oauth provider '%s': using oauth_token from config.",
+                config.name,
+            )
         elif config.api_key:
             # No credentials file but an api_key was supplied — fall back silently.
             logger.debug(
@@ -61,7 +67,7 @@ def create_provider(config: ProviderConfig) -> BaseProvider:
             raise ValueError(
                 f"anthropic_oauth provider '{config.name}': "
                 "no OAuth credentials file (~/.claude/.credentials.json) found "
-                "and no api_key supplied. "
+                "and no api_key or oauth_token supplied. "
                 "Run `claude setup-token` and set ANTHROPIC_OAUTH_TOKEN in .env, "
                 "or set ANTHROPIC_API_KEY."
             )

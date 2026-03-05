@@ -7,14 +7,15 @@
  * - Yellow pulsing when tests are running
  * - Gray when no test command detected
  *
- * Polls GET /regression/status every 10s and listens to WebSocket events.
+ * Polls GET /regression/status every 10s; real-time updates come via
+ * the shared WebSocket managed by useWebSocket (passed as props).
  */
 
-import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 interface RegressionStatus {
   run_count: number;
+  has_test_command: boolean;
   last_result: {
     passed: boolean;
     total: number;
@@ -28,8 +29,10 @@ interface RegressionStatus {
 }
 
 interface RegressionHealthBarProps {
-  /** Called when a regression_result event arrives with implicated IDs */
-  onImplicatedUpdate?: (ids: number[]) => void;
+  /** Whether a regression suite is currently running (from shared WebSocket). */
+  isRunning: boolean;
+  /** The run number of the currently running suite. */
+  runNumber: number;
 }
 
 // Use relative path — Vite proxy handles it in dev, same-origin in production
@@ -48,72 +51,50 @@ function secondsAgo(durationMs: number): string {
   return `${Math.round(s / 3600)}h`;
 }
 
-export function RegressionHealthBar({
-  onImplicatedUpdate,
-}: RegressionHealthBarProps) {
-  const [isRunning, setIsRunning] = useState(false);
-  const [runningNumber, setRunningNumber] = useState(0);
-
-  const { data, refetch } = useQuery<RegressionStatus>({
+export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBarProps) {
+  const { data, isLoading } = useQuery<RegressionStatus>({
     queryKey: ["regression", "status"],
     queryFn: fetchRegressionStatus,
     refetchInterval: 10_000,
     retry: 1,
   });
 
-  // Listen for WebSocket regression events
-  const handleWsMessage = useCallback(
-    (event: MessageEvent<string>) => {
-      try {
-        const msg = JSON.parse(event.data) as Record<string, unknown>;
-        if (msg.type === "regression_started") {
-          setIsRunning(true);
-          setRunningNumber(msg.run_number as number);
-        } else if (msg.type === "regression_result") {
-          setIsRunning(false);
-          void refetch();
-          if (
-            onImplicatedUpdate &&
-            Array.isArray(msg.implicated_feature_ids)
-          ) {
-            onImplicatedUpdate(
-              msg.implicated_feature_ids as number[],
-            );
-          }
-        }
-      } catch {
-        // ignore non-JSON
-      }
-    },
-    [refetch, onImplicatedUpdate],
-  );
-
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = window.location.host;
-    const ws = new WebSocket(`${protocol}://${host}/ws`);
-    ws.onmessage = handleWsMessage;
-    return () => {
-      ws.close();
-    };
-  }, [handleWsMessage]);
-
-  // Running state
+  // Running state (driven by shared WebSocket in useWebSocket)
   if (isRunning) {
     return (
       <div className="w-full bg-yellow-100 dark:bg-yellow-900/40 border-b border-yellow-300 dark:border-yellow-700 px-4 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-200 animate-pulse flex items-center gap-2">
         <span>🔄</span>
-        <span>Running regression suite… (Run #{runningNumber})</span>
+        <span>Running regression suite… (Run #{runNumber})</span>
       </div>
     );
   }
 
-  // Never run
-  if (!data || data.run_count === 0) {
+  // Initial load — avoid flashing "No test command detected" before data arrives
+  if (isLoading) {
+    return (
+      <div className="w-full bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-1.5 text-xs text-slate-400 dark:text-slate-500 flex items-center gap-2 animate-pulse">
+        <span>⚫</span>
+        <span>Checking regression status…</span>
+      </div>
+    );
+  }
+
+  // No test command configured
+  if (!data || !data.has_test_command) {
     return (
       <div className="w-full bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-1.5 text-xs text-slate-400 dark:text-slate-500 flex items-center gap-2">
         <span>⚫</span>
         <span>No test command detected</span>
+      </div>
+    );
+  }
+
+  // Test command configured but not yet run
+  if (data.run_count === 0) {
+    return (
+      <div className="w-full bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-1.5 text-xs text-slate-400 dark:text-slate-500 flex items-center gap-2">
+        <span>⚫</span>
+        <span>Regression suite ready — waiting for first run</span>
       </div>
     );
   }
