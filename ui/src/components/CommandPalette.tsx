@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
   Bug,
@@ -134,22 +135,31 @@ export function CommandPalette({
     [filtered, activeIndex, onExecute, onClose],
   );
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
-      onClick={onClose}
-    >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-
-      {/* Panel */}
-      <div
-        className="relative z-10 w-full max-w-xl rounded-2xl bg-white dark:bg-slate-800 shadow-2xl
-          border border-slate-200 dark:border-slate-700 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+    <AnimatePresence>
+      {isOpen && (
+      <motion.div
+        key="palette"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+        onClick={onClose}
       >
+        {/* Backdrop */}
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+
+        {/* Panel */}
+        <motion.div
+          initial={{ scale: 0.96, opacity: 0, y: -8 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.96, opacity: 0, y: -8 }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
+          className="relative z-10 w-full max-w-xl rounded-2xl bg-white dark:bg-slate-800 shadow-2xl
+            border border-slate-200 dark:border-slate-700 overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Search */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <span className="text-slate-400 dark:text-slate-500 text-sm font-mono">⌘</span>
@@ -237,7 +247,9 @@ export function CommandPalette({
           <span><kbd className="font-mono">↵</kbd> run</span>
           <span><kbd className="font-mono">Esc</kbd> close</span>
         </div>
-      </div>
-    </div>
+        </motion.div>
+      </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

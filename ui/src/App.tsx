@@ -42,6 +42,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { gsap } from "gsap";
 import { FeatureCard } from "./components/FeatureCard";
 import { RegressionHealthBar } from "./components/RegressionHealthBar";
 import { ProgressBar } from "./components/ProgressBar";
@@ -481,6 +482,25 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     | string
     | undefined;
 
+  const agentCountRef = useRef<HTMLSpanElement>(null);
+  const displayedRunningRef = useRef(summary.running);
+
+  useEffect(() => {
+    const obj = { val: displayedRunningRef.current };
+    gsap.to(obj, {
+      val: summary.running,
+      duration: 0.4,
+      ease: "power1.out",
+      snap: { val: 1 },
+      onUpdate: () => {
+        if (agentCountRef.current) {
+          agentCountRef.current.textContent = String(Math.round(obj.val));
+        }
+        displayedRunningRef.current = Math.round(obj.val);
+      },
+    });
+  }, [summary.running]);
+
   // Apply filters to features
   const filteredFeatures = useMemo(
     () => applyFilters(allFeatures, filters),
@@ -591,7 +611,8 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                   className={`h-2 w-2 rounded-full ${summary.running > 0 ? "bg-blue-500 animate-pulse" : "bg-slate-300 dark:bg-slate-600"}`}
                 />
                 <span className="text-slate-600 dark:text-slate-300 font-medium">
-                  {summary.running} agent{summary.running !== 1 ? "s" : ""} live
+                  <span ref={agentCountRef}>{summary.running}</span>
+                  {" "}agent{summary.running !== 1 ? "s" : ""} live
                 </span>
               </div>
 

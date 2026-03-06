@@ -3,6 +3,7 @@
  * Triggered by long-press on mobile. Shows full description + output/error.
  */
 import { useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { X, Clock, Coins, AlertCircle, FileText, Layers } from "lucide-react";
 import type { Feature } from "../types";
 
@@ -42,18 +43,29 @@ export function TaskDetailModal({ feature, onClose }: TaskDetailModalProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [feature, onClose]);
 
-  if (!feature) return null;
-
   return (
-    <div
-      ref={backdropRef}
-      className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center"
-      onClick={(e) => {
-        if (e.target === backdropRef.current) onClose();
-      }}
-      data-testid="task-detail-modal"
-    >
-      <div className="bg-white dark:bg-slate-800 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[85vh] overflow-y-auto shadow-2xl animate-slide-up">
+    <AnimatePresence>
+      {feature && (
+      <motion.div
+        key="modal-backdrop"
+        ref={backdropRef}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center"
+        onClick={(e) => {
+          if (e.target === backdropRef.current) onClose();
+        }}
+        data-testid="task-detail-modal"
+      >
+        <motion.div
+          initial={{ y: "100%", opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: "100%", opacity: 0 }}
+          transition={{ type: "spring", stiffness: 350, damping: 35, opacity: { duration: 0.15 } }}
+          className="bg-white dark:bg-slate-800 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
+        >
         {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-start justify-between z-10">
           <div className="flex-1 min-w-0">
@@ -210,7 +222,9 @@ export function TaskDetailModal({ feature, onClose }: TaskDetailModalProps) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+        </motion.div>
+      </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

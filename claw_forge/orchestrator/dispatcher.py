@@ -344,6 +344,12 @@ class Dispatcher:
                             t.cancel()
                     if data.get("pause"):
                         self.pause()
+                        # Hard-stop: cancel tasks waiting for the semaphore too.
+                        # Without this, cancelled tasks release the semaphore and
+                        # queued tasks immediately acquire it and become "running",
+                        # causing the In Progress count to grow on Stop All.
+                        for t in list(self._running_tasks.values()):
+                            t.cancel()
                     if data.get("resume"):
                         self.resume()
                 except Exception:  # noqa: BLE001
