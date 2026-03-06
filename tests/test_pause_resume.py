@@ -241,3 +241,191 @@ class TestPauseResumeAPI:
         async with client:
             resp = await client.post("/project/pause?session_id=nonexistent")
             assert resp.status_code == 404
+
+
+# ── Stop-all / Resume-all task endpoints ─────────────────────────────────────
+
+
+class TestStopAllResumeAll:
+    """Test the stop-all and resume-all task endpoints."""
+
+    async def _make_client(self):  # type: ignore[return]
+        from httpx import ASGITransport, AsyncClient
+
+        from claw_forge.state.service import AgentStateService
+
+        svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+        await svc.init_db()
+        app = svc.create_app()
+
+        class _CleanupClient(AsyncClient):
+            async def aclose(self) -> None:
+                await super().aclose()
+                await svc.dispose()
+
+        return _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    async def _setup_running_tasks(self, client, session_id: str) -> tuple[str, str]:
+        """Create two tasks and set them to running. Returns (task1_id, task2_id)."""
+        t1 = await client.post(
+            f"/sessions/{session_id}/tasks",
+            json={"plugin_name": "coding", "description": "task 1"},
+        )
+        t2 = await client.post(
+            f"/sessions/{session_id}/tasks",
+            json={"plugin_name": "coding", "description": "task 2"},
+        )
+        task1_id = t1.json()["id"]
+        task2_id = t2.json()["id"]
+        await client.patch(f"/tasks/{task1_id}", json={"status": "running"})
+        await client.patch(f"/tasks/{task2_id}", json={"status": "running"})
+        return task1_id, task2_id
+
+    @pytest.mark.asyncio
+    async def test_stop_all_sets_tasks_to_paused(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            task1_id, task2_id = await self._setup_running_tasks(client, session_id)
+
+            resp = await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert set(data["stopped"]) == {task1_id, task2_id}
+
+            tasks = await client.get(f"/sessions/{session_id}/tasks")
+            for t in tasks.json():
+                assert t["status"] == "paused", f"Expected paused, got {t['status']}"
+
+    @pytest.mark.asyncio
+    async def test_stop_all_sets_project_paused_flag(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            resp = await client.get(f"/project/paused?session_id={session_id}")
+            assert resp.json()["paused"] is True
+
+    @pytest.mark.asyncio
+    async def test_stop_poll_returns_pause_flag_after_stop_all(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            resp = await client.get("/stop-poll")
+            data = resp.json()
+            assert data["pause"] is True
+            # Flag is cleared after first poll
+            resp2 = await client.get("/stop-poll")
+            assert resp2.json()["pause"] is False
+
+    @pytest.mark.asyncio
+    async def test_resume_all_sets_tasks_to_pending(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            task1_id, task2_id = await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            resp = await client.post(f"/sessions/{session_id}/tasks/resume-all")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert set(data["resumed"]) == {task1_id, task2_id}
+
+            tasks = await client.get(f"/sessions/{session_id}/tasks")
+            for t in tasks.json():
+                assert t["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_resume_all_clears_project_paused_flag(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            await client.post(f"/sessions/{session_id}/tasks/resume-all")
+            resp = await client.get(f"/project/paused?session_id={session_id}")
+            assert resp.json()["paused"] is False
+
+    @pytest.mark.asyncio
+    async def test_stop_poll_returns_resume_flag_after_resume_all(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            await client.get("/stop-poll")  # drain the pause flag
+            await client.post(f"/sessions/{session_id}/tasks/resume-all")
+            resp = await client.get("/stop-poll")
+            data = resp.json()
+            assert data["resume"] is True
+            # Flag is cleared after first poll
+            resp2 = await client.get("/stop-poll")
+            assert resp2.json()["resume"] is False
+
+    @pytest.mark.asyncio
+    async def test_stop_all_no_running_tasks_returns_empty(self) -> None:
+        """stop-all on a session with no running tasks returns empty list."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            resp = await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            assert resp.status_code == 200
+            assert resp.json()["stopped"] == []
+
+    @pytest.mark.asyncio
+    async def test_agent_logs_suppressed_after_stop_all(self) -> None:
+        """Agent log POSTs return 'suppressed' for paused tasks."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            task1_id, _ = await self._setup_running_tasks(client, session_id)
+
+            # Before stop-all: log should broadcast (status "ok")
+            resp = await client.post(
+                f"/tasks/{task1_id}/agent-log",
+                json={"role": "assistant", "content": "hello", "task_name": "t1"},
+            )
+            assert resp.json()["status"] == "ok"
+
+            # After stop-all: logs suppressed for paused task IDs
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            resp = await client.post(
+                f"/tasks/{task1_id}/agent-log",
+                json={"role": "assistant", "content": "still running", "task_name": "t1"},
+            )
+            assert resp.json()["status"] == "suppressed"
+
+    @pytest.mark.asyncio
+    async def test_agent_logs_resume_after_resume_all(self) -> None:
+        """Agent logs are broadcast again after resume-all clears the paused set."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            task1_id, _ = await self._setup_running_tasks(client, session_id)
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            await client.post(f"/sessions/{session_id}/tasks/resume-all")
+
+            # After resume: logs should flow again (task is now "pending" but we just
+            # verify the suppression set was cleared)
+            resp = await client.post(
+                f"/tasks/{task1_id}/agent-log",
+                json={"role": "assistant", "content": "resumed log", "task_name": "t1"},
+            )
+            assert resp.json()["status"] == "ok"

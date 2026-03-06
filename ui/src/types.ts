@@ -9,6 +9,7 @@ export type FeatureStatus =
   | "pending"
   | "queued"
   | "running"
+  | "paused"
   | "completed"
   | "failed"
   | "blocked";
@@ -205,7 +206,7 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
   {
     id: "in_progress",
     label: "In Progress",
-    statuses: ["running"],
+    statuses: ["running", "paused"],
     colorClass: "bg-blue-50 border-blue-200",
     headerClass: "bg-blue-100 text-blue-700",
     darkColorClass: "dark:bg-blue-950/30 dark:border-blue-800",

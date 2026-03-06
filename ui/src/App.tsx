@@ -66,7 +66,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning, resumeAllPaused } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -526,9 +526,15 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
         runningIds.forEach((id) => s.delete(id));
         return s;
       });
-      addToast("Failed to stop all tasks", "error");
+      addToast("Failed to pause tasks", "error");
     });
   }, [features, sessionId, addToast]);
+
+  const handleResumeAll = useCallback(() => {
+    void resumeAllPaused(sessionId).catch(() => {
+      addToast("Failed to resume tasks", "error");
+    });
+  }, [sessionId, addToast]);
 
   // Remove task IDs from stoppingTasks once they leave the "running" state
   useEffect(() => {
@@ -880,13 +886,24 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                       >
                         <span className="text-sm font-semibold">{col.label}</span>
                         <div className="flex items-center gap-2">
-                          {col.id === "in_progress" && cards.length > 0 && (
+                          {col.id === "in_progress" && cards.some((c) => c.effectiveStatus === "paused") && (
+                            <button
+                              type="button"
+                              onClick={handleResumeAll}
+                              className="text-[10px] font-medium text-purple-500 hover:text-purple-700 dark:text-purple-400
+                                dark:hover:text-purple-300 transition-colors flex items-center gap-0.5"
+                              title="Resume all paused tasks"
+                            >
+                              ▶ Resume All
+                            </button>
+                          )}
+                          {col.id === "in_progress" && cards.some((c) => c.effectiveStatus === "running") && !cards.some((c) => c.effectiveStatus === "paused") && (
                             <button
                               type="button"
                               onClick={handleStopAll}
                               className="text-[10px] font-medium text-red-500 hover:text-red-700 dark:text-red-400
                                 dark:hover:text-red-300 transition-colors flex items-center gap-0.5"
-                              title="Stop all running tasks"
+                              title="Pause all running tasks"
                             >
                               ■ Stop All
                             </button>

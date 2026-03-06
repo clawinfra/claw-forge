@@ -106,9 +106,16 @@ export async function stopTask(taskId: string): Promise<void> {
   await fetchJSON<unknown>(`/tasks/${taskId}/stop`, { method: "POST" });
 }
 
-/** Stop all running tasks in a session and reset them to pending. */
+/** Pause all running tasks in a session (they remain visible as "paused" in In Progress). */
 export async function stopAllRunning(sessionId: string): Promise<void> {
   await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/stop-all`, {
+    method: "POST",
+  });
+}
+
+/** Resume all paused tasks in a session (moves them back to "pending"). */
+export async function resumeAllPaused(sessionId: string): Promise<void> {
+  await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/resume-all`, {
     method: "POST",
   });
 }

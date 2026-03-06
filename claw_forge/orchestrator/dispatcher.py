@@ -320,11 +320,13 @@ class Dispatcher:
             self._running_tasks.pop(task.id, None)
 
     async def _cancel_monitor(self) -> None:
-        """Poll the state service for stop requests and cancel matching tasks.
+        """Poll the state service for stop/pause/resume signals.
 
         Runs as a background asyncio.Task for the duration of ``run()``.
-        Polls ``GET {state_url}/stop-poll`` every 2 s; for each returned task
-        ID that is currently running, calls ``asyncio.Task.cancel()``.
+        Polls ``GET {state_url}/stop-poll`` every 2 s:
+        - Cancels any task IDs listed in ``task_ids``.
+        - Calls ``self.pause()`` when ``pause`` flag is True.
+        - Calls ``self.resume()`` when ``resume`` flag is True.
         """
         import httpx
 
@@ -340,5 +342,9 @@ class Dispatcher:
                         t = self._running_tasks.get(task_id)
                         if t is not None:
                             t.cancel()
+                    if data.get("pause"):
+                        self.pause()
+                    if data.get("resume"):
+                        self.resume()
                 except Exception:  # noqa: BLE001
                     pass  # transient errors are fine — we'll retry next cycle

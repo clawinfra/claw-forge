@@ -57,6 +57,7 @@ class Task(Base):
             "pending",
             "queued",
             "running",
+            "paused",
             "completed",
             "failed",
             "blocked",

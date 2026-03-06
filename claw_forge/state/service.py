@@ -245,6 +245,11 @@ class AgentStateService:
         self._pool_manager: ProviderPoolManager | None = pool_manager
         # In-memory set of task IDs requested to stop; polled and cleared by dispatcher
         self._stop_requested: set[str] = set()
+        # Pause/resume signals for the dispatcher (cleared atomically on each poll)
+        self._pause_requested: bool = False
+        self._resume_requested: bool = False
+        # Task IDs currently paused via stop-all; agent logs for these are suppressed
+        self._paused_task_ids: set[str] = set()
         # Derive project root from DB path for config discovery
         # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
         try:
@@ -478,7 +483,13 @@ class AgentStateService:
 
         @app.post("/tasks/{task_id}/agent-log")
         async def post_agent_log(task_id: str, req: AgentLogRequest) -> dict[str, str]:
-            """Accept an agent streaming log entry and broadcast it via WebSocket."""
+            """Accept an agent streaming log entry and broadcast it via WebSocket.
+
+            Logs are suppressed for tasks that have been paused via stop-all so
+            lingering agent subprocesses don't pollute the activity log.
+            """
+            if task_id in self._paused_task_ids:
+                return {"status": "suppressed"}
             task_name = req.task_name or task_id[:8]
             await self.ws_manager.broadcast_agent_log(
                 task_id=task_id,
@@ -638,8 +649,17 @@ class AgentStateService:
 
         @app.post("/sessions/{session_id}/tasks/stop-all")
         async def stop_all_running(session_id: str) -> dict[str, Any]:
-            """Stop all running tasks in a session and reset them to pending."""
+            """Pause all running tasks in a session.
+
+            Sets each running task to ``paused`` so they remain visible in the
+            In Progress column.  The dispatcher is signalled to drain (finish
+            in-flight work, start no new waves) via the ``/stop-poll`` flag.
+            Call ``POST /sessions/{session_id}/tasks/resume-all`` to resume.
+            """
             async with self._session_factory() as db:
+                session = await db.get(Session, session_id)
+                if session:
+                    session.project_paused = True
                 result = await db.execute(
                     select(Task).where(
                         Task.session_id == session_id,
@@ -649,29 +669,68 @@ class AgentStateService:
                 running_tasks = result.scalars().all()
                 stopped_ids: list[str] = []
                 for task in running_tasks:
-                    task.status = "pending"
-                    task.started_at = None
-                    task.error_message = None
+                    task.status = "paused"
                     stopped_ids.append(str(task.id))
                 await db.commit()
+            # Signal dispatcher to cancel these tasks and enter drain mode
             for task_id in stopped_ids:
                 self._stop_requested.add(task_id)
+                self._paused_task_ids.add(task_id)
+            self._pause_requested = True
+            for task_id in stopped_ids:
                 await self.ws_manager.broadcast_feature_update(
-                    {"id": task_id, "status": "pending"}
+                    {"id": task_id, "status": "paused"}
                 )
             return {"stopped": stopped_ids}
 
+        @app.post("/sessions/{session_id}/tasks/resume-all")
+        async def resume_all_paused(session_id: str) -> dict[str, Any]:
+            """Resume all paused tasks in a session.
+
+            Sets each paused task back to ``pending`` so the dispatcher can
+            pick them up on the next run.  Clears the ``project_paused`` flag.
+            """
+            async with self._session_factory() as db:
+                session = await db.get(Session, session_id)
+                if session:
+                    session.project_paused = False
+                result = await db.execute(
+                    select(Task).where(
+                        Task.session_id == session_id,
+                        Task.status == "paused",
+                    )
+                )
+                paused_tasks = result.scalars().all()
+                resumed_ids: list[str] = []
+                for task in paused_tasks:
+                    task.status = "pending"
+                    resumed_ids.append(str(task.id))
+                await db.commit()
+            self._resume_requested = True
+            # Re-allow log broadcasting for these tasks
+            for task_id in resumed_ids:
+                self._paused_task_ids.discard(task_id)
+            for task_id in resumed_ids:
+                await self.ws_manager.broadcast_feature_update(
+                    {"id": task_id, "status": "pending"}
+                )
+            return {"resumed": resumed_ids}
+
         @app.get("/stop-poll")
         async def stop_poll() -> dict[str, Any]:
-            """Return and clear the pending stop-request set.
+            """Return and clear the pending stop-request set plus pause/resume signals.
 
             Called by the dispatcher every ~2 s to discover task IDs that
-            the UI has requested to stop.  The set is cleared atomically so
-            each stop request is delivered exactly once.
+            the UI has requested to stop and whether to pause or resume.
+            All values are cleared atomically so each signal is delivered once.
             """
             task_ids = list(self._stop_requested)
             self._stop_requested.clear()
-            return {"task_ids": task_ids}
+            pause = self._pause_requested
+            self._pause_requested = False
+            resume = self._resume_requested
+            self._resume_requested = False
+            return {"task_ids": task_ids, "pause": pause, "resume": resume}
 
         # ── Human input endpoints ────────────────────────────────────────────
 
