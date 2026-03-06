@@ -971,7 +971,8 @@ class TestWritePlanToDb:
 
         with sqlite3.connect(str(db)) as conn:
             rows = conn.execute("SELECT id, description FROM tasks").fetchall()
-        assert len(rows) == 2
+        # Three-phase pipeline: each coding feature produces coding + testing + reviewer
+        assert len(rows) == 6
 
     @pytest.mark.asyncio
     async def test_empty_features(self, tmp_path: Path) -> None:

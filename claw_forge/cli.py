@@ -1140,35 +1140,104 @@ async def _write_plan_to_db(
         db.add(db_sess)
         await db.flush()
 
-        # Map feature index → task UUID for dependency wiring
+        # Categories that only need a coding task (no testable artifact produced)
+        _NON_CODING_CATEGORIES = {"docs", "infra"}
+
+        # Map feature index → terminal task UUID for cross-feature dep wiring.
+        # Terminal = reviewer task (if three phases) or coding task (if one phase).
         index_to_uuid: dict[int, str] = {}
         task_objs: list[Task] = []
-        for feat in features:
-            tid = str(uuid.uuid4())
-            index_to_uuid[feat["index"]] = tid
-            task_objs.append(
-                Task(
-                    id=tid,
-                    session_id=session_id,
-                    plugin_name="coding",
-                    description=f"{feat['name']}: {feat['description']}",
-                    category=feat.get("category"),
-                    steps=feat.get("steps", []),
-                    status="pending",
-                    priority=feat.get("index", 0),
-                    depends_on=[],  # filled below
-                )
-            )
 
-        # Wire depends_on using resolved UUIDs
-        for feat, task in zip(features, task_objs, strict=True):
-            dep_uuids = [
+        # Store per-feature task IDs for chaining
+        feature_task_ids: list[dict[str, str | None]] = []  # [{coding, testing, reviewer}]
+
+        # Pass 1: allocate UUIDs and build task objects (depends_on filled in pass 2)
+        for feat in features:
+            cat = (feat.get("category") or "").lower()
+            is_coding_only = cat in _NON_CODING_CATEGORIES
+
+            coding_tid   = str(uuid.uuid4())
+            testing_tid  = str(uuid.uuid4()) if not is_coding_only else None
+            reviewer_tid = str(uuid.uuid4()) if not is_coding_only else None
+            terminal_tid = reviewer_tid if reviewer_tid else coding_tid
+
+            index_to_uuid[feat["index"]] = terminal_tid
+            feature_task_ids.append({
+                "coding":   coding_tid,
+                "testing":  testing_tid,
+                "reviewer": reviewer_tid,
+            })
+
+            base_desc = f"{feat['name']}: {feat['description']}"
+            priority  = feat.get("index", 0)
+
+            task_objs.append(Task(
+                id=coding_tid,
+                session_id=session_id,
+                plugin_name="coding",
+                description=base_desc,
+                category=feat.get("category"),
+                steps=feat.get("steps", []),
+                status="pending",
+                priority=priority,
+                depends_on=[],
+            ))
+
+            if testing_tid:
+                task_objs.append(Task(
+                    id=testing_tid,
+                    session_id=session_id,
+                    plugin_name="testing",
+                    description=f"Test: {base_desc}",
+                    category=feat.get("category"),
+                    steps=[],
+                    status="pending",
+                    priority=priority,
+                    depends_on=[],
+                ))
+
+            if reviewer_tid:
+                task_objs.append(Task(
+                    id=reviewer_tid,
+                    session_id=session_id,
+                    plugin_name="reviewer",
+                    description=f"Review: {base_desc}",
+                    category=feat.get("category"),
+                    steps=[],
+                    status="pending",
+                    priority=priority,
+                    depends_on=[],
+                ))
+
+        # Pass 2: wire depends_on
+        for feat, tids in zip(features, feature_task_ids, strict=True):
+            # Cross-feature deps: resolve upstream feature's terminal task UUID
+            cross_deps = [
                 index_to_uuid[i]
                 for i in feat.get("depends_on_indices", [])
                 if i in index_to_uuid
             ]
-            task.depends_on = dep_uuids
-            db.add(task)
+
+            # coding task gets cross-feature deps
+            coding_task = next(t for t in task_objs if t.id == tids["coding"])
+            coding_task.depends_on = cross_deps
+            db.add(coding_task)
+
+            # testing depends on coding
+            if tids["testing"]:
+                coding_id = tids["coding"]
+                assert coding_id is not None
+                testing_task = next(t for t in task_objs if t.id == tids["testing"])
+                testing_task.depends_on = [coding_id]
+                db.add(testing_task)
+
+            # reviewer depends on testing
+            if tids["reviewer"]:
+                testing_id = tids["testing"]
+                assert testing_id is not None
+                reviewer_task = next(t for t in task_objs if t.id == tids["reviewer"])
+                reviewer_task.depends_on = [testing_id]
+                db.add(reviewer_task)
 
         await db.commit()
 
