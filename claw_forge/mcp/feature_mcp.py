@@ -451,5 +451,5 @@ def mcp_server_config(project_dir: Path) -> dict[str, Any]:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     mcp.run()

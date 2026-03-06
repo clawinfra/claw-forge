@@ -165,6 +165,8 @@ class CreateTaskRequest(BaseModel):
     description: str | None = None
     priority: int = 0
     depends_on: list[str] = []
+    category: str | None = None
+    steps: list[str] = []
 
 
 class UpdateTaskRequest(BaseModel):
@@ -397,6 +399,8 @@ class AgentStateService:
                     description=req.description,
                     priority=req.priority,
                     depends_on=req.depends_on,
+                    category=req.category,
+                    steps=req.steps,
                 )
                 db.add(task)
                 await db.commit()
@@ -437,7 +441,7 @@ class AgentStateService:
                         "id": str(task.id),
                         "name": task.description or task.plugin_name,
                         "status": str(task.status),
-                        "category": task.plugin_name,
+                        "category": task.category or task.plugin_name,
                     },
                 )
                 return {"id": task.id, "status": task.status}
@@ -466,11 +470,12 @@ class AgentStateService:
                         "id": t.id,
                         "name": t.description or t.plugin_name,
                         "plugin_name": t.plugin_name,
-                        "category": t.plugin_name,
+                        "category": t.category or t.plugin_name,
                         "description": t.description,
                         "status": t.status,
                         "priority": t.priority,
                         "depends_on": t.depends_on,
+                        "steps": t.steps or [],
                         "result_json": t.result_json,
                         "error_message": t.error_message,
                         "input_tokens": t.input_tokens,

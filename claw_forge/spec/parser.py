@@ -164,26 +164,50 @@ class ProjectSpec:
         if feature_root_el is not None:
             for category_el in feature_root_el:
                 category = category_el.tag.replace("_", " ").title()
-                text = category_el.text or ""
-                # Extract bullet items: lines starting with -
-                for line in text.splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith("- ") or stripped.startswith("* "):
-                        bullet = stripped[2:].strip()
-                        if bullet:
-                            # Derive a short name: first 60 chars, title-cased
-                            short_name = bullet[:60].rstrip(".,:;")
-                            features.append(
-                                FeatureItem(
-                                    category=category,
-                                    name=short_name,
-                                    description=bullet,
-                                )
+                feature_els = category_el.findall("feature")
+                if feature_els:
+                    # New format: <feature><description>…</description><steps>…</steps></feature>
+                    for feat_el in feature_els:
+                        desc = (feat_el.findtext("description") or "").strip()
+                        if not desc:
+                            continue
+                        short_name = desc[:60].rstrip(".,:;")
+                        feat_steps: list[str] = []
+                        steps_el = feat_el.find("steps")
+                        if steps_el is not None:
+                            for line in (steps_el.text or "").splitlines():
+                                stripped = line.strip()
+                                if stripped.startswith("- ") or stripped.startswith("* "):
+                                    feat_steps.append(stripped[2:].strip())
+                        features.append(
+                            FeatureItem(
+                                category=category,
+                                name=short_name,
+                                description=desc,
+                                steps=feat_steps,
                             )
+                        )
+                else:
+                    # Legacy format: text bullets in category element text
+                    text = category_el.text or ""
+                    for line in text.splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith("- ") or stripped.startswith("* "):
+                            bullet = stripped[2:].strip()
+                            if bullet:
+                                # Derive a short name: first 60 chars, title-cased
+                                short_name = bullet[:60].rstrip(".,:;")
+                                features.append(
+                                    FeatureItem(
+                                        category=category,
+                                        name=short_name,
+                                        description=bullet,
+                                    )
+                                )
 
         # Brownfield: if <features_to_add> has plain-text lines (not sub-elements),
         # parse them directly as flat feature list under "Addition" category.
-        if feature_root_el is None:
+        if feature_root_el is None:  # pragma: no cover
             fta_el = root.find("features_to_add")
             if fta_el is not None and not list(fta_el):
                 # No child elements — flat text block

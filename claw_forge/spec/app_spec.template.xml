@@ -45,6 +45,11 @@
       Each bullet = one agent task.
       Start with action verb: "User can...", "System displays...", "API returns..."
       Group by category. Aim for 100-300 bullets total for a full app.
+
+      IMPORTANT: Each child element name becomes the task category in the Kanban board.
+      Use descriptive snake_case names (e.g. <authentication>, <receipt_scanning>,
+      <payment_processing>). NEVER use the generic <category> tag — it makes every
+      task show "Category" with no meaningful grouping.
     -->
     <authentication>
       - User can register with email and password (returns 201 with user_id)

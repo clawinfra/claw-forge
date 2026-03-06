@@ -2,6 +2,7 @@
  * FeatureDetailDrawer — right-side slide-in drawer with full feature details.
  */
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   X,
   Clock,
@@ -35,6 +36,42 @@ const STATUS_BADGE_STYLE: Record<Feature["status"], string> = {
   failed: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
   blocked: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
 };
+
+function MarkdownContent({ children }: { children: string }) {
+  return (
+    <div className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed markdown-body">
+      <ReactMarkdown
+        components={{
+          h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-sm font-bold mt-2.5 mb-1">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-0.5">{children}</h3>,
+          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+          li: ({ children }) => <li className="leading-snug">{children}</li>,
+          code: ({ children, className }) =>
+            className ? (
+              <code className="block bg-slate-100 dark:bg-slate-900 rounded px-2 py-1.5 text-xs font-mono overflow-x-auto whitespace-pre">
+                {children}
+              </code>
+            ) : (
+              <code className="bg-slate-100 dark:bg-slate-900 rounded px-1 py-0.5 text-xs font-mono">{children}</code>
+            ),
+          pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-slate-300 dark:border-slate-600 pl-3 italic text-slate-500 dark:text-slate-400 mb-2">
+              {children}
+            </blockquote>
+          ),
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          hr: () => <hr className="border-slate-200 dark:border-slate-700 my-3" />,
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 function formatTime(ts: string | undefined): string {
   if (!ts) return "—";
@@ -138,9 +175,7 @@ export function FeatureDetailDrawer({
                     <FileText size={12} />
                     Description
                   </h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                    {feature.description}
-                  </p>
+                  <MarkdownContent>{feature.description}</MarkdownContent>
                 </div>
               )}
 
@@ -238,19 +273,19 @@ export function FeatureDetailDrawer({
                   <div className="flex justify-between">
                     <span className="text-slate-500 dark:text-slate-400">Input tokens</span>
                     <span className="font-mono text-slate-700 dark:text-slate-300">
-                      {feature.input_tokens.toLocaleString()}
+                      {(feature.input_tokens ?? 0).toLocaleString()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500 dark:text-slate-400">Output tokens</span>
                     <span className="font-mono text-slate-700 dark:text-slate-300">
-                      {feature.output_tokens.toLocaleString()}
+                      {(feature.output_tokens ?? 0).toLocaleString()}
                     </span>
                   </div>
                   <div className="flex justify-between font-medium">
                     <span className="text-slate-600 dark:text-slate-300">Cost</span>
                     <span className="font-mono text-slate-800 dark:text-slate-200">
-                      ${feature.cost_usd.toFixed(4)}
+                      ${(feature.cost_usd ?? 0).toFixed(4)}
                     </span>
                   </div>
                 </div>
@@ -317,9 +352,9 @@ export function FeatureDetailDrawer({
                           <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">{label}</span>
                           {isLong ? (
                             <>
-                              <pre className="mt-0.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-words">
-                                {strVal}
-                              </pre>
+                              <div className="mt-0.5 bg-slate-50 dark:bg-slate-900 rounded-lg p-2.5">
+                                <MarkdownContent>{strVal}</MarkdownContent>
+                              </div>
                               <button
                                 type="button"
                                 onClick={() => copyToClipboard(strVal)}

@@ -428,6 +428,7 @@ def run(
     async def main() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await _migrate_schema(engine)
 
         async with async_session_maker() as session:
             # Find or create a session for this project
@@ -501,6 +502,8 @@ def run(
                     priority=t.priority,
                     depends_on=depends_on,
                     status="pending",  # reset failed/orphaned tasks to pending for retry
+                    category=t.category or "",
+                    steps=t.steps or [],
                 )
                 task_nodes.append(node)
 
@@ -642,6 +645,11 @@ def run(
                         db_task = result.scalar_one()
                         task_name = db_task.description or db_task.plugin_name
                         prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
+                        if db_task.steps:
+                            numbered = "\n".join(
+                                f"{i + 1}. {s}" for i, s in enumerate(db_task.steps)
+                            )
+                            prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
                         db_task.status = "running"
                         db_task.started_at = datetime.now(UTC)
                         await task_session.commit()
@@ -700,11 +708,12 @@ def run(
                                     async for msg in agent_session.run(prompt):  # noqa: E501
                                         _cls = type(msg).__name__
                                         if _cls == "ResultMessage":
-                                            if getattr(msg, "result", None):
-                                                full_output.append(msg.result)
+                                            _result = getattr(msg, "result", None)
+                                            if _result:
+                                                full_output.append(str(_result))
                                                 await _log_agent(
                                                     http, task_node.id, task_name,
-                                                    "result", msg.result[:500],
+                                                    "result", str(_result)[:500],
                                                     model=model,
                                                 )
                                             continue
@@ -740,9 +749,10 @@ def run(
                                                     level="error" if _is_err else "info",
                                                     model=model,
                                                 )
-                                        if getattr(msg, "error", None):
+                                        _err = getattr(msg, "error", None)
+                                        if _err:
                                             raise RuntimeError(
-                                                f"Agent error: {msg.error} — "
+                                                f"Agent error: {_err} — "
                                                 "check `claude login` or verify API key in .env"
                                             )
                                 output = "\n".join(full_output)
@@ -1078,6 +1088,26 @@ def init(
         )
 
 
+async def _migrate_schema(engine: Any) -> None:
+    """Add new columns to existing tasks table if they don't exist.
+
+    SQLite doesn't support IF NOT EXISTS in ALTER TABLE ADD COLUMN before 3.37,
+    so we suppress OperationalError (column already exists) instead.
+    """
+    import contextlib
+
+    from sqlalchemy import text
+
+    columns = [
+        "ALTER TABLE tasks ADD COLUMN category VARCHAR(256)",
+        "ALTER TABLE tasks ADD COLUMN steps JSON DEFAULT '[]'",
+    ]
+    async with engine.begin() as conn:
+        for col_sql in columns:
+            with contextlib.suppress(Exception):
+                await conn.execute(text(col_sql))
+
+
 async def _write_plan_to_db(
     project_path: Path, project_name: str, features: list[dict[str, Any]]
 ) -> None:
@@ -1121,9 +1151,9 @@ async def _write_plan_to_db(
                     id=tid,
                     session_id=session_id,
                     plugin_name="coding",
-                    description=(
-                        f"[{feat['category']}] {feat['name']}: {feat['description']}"
-                    ),
+                    description=f"{feat['name']}: {feat['description']}",
+                    category=feat.get("category"),
+                    steps=feat.get("steps", []),
                     status="pending",
                     priority=feat.get("index", 0),
                     depends_on=[],  # filled below
@@ -2082,8 +2112,8 @@ def dev(
             if proc.poll() is None:
                 proc.terminate()
 
-    signal.signal(signal.SIGINT, _shutdown)  # type: ignore[arg-type]
-    signal.signal(signal.SIGTERM, _shutdown)  # type: ignore[arg-type]
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
 
     try:
         # Wait for any watched process to finish

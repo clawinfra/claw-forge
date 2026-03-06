@@ -187,13 +187,16 @@ After each response, derive granular bullets and confirm:
 ```
 From what you described, I'm generating these features:
 
-**Authentication (5 bullets)**
+**Authentication (5 bullets)**  →  XML: <authentication>
 - User can register with email and password (returns 201 with user_id)
 - User can login and receive JWT access_token and refresh_token
 - ...
 
 Does this capture it? Anything to add or change?
 ```
+
+The heading name in bold becomes the XML element tag in `<core_features>` (snake_case).
+Keep a note of each confirmed heading — you will use them verbatim as XML element names in Phase 5.
 
 Continue through categories:
 - **Authentication & user management**
@@ -254,6 +257,33 @@ user's project details. The XML must include:
 
 **Important:** Use `&amp;` for `&` in XML content. Each bullet in `<core_features>` becomes one
 agent task.
+
+**CRITICAL — `<core_features>` element naming:**
+Each category group inside `<core_features>` MUST use a **descriptive `snake_case` XML element
+name** derived from the feature group. The tag name becomes the task category shown in the
+Kanban board and used for routing and filtering.
+
+✅ Correct — descriptive names:
+```xml
+<core_features>
+  <authentication>...</authentication>
+  <user_profile>...</user_profile>
+  <receipt_scanning>...</receipt_scanning>
+  <payment_processing>...</payment_processing>
+  <notifications>...</notifications>
+</core_features>
+```
+
+❌ Wrong — never use the generic `<category>` tag:
+```xml
+<core_features>
+  <category>...</category>  <!-- BAD: becomes "Category" for every task -->
+  <category>...</category>
+</core_features>
+```
+
+Derive the element name from the feature group heading you used in Phase 3
+(e.g. "Receipt Scanning" → `<receipt_scanning>`, "Auth & Users" → `<authentication>`).
 
 #### `claw-forge.yaml`
 

@@ -771,14 +771,15 @@ class TestEnsureStateService:
         import socket
         from unittest.mock import MagicMock, patch
 
+        from claw_forge import __version__
         from claw_forge.cli import _ensure_state_service
 
-        # Simulate /info returning the same project path
+        # Simulate /info returning the same project path and current version
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.read.return_value = json.dumps(
-            {"project_path": str(tmp_path.resolve())}
+            {"project_path": str(tmp_path.resolve()), "claw_forge_version": __version__}
         ).encode()
 
         with socket.socket() as srv:

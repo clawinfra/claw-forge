@@ -231,6 +231,73 @@ class TestTasksEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# category + steps fields
+# ---------------------------------------------------------------------------
+
+
+class TestTaskCategoryAndSteps:
+    async def test_create_task_with_category_and_steps(self, client: AsyncClient) -> None:
+        sid = await _create_session(client)
+        r = await client.post(
+            f"/sessions/{sid}/tasks",
+            json={
+                "plugin_name": "coding",
+                "description": "Add JWT auth",
+                "category": "Authentication",
+                "steps": [
+                    "Run tests and verify all pass",
+                    "Check coverage is above 90%",
+                ],
+            },
+        )
+        assert r.status_code == 201
+
+    async def test_list_tasks_returns_category_not_plugin_name(
+        self, client: AsyncClient
+    ) -> None:
+        sid = await _create_session(client)
+        await client.post(
+            f"/sessions/{sid}/tasks",
+            json={
+                "plugin_name": "coding",
+                "description": "Implement login",
+                "category": "Authentication",
+            },
+        )
+        r = await client.get(f"/sessions/{sid}/tasks")
+        assert r.status_code == 200
+        task = r.json()[0]
+        assert task["category"] == "Authentication"
+        assert task["category"] != task["plugin_name"]
+
+    async def test_list_tasks_returns_steps(self, client: AsyncClient) -> None:
+        sid = await _create_session(client)
+        steps = ["Step 1: Run tests", "Step 2: Check coverage"]
+        await client.post(
+            f"/sessions/{sid}/tasks",
+            json={"plugin_name": "testing", "steps": steps},
+        )
+        r = await client.get(f"/sessions/{sid}/tasks")
+        assert r.status_code == 200
+        assert r.json()[0]["steps"] == steps
+
+    async def test_category_defaults_to_plugin_name_when_absent(
+        self, client: AsyncClient
+    ) -> None:
+        sid = await _create_session(client)
+        await client.post(
+            f"/sessions/{sid}/tasks",
+            json={"plugin_name": "bugfix"},
+        )
+        r = await client.get(f"/sessions/{sid}/tasks")
+        assert r.status_code == 200
+        task = r.json()[0]
+        # Falls back to plugin_name when no category stored
+        assert task["category"] == "bugfix"
+        assert task["steps"] == []
+
+
+# ---------------------------------------------------------------------------
 # DB persistence: create → retrieve → update → verify
 # ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -14,6 +14,8 @@ class TaskNode:
     priority: int
     depends_on: list[str]
     status: str = "pending"
+    category: str = ""
+    steps: list[str] = field(default_factory=list)
 
 
 class CycleDetectedError(Exception):

@@ -67,6 +67,8 @@ class Task(Base):
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)
     depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)  # list of task IDs
+    category: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    steps: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     human_question: Mapped[str | None] = mapped_column(Text, nullable=True)
