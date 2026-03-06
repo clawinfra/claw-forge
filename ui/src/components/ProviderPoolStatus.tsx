@@ -12,7 +12,6 @@ import { useState, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProviderStatus } from "../types";
 import { toggleProvider, persistProvider, setProviderTiers } from "../api";
-import type { PoolStatusResponse } from "../api";
 import { POOL_KEY } from "../hooks/usePoolStatus";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -377,9 +376,14 @@ export function ProviderPoolStatus({
   const [toggling, setToggling] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (toggling.size === 0) {
-      setProviders(initialProviders);
-    }
+    // Merge: accept server updates for all providers except those with an
+    // in-flight optimistic toggle — preserve local state only for those.
+    setProviders((prev) => {
+      const prevMap = new Map(prev.map((p) => [p.name, p]));
+      return initialProviders.map((p) =>
+        toggling.has(p.name) ? (prevMap.get(p.name) ?? p) : p,
+      );
+    });
   }, [initialProviders, toggling]);
 
   const handleToast = useCallback((message: string, kind: ToastKind) => {
@@ -400,23 +404,14 @@ export function ProviderPoolStatus({
   }, [providers, onProvidersChange]);
 
   const handleToggleResult = useCallback(
-    (name: string, success: boolean, newEnabled: boolean) => {
+    (name: string, _success: boolean, _newEnabled: boolean) => {
       setToggling((prev) => {
         const next = new Set(prev);
         next.delete(name);
         return next;
       });
-      if (success) {
-        qc.setQueryData<PoolStatusResponse>(POOL_KEY, (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            providers: old.providers.map((p) =>
-              p.name === name ? { ...p, enabled: newEnabled } : p,
-            ),
-          };
-        });
-      }
+      // Always refetch — on success this confirms, on failure this reverts.
+      void qc.invalidateQueries({ queryKey: POOL_KEY });
     },
     [qc],
   );
@@ -436,18 +431,9 @@ export function ProviderPoolStatus({
   }, []);
 
   const handleTierToggleResult = useCallback(
-    (name: string, success: boolean, activeTiers: string[]) => {
-      if (success) {
-        qc.setQueryData<PoolStatusResponse>(POOL_KEY, (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            providers: old.providers.map((p) =>
-              p.name === name ? { ...p, active_tiers: activeTiers } : p,
-            ),
-          };
-        });
-      }
+    (_name: string, _success: boolean, _activeTiers: string[]) => {
+      // Always refetch — on success this confirms, on failure this reverts.
+      void qc.invalidateQueries({ queryKey: POOL_KEY });
     },
     [qc],
   );

@@ -11,7 +11,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from claw_forge.orchestrator.reviewer import ParallelReviewer
 
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -235,7 +238,7 @@ class AgentStateService:
         # Kanban UI real-time broadcast manager
         self.ws_manager: ConnectionManager = ConnectionManager()
         # Regression reviewer reference (set by dispatcher)
-        self._reviewer: Any | None = None
+        self._reviewer: ParallelReviewer | None = None
         # Command execution store: {execution_id: {...}}
         self._executions: dict[str, dict[str, Any]] = {}
         # Provider pool manager (optional, used by toggle endpoints)
@@ -308,7 +311,26 @@ class AgentStateService:
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await self.init_db()
+            # Auto-start regression reviewer in the state service process so it
+            # can broadcast WebSocket events directly.  The reviewer is skipped
+            # when no project path is available (e.g. bare `create_app_from_env`
+            # without a real project).
+            if self._project_path is not None:
+                from claw_forge.orchestrator.reviewer import ParallelReviewer
+                reviewer = ParallelReviewer(
+                    project_dir=self._project_path,
+                    state_service=self,
+                )
+                self._reviewer = reviewer
+                await reviewer.start()
+                logger.info(
+                    "Regression reviewer started (cmd=%s)",
+                    reviewer.test_command or "none detected",
+                )
             yield
+            if self._reviewer is not None:
+                await self._reviewer.stop()
+                self._reviewer = None
             await self._engine.dispose()
 
         app = FastAPI(title="claw-forge State Service", version="0.1.0", lifespan=lifespan)
@@ -422,6 +444,8 @@ class AgentStateService:
                         task.started_at = datetime.now(UTC)
                     elif req.status in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
+                        if req.status == "completed" and self._reviewer is not None:
+                            self._reviewer.notify_feature_completed()
                 if req.result is not None:
                     task.result_json = req.result
                 if req.error_message is not None:
@@ -442,6 +466,12 @@ class AgentStateService:
                         "name": task.description or task.plugin_name,
                         "status": str(task.status),
                         "category": task.category or task.plugin_name,
+                        "plugin_name": task.plugin_name,
+                        "result_json": task.result_json,
+                        "error_message": task.error_message,
+                        "cost_usd": task.cost_usd,
+                        "input_tokens": task.input_tokens,
+                        "output_tokens": task.output_tokens,
                     },
                 )
                 return {"id": task.id, "status": task.status}
@@ -730,7 +760,7 @@ class AgentStateService:
             Used by the Kanban health bar to poll for regression state.
             """
             reviewer = self._reviewer
-            if reviewer is None:
+            if reviewer is None or reviewer.test_command is None:
                 return {"run_count": 0, "last_result": None, "has_test_command": False}
             if reviewer.run_count == 0:
                 return {"run_count": 0, "last_result": None, "has_test_command": True}

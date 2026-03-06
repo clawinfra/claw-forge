@@ -242,8 +242,8 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     error: featuresError,
   } = useFeatures(sessionId);
   const { data: poolData, isLoading: poolLoading } = usePoolStatus();
-  const providers = poolData?.providers ?? [];
-  const modelAliases = poolData?.model_aliases ?? {};
+  const providers = useMemo(() => poolData?.providers ?? [], [poolData?.providers]);
+  const modelAliases = useMemo(() => poolData?.model_aliases ?? {}, [poolData?.model_aliases]);
   const { data: sessionData } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => fetchSession(sessionId),

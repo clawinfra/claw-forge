@@ -55,12 +55,32 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
   const queryClient = useQueryClient();
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("connecting");
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+
+  const storageKey = `cf_activity:${sessionId}`;
+
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(() => {
+    try {
+      const stored = sessionStorage.getItem(storageKey);
+      if (stored) {
+        return (JSON.parse(stored) as Array<ActivityLogEntry & { timestamp: string }>)
+          .map((e) => ({ ...e, timestamp: new Date(e.timestamp) }));
+      }
+    } catch {}
+    return [];
+  });
+
   const [costHistory, setCostHistory] = useState<number[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
   const [regressionIsRunning, setRegressionIsRunning] = useState(false);
   const [regressionRunNumber, setRegressionRunNumber] = useState(0);
+
+  // Persist activity log to sessionStorage so it survives page refreshes
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(activityLog));
+    } catch {}
+  }, [storageKey, activityLog]);
 
   const socketRef = useRef<WebSocket | null>(null);
   // task_id (string) → assigned slot number (1-based)

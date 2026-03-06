@@ -70,6 +70,13 @@ const CATEGORY_COLOURS: Record<string, string> = {
   security: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200",
 };
 
+const PLUGIN_BADGE: Record<string, { icon: string; label: string; cls: string }> = {
+  testing:  { icon: "🧪", label: "Test Suite", cls: "bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-200" },
+  reviewer: { icon: "📋", label: "Code Review", cls: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200" },
+  bugfix:   { icon: "🐛", label: "Bug Fix",    cls: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200" },
+  coding:   { icon: "💻", label: "Coding",     cls: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200" },
+};
+
 function categoryColour(category: string): string {
   return CATEGORY_COLOURS[category.toLowerCase()] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
 }
@@ -256,6 +263,30 @@ export function FeatureCard({
           {feature.category}
         </span>
       )}
+
+      {/* Plugin type badge (testing / reviewer / bugfix / coding) */}
+      {feature.plugin_name && PLUGIN_BADGE[feature.plugin_name] && (
+        <span
+          className={`mt-1 ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${PLUGIN_BADGE[feature.plugin_name].cls}`}
+          title={`Plugin: ${feature.plugin_name}`}
+        >
+          <span>{PLUGIN_BADGE[feature.plugin_name].icon}</span>
+          <span>{PLUGIN_BADGE[feature.plugin_name].label}</span>
+        </span>
+      )}
+
+      {/* QA result summary for completed testing / reviewer tasks */}
+      {(feature.plugin_name === "testing" || feature.plugin_name === "reviewer") &&
+        feature.status === "completed" &&
+        feature.result_json && (
+          <div className="mt-1.5 rounded bg-teal-50 dark:bg-teal-900/30 px-2 py-1 text-[10px] text-teal-700 dark:text-teal-300 leading-snug">
+            {typeof feature.result_json.verdict === "string"
+              ? feature.result_json.verdict
+              : typeof feature.result_json.summary === "string"
+              ? (feature.result_json.summary as string).slice(0, 80)
+              : "QA complete"}
+          </div>
+        )}
 
       {/* Progress bar (when running) */}
       {feature.status === "running" && feature.progress !== undefined && (

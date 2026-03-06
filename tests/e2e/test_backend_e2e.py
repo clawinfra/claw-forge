@@ -703,3 +703,163 @@ class TestSSEStream:
                 assert event["payload"] == {"k": "v"}
             finally:
                 service._event_queues.remove(queue)
+
+
+# ---------------------------------------------------------------------------
+# task.updated WS broadcast — plugin_name + result_json fields
+# ---------------------------------------------------------------------------
+
+
+class TestTaskUpdatedBroadcastFields:
+    """Verify that PATCH /tasks/{id} broadcasts plugin_name, result_json,
+    error_message, cost_usd, input_tokens, and output_tokens in the
+    feature_update WebSocket event so the Kanban UI can show per-feature
+    QA/testing activity without a full HTTP refetch.
+    """
+
+    async def test_update_task_broadcast_includes_plugin_name(
+        self, service: AgentStateService
+    ) -> None:
+        """plugin_name must be present in the task.updated WS broadcast."""
+        app = service.create_app()
+        await service.init_db()
+        transport = ASGITransport(app=app)
+
+        captured: list[dict[str, Any]] = []
+        original_broadcast = service.ws_manager.broadcast_feature_update
+
+        async def _capture(payload: dict[str, Any]) -> None:
+            captured.append(payload)
+            await original_broadcast(payload)
+
+        service.ws_manager.broadcast_feature_update = _capture  # type: ignore[method-assign]
+
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            sid = await _create_session(ac)
+            r_task = await ac.post(
+                f"/sessions/{sid}/tasks",
+                json={"plugin_name": "testing", "description": "Run test suite"},
+            )
+            assert r_task.status_code == 201
+            tid = r_task.json()["id"]
+
+            await ac.patch(f"/tasks/{tid}", json={"status": "running"})
+
+        # Filter to the task.updated broadcast (has "id" field)
+        task_updates = [p for p in captured if p.get("id") == tid]
+        assert task_updates, "No task.updated broadcast captured"
+        payload = task_updates[-1]
+        assert payload["plugin_name"] == "testing", (
+            f"Expected plugin_name='testing', got: {payload}"
+        )
+
+    async def test_update_task_broadcast_includes_result_json(
+        self, service: AgentStateService
+    ) -> None:
+        """result_json written in a PATCH must appear in the WS broadcast."""
+        app = service.create_app()
+        await service.init_db()
+        transport = ASGITransport(app=app)
+
+        captured: list[dict[str, Any]] = []
+        original_broadcast = service.ws_manager.broadcast_feature_update
+
+        async def _capture(payload: dict[str, Any]) -> None:
+            captured.append(payload)
+            await original_broadcast(payload)
+
+        service.ws_manager.broadcast_feature_update = _capture  # type: ignore[method-assign]
+
+        review_result = {"verdict": "APPROVE", "issues": 0}
+
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            sid = await _create_session(ac)
+            r_task = await ac.post(
+                f"/sessions/{sid}/tasks",
+                json={"plugin_name": "reviewer", "description": "Code review"},
+            )
+            tid = r_task.json()["id"]
+
+            await ac.patch(
+                f"/tasks/{tid}",
+                json={"status": "completed", "result": review_result},
+            )
+
+        task_updates = [p for p in captured if p.get("id") == tid]
+        assert task_updates, "No task.updated broadcast captured"
+        payload = task_updates[-1]
+        assert payload["plugin_name"] == "reviewer"
+        assert payload["result_json"] == review_result
+
+    async def test_update_task_broadcast_includes_cost_and_tokens(
+        self, service: AgentStateService
+    ) -> None:
+        """Accumulated cost/tokens must be present in the WS broadcast."""
+        app = service.create_app()
+        await service.init_db()
+        transport = ASGITransport(app=app)
+
+        captured: list[dict[str, Any]] = []
+        original_broadcast = service.ws_manager.broadcast_feature_update
+
+        async def _capture(payload: dict[str, Any]) -> None:
+            captured.append(payload)
+            await original_broadcast(payload)
+
+        service.ws_manager.broadcast_feature_update = _capture  # type: ignore[method-assign]
+
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            sid = await _create_session(ac)
+            r_task = await ac.post(
+                f"/sessions/{sid}/tasks",
+                json={"plugin_name": "coding"},
+            )
+            tid = r_task.json()["id"]
+
+            await ac.patch(
+                f"/tasks/{tid}",
+                json={"input_tokens": 200, "output_tokens": 100, "cost_usd": 0.005},
+            )
+
+        task_updates = [p for p in captured if p.get("id") == tid]
+        assert task_updates
+        payload = task_updates[-1]
+        assert payload["input_tokens"] == 200
+        assert payload["output_tokens"] == 100
+        assert payload["cost_usd"] == pytest.approx(0.005)
+
+    async def test_update_testing_task_error_message_in_broadcast(
+        self, service: AgentStateService
+    ) -> None:
+        """error_message must appear in the WS broadcast for failed QA tasks."""
+        app = service.create_app()
+        await service.init_db()
+        transport = ASGITransport(app=app)
+
+        captured: list[dict[str, Any]] = []
+        original_broadcast = service.ws_manager.broadcast_feature_update
+
+        async def _capture(payload: dict[str, Any]) -> None:
+            captured.append(payload)
+            await original_broadcast(payload)
+
+        service.ws_manager.broadcast_feature_update = _capture  # type: ignore[method-assign]
+
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            sid = await _create_session(ac)
+            r_task = await ac.post(
+                f"/sessions/{sid}/tasks",
+                json={"plugin_name": "testing"},
+            )
+            tid = r_task.json()["id"]
+
+            await ac.patch(
+                f"/tasks/{tid}",
+                json={"status": "failed", "error_message": "3 tests failed"},
+            )
+
+        task_updates = [p for p in captured if p.get("id") == tid]
+        assert task_updates
+        payload = task_updates[-1]
+        assert payload["plugin_name"] == "testing"
+        assert payload["error_message"] == "3 tests failed"
