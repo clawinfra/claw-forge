@@ -148,18 +148,22 @@ export function FeatureCard({
   const showExpanded = isMobile && tapped;
 
   return (
-    <div
+    <motion.div
       ref={setNodeRef}
       onClick={isMobile ? undefined : onClick}
       {...(isMobile ? longPressHandlers : {})}
       {...listeners}
       {...attributes}
+      layout
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: isDragging ? 0.5 : 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       style={{
         transform: CSS.Transform.toString(transform),
-        opacity: isDragging ? 0.5 : undefined,
       }}
       className={`group rounded-lg border-l-4 border bg-white dark:bg-slate-800 p-3 shadow-sm
-        hover:shadow-md transition-all duration-200 touch-manipulation
+        hover:shadow-md transition-shadow duration-200 touch-manipulation
         border-slate-200 dark:border-slate-700
         ${isDraggable ? (isDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-pointer"}
         ${STATUS_BORDER[feature.status] ?? STATUS_BORDER.pending}
@@ -341,6 +345,6 @@ export function FeatureCard({
           </span>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

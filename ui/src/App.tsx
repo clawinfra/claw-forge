@@ -41,6 +41,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { FeatureCard } from "./components/FeatureCard";
 import { RegressionHealthBar } from "./components/RegressionHealthBar";
 import { ProgressBar } from "./components/ProgressBar";
@@ -194,15 +195,19 @@ function PendingDropColumn({
                 className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
               />
             ))
-          : cards.map((feature) => (
-              <FeatureCard
-                key={feature.id}
-                feature={feature}
-                onClick={() => setSelectedFeatureId(feature.id)}
-                onLongPress={(f) => setLongPressFeature(f)}
-                implicatedFeatureIds={implicatedFeatureIds}
-              />
-            ))}
+          : (
+            <AnimatePresence initial={false}>
+              {cards.map((feature) => (
+                <FeatureCard
+                  key={feature.id}
+                  feature={feature}
+                  onClick={() => setSelectedFeatureId(feature.id)}
+                  onLongPress={(f) => setLongPressFeature(f)}
+                  implicatedFeatureIds={implicatedFeatureIds}
+                />
+              ))}
+            </AnimatePresence>
+          )}
         {!featuresLoading && cards.length === 0 && !isOver && (
           <div className="px-2 py-6 text-center">
             <Inbox
@@ -835,17 +840,21 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                                 className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
                               />
                             ))
-                          : cards.map((feature) => (
-                              <FeatureCard
-                                key={feature.id}
-                                feature={feature}
-                                onClick={() => setSelectedFeatureId(feature.id)}
-                                onLongPress={(f) => setLongPressFeature(f)}
-                                implicatedFeatureIds={implicatedFeatureIds}
-                                onStop={col.id === "in_progress" ? handleStopTask : undefined}
-                                isStopping={stoppingTasks.has(feature.id)}
-                              />
-                            ))}
+                          : (
+                            <AnimatePresence initial={false}>
+                              {cards.map((feature) => (
+                                <FeatureCard
+                                  key={feature.id}
+                                  feature={feature}
+                                  onClick={() => setSelectedFeatureId(feature.id)}
+                                  onLongPress={(f) => setLongPressFeature(f)}
+                                  implicatedFeatureIds={implicatedFeatureIds}
+                                  onStop={col.id === "in_progress" ? handleStopTask : undefined}
+                                  isStopping={stoppingTasks.has(feature.id)}
+                                />
+                              ))}
+                            </AnimatePresence>
+                          )}
                         {!featuresLoading && cards.length === 0 && (
                           <div className="px-2 py-6 text-center">
                             <Inbox
@@ -866,9 +875,14 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
               {/* Drag overlay: ghost card following the cursor during drag */}
               <DragOverlay>
                 {activeFeature ? (
-                  <div className="shadow-xl opacity-90 rounded-lg">
+                  <motion.div
+                    initial={{ scale: 1.02, rotate: 1.5 }}
+                    animate={{ scale: 1.02, rotate: 1.5 }}
+                    className="rounded-lg"
+                    style={{ boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}
+                  >
                     <FeatureCard feature={activeFeature} />
-                  </div>
+                  </motion.div>
                 ) : null}
               </DragOverlay>
             </DndContext>

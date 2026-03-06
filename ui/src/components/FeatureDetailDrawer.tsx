@@ -2,6 +2,7 @@
  * FeatureDetailDrawer — right-side slide-in drawer with full feature details.
  */
 import { useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import {
   X,
@@ -109,20 +110,32 @@ export function FeatureDetailDrawer({
 
   return (
     <>
-      {/* Backdrop */}
-      {feature && (
-        <div className="fixed inset-0 z-[80] bg-black/20 transition-opacity duration-200" />
-      )}
-
-      {/* Drawer */}
-      <div
-        ref={drawerRef}
-        className={`fixed top-0 right-0 h-full w-[400px] max-w-[90vw] z-[90]
-          bg-white dark:bg-slate-800 shadow-2xl border-l border-slate-200 dark:border-slate-700
-          transform transition-transform duration-300 ease-out overflow-y-auto
-          ${feature ? "translate-x-0" : "translate-x-full"}`}
-      >
+      <AnimatePresence>
         {feature && (
+          <motion.div
+            key="backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[80] bg-black/20"
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {feature && (
+          <motion.div
+            key="drawer"
+            ref={drawerRef}
+            initial={{ x: "100%", opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: "100%", opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30, opacity: { duration: 0.2 } }}
+            className="fixed top-0 right-0 h-full w-[400px] max-w-[90vw] z-[90]
+              bg-white dark:bg-slate-800 shadow-2xl border-l border-slate-200 dark:border-slate-700
+              overflow-y-auto"
+          >
           <div className="flex flex-col h-full">
             {/* Header */}
             <div className="flex items-start justify-between p-5 border-b border-slate-200 dark:border-slate-700">
@@ -444,8 +457,9 @@ export function FeatureDetailDrawer({
               </div>
             </div>
           </div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
     </>
   );
 }
