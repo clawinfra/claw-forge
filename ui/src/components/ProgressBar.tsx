@@ -2,7 +2,10 @@
  * ProgressBar — overall project progress indicator.
  *
  * Shows: X / Y features passing with a coloured fill bar.
+ * Fill width is tweened via GSAP (power2.out) for a satisfying deceleration.
  */
+import { useEffect, useRef } from "react";
+import { gsap } from "gsap";
 
 interface ProgressBarProps {
   passing: number;
@@ -12,6 +15,7 @@ interface ProgressBarProps {
 
 export function ProgressBar({ passing, total, className = "" }: ProgressBarProps) {
   const pct = total > 0 ? Math.round((passing / total) * 100) : 0;
+  const fillRef = useRef<HTMLDivElement>(null);
 
   const fillColour =
     pct === 100
@@ -21,6 +25,11 @@ export function ProgressBar({ passing, total, className = "" }: ProgressBarProps
         : pct >= 30
           ? "bg-amber-500"
           : "bg-red-500";
+
+  useEffect(() => {
+    if (!fillRef.current) return;
+    gsap.to(fillRef.current, { width: `${pct}%`, duration: 0.6, ease: "power2.out" });
+  }, [pct]);
 
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
@@ -32,8 +41,9 @@ export function ProgressBar({ passing, total, className = "" }: ProgressBarProps
       </div>
       <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-500 ${fillColour}`}
-          style={{ width: `${pct}%` }}
+          ref={fillRef}
+          className={`h-full rounded-full ${fillColour}`}
+          style={{ width: "0%" }}
           role="progressbar"
           aria-valuenow={pct}
           aria-valuemin={0}
