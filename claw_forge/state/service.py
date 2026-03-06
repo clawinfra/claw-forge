@@ -294,6 +294,12 @@ class AgentStateService:
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        # Reset tasks orphaned in 'running' state by a previously crashed runner
+        from sqlalchemy import text
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'")
+            )
 
     async def dispose(self) -> None:
         """Dispose the async engine, closing all pooled connections.

@@ -1,4 +1,9 @@
-"""Tests for three-phase (coding→testing→reviewer) task generation in _write_plan_to_db."""
+"""Tests for single-task-per-feature generation in _write_plan_to_db.
+
+Each feature produces exactly one coding task. The coding agent handles
+TDD inline (write failing tests → implement → verify green).
+Cross-feature dependency edges connect directly between coding task UUIDs.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,98 +40,91 @@ def _features(cats: list[str]) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_backend_feature_creates_three_tasks(tmp_path: Path) -> None:
+async def test_each_feature_creates_one_task(tmp_path: Path) -> None:
     from claw_forge.cli import _write_plan_to_db
 
-    await _write_plan_to_db(tmp_path, "proj", _features(["backend"]))
+    for cat in ["backend", "frontend", "testing", "security", "docs", "infra"]:
+        proj = tmp_path / cat
+        await _write_plan_to_db(proj, "proj", _features([cat]))
+        tasks = await _load_tasks(proj / ".claw-forge" / "state.db")
+        assert len(tasks) == 1, f"Expected 1 task for category={cat}, got {len(tasks)}"
+        assert tasks[0].plugin_name == "coding"
+
+
+@pytest.mark.asyncio
+async def test_multiple_independent_features(tmp_path: Path) -> None:
+    from claw_forge.cli import _write_plan_to_db
+
+    # 3 features with no cross-deps — all schedulable in parallel (wave 0)
+    feats = [
+        {"index": i, "name": f"F{i}", "description": "d", "category": "backend",
+         "steps": [], "depends_on_indices": []}
+        for i in range(3)
+    ]
+    await _write_plan_to_db(tmp_path, "proj", feats)
     tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
 
     assert len(tasks) == 3
-    plugins = {t.plugin_name for t in tasks}
-    assert plugins == {"coding", "testing", "reviewer"}
+    assert all(t.plugin_name == "coding" for t in tasks)
+    assert all(t.depends_on == [] for t in tasks)
 
 
 @pytest.mark.asyncio
-async def test_docs_feature_creates_one_task(tmp_path: Path) -> None:
-    from claw_forge.cli import _write_plan_to_db
-
-    await _write_plan_to_db(tmp_path, "proj", _features(["docs"]))
-    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
-
-    assert len(tasks) == 1
-    assert tasks[0].plugin_name == "coding"
-
-
-@pytest.mark.asyncio
-async def test_infra_feature_creates_one_task(tmp_path: Path) -> None:
-    from claw_forge.cli import _write_plan_to_db
-
-    await _write_plan_to_db(tmp_path, "proj", _features(["infra"]))
-    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
-
-    assert len(tasks) == 1
-    assert tasks[0].plugin_name == "coding"
-
-
-@pytest.mark.asyncio
-async def test_task_names_have_prefix(tmp_path: Path) -> None:
-    from claw_forge.cli import _write_plan_to_db
-
-    await _write_plan_to_db(tmp_path, "proj", _features(["frontend"]))
-    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
-
-    by_plugin = {t.plugin_name: t for t in tasks}
-    assert "Test:" in by_plugin["testing"].description
-    assert "Review:" in by_plugin["reviewer"].description
-    # coding task has no prefix
-    assert "Test:" not in by_plugin["coding"].description
-    assert "Review:" not in by_plugin["coding"].description
-
-
-@pytest.mark.asyncio
-async def test_coding_testing_reviewer_chain(tmp_path: Path) -> None:
-    """testing.depends_on == [coding.id], reviewer.depends_on == [testing.id]."""
-    from claw_forge.cli import _write_plan_to_db
-
-    await _write_plan_to_db(tmp_path, "proj", _features(["security"]))
-    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
-
-    by_plugin = {t.plugin_name: t for t in tasks}
-    coding = by_plugin["coding"]
-    testing = by_plugin["testing"]
-    reviewer = by_plugin["reviewer"]
-
-    assert testing.depends_on == [coding.id]
-    assert reviewer.depends_on == [testing.id]
-    assert coding.depends_on == []
-
-
-@pytest.mark.asyncio
-async def test_cross_feature_dep_points_to_terminal_reviewer(tmp_path: Path) -> None:
-    """Feature B's coding task must depend on Feature A's reviewer (terminal) task."""
+async def test_cross_feature_dep_wiring(tmp_path: Path) -> None:
+    """Feature B's task must depend on Feature A's task UUID."""
     from claw_forge.cli import _write_plan_to_db
 
     feats = _features(["backend", "backend"])
     await _write_plan_to_db(tmp_path, "proj", feats)
     tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
 
-    # Identify Feature A: its coding task has no depends_on
-    feat_a_coding = next(t for t in tasks if t.plugin_name == "coding" and not t.depends_on)
-    feat_a_testing = next(
-        t for t in tasks if t.plugin_name == "testing" and feat_a_coding.id in t.depends_on
-    )
-    feat_a_reviewer = next(
-        t for t in tasks if t.plugin_name == "reviewer" and feat_a_testing.id in t.depends_on
-    )
-
-    # Feature B's coding task depends on Feature A's reviewer (the terminal)
-    feat_b_coding = next(t for t in tasks if t.plugin_name == "coding" and t.depends_on)
-    assert feat_a_reviewer.id in feat_b_coding.depends_on
+    feat_a = next(t for t in tasks if t.depends_on == [])
+    feat_b = next(t for t in tasks if t.depends_on != [])
+    assert feat_a.id in feat_b.depends_on
 
 
 @pytest.mark.asyncio
-async def test_cross_feature_dep_docs_points_to_coding_terminal(tmp_path: Path) -> None:
-    """Feature B depends on Feature A (docs). B's coding task must depend on A's coding task."""
+async def test_sequential_chain_deps(tmp_path: Path) -> None:
+    """A→B→C chain: B depends on A, C depends on B."""
+    from claw_forge.cli import _write_plan_to_db
+
+    feats = _features(["backend", "backend", "backend"])
+    await _write_plan_to_db(tmp_path, "proj", feats)
+    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
+
+    task_a = next(t for t in tasks if t.depends_on == [])
+    task_b = next(t for t in tasks if t.depends_on == [task_a.id])
+    task_c = next(t for t in tasks if t.depends_on == [task_b.id])
+    assert task_c is not None
+
+
+@pytest.mark.asyncio
+async def test_empty_features(tmp_path: Path) -> None:
+    from claw_forge.cli import _write_plan_to_db
+
+    await _write_plan_to_db(tmp_path, "proj", [])
+    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
+    assert tasks == []
+
+
+@pytest.mark.asyncio
+async def test_task_description_includes_name_and_desc(tmp_path: Path) -> None:
+    from claw_forge.cli import _write_plan_to_db
+
+    feats = [{"index": 0, "name": "Auth Module", "description": "JWT login",
+              "category": "backend", "steps": ["step1"], "depends_on_indices": []}]
+    await _write_plan_to_db(tmp_path, "proj", feats)
+    tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
+
+    assert len(tasks) == 1
+    assert "Auth Module" in tasks[0].description
+    assert "JWT login" in tasks[0].description
+    assert tasks[0].steps == ["step1"]
+
+
+@pytest.mark.asyncio
+async def test_cross_feature_dep_any_category(tmp_path: Path) -> None:
+    """Dep wiring works regardless of category (docs, infra, backend, etc.)."""
     from claw_forge.cli import _write_plan_to_db
 
     feats = [
@@ -138,24 +136,7 @@ async def test_cross_feature_dep_docs_points_to_coding_terminal(tmp_path: Path) 
     await _write_plan_to_db(tmp_path, "proj", feats)
     tasks = await _load_tasks(tmp_path / ".claw-forge" / "state.db")
 
-    # docs feature → 1 task (coding only)
-    docs_coding = next(t for t in tasks if t.plugin_name == "coding" and t.depends_on == [])
-    # backend feature's coding task depends on docs' coding task (its terminal)
-    backend_coding = next(
-        t for t in tasks
-        if t.plugin_name == "coding" and docs_coding.id in (t.depends_on or [])
-    )
-    assert backend_coding is not None
-
-
-@pytest.mark.asyncio
-async def test_all_coding_categories_get_three_tasks(tmp_path: Path) -> None:
-    """backend, frontend, testing, security categories all produce 3 tasks."""
-    from claw_forge.cli import _write_plan_to_db
-
-    for cat in ["backend", "frontend", "testing", "security"]:
-        proj = tmp_path / cat
-        await _write_plan_to_db(proj, "proj", _features([cat]))
-        tasks = await _load_tasks(proj / ".claw-forge" / "state.db")
-        plugins = {t.plugin_name for t in tasks}
-        assert plugins == {"coding", "testing", "reviewer"}, f"Failed for category={cat}"
+    assert len(tasks) == 2
+    docs_task = next(t for t in tasks if t.depends_on == [])
+    api_task = next(t for t in tasks if t.depends_on != [])
+    assert docs_task.id in api_task.depends_on

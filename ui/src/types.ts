@@ -45,32 +45,6 @@ export interface Feature {
   result_json?: Record<string, unknown> | null;
 }
 
-// ── Feature group (3-phase pipeline: coding → testing → reviewer) ────────────
-
-/**
- * A FeatureGroup wraps the 1–3 tasks that belong to a single spec feature.
- * Coding-only features (docs/infra) have testing/reviewer undefined.
- * Non-standard tasks (bugfix, etc.) are represented as solo groups.
- */
-export interface FeatureGroup {
-  /** Stable ID — coding task's UUID (or the solo task's UUID) */
-  id: string;
-  /** Feature display name (from coding task description) */
-  name: string;
-  category: string;
-  /** Cross-feature dependency IDs (from coding task's depends_on) */
-  depends_on: string[];
-  /** Derived status driving Kanban column placement */
-  effectiveStatus: FeatureStatus;
-  coding: Feature;
-  testing?: Feature;
-  reviewer?: Feature;
-  /** Aggregate cost across all stages */
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-}
-
 // ── Provider / Pool ───────────────────────────────────────────────────────────
 
 export type ProviderHealth = "healthy" | "degraded" | "unhealthy" | "unknown";
