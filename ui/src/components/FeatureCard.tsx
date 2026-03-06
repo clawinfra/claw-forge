@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import { motion } from "motion/react";
 import type { Feature } from "../types";
 import { AgentMascot } from "./AgentMascot";
 import { useLongPress } from "../hooks/useLongPress";
@@ -174,13 +175,17 @@ export function FeatureCard({
           #{shortId(feature.id)}
         </span>
         <div className="flex items-center gap-1">
-          <span
+          <motion.span
+            key={isStopping ? "stopping" : feature.status}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 400, damping: 20 }}
             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
               STATUS_BADGE[feature.status] ?? STATUS_BADGE.pending
             }`}
           >
             {isStopping ? "stopping…" : feature.status}
-          </span>
+          </motion.span>
 
           {/* Stop button */}
           {feature.status === "running" && onStop && (
