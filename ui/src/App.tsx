@@ -72,6 +72,7 @@ import type {
   Command,
   Execution,
   Feature,
+  FeatureGroup,
   FeatureStatus,
   FilterState,
   ViewMode,
@@ -90,46 +91,113 @@ const queryClient = new QueryClient({
 
 // ── Board ─────────────────────────────────────────────────────────────────────
 
-/** Derive project summary stats from the feature list. */
-function useSummary(features: Feature[] | undefined) {
-  return useMemo(() => {
-    const all = features ?? [];
-    const passing = all.filter((f) => f.status === "completed").length;
-    const failing = all.filter((f) => f.status === "failed").length;
-    const running = all.filter((f) => f.status === "running").length;
-    const blocked = all.filter((f) => f.status === "blocked").length;
-    const totalCost = all.reduce((s, f) => s + (f.cost_usd ?? 0), 0);
-    return { passing, failing, running, blocked, totalCost, total: all.length };
-  }, [features]);
+/**
+ * Group raw tasks into FeatureGroups by traversing the coding→testing→reviewer
+ * dependency chain. Each coding task is a feature root; testing and reviewer
+ * tasks are identified by their depends_on links. Non-coding tasks (bugfix etc.)
+ * become solo groups.
+ */
+function groupFeatures(tasks: Feature[]): FeatureGroup[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+
+  // Index testing tasks by the coding task ID they depend on
+  const testingByCodingId = new Map<string, Feature>();
+  // Index reviewer tasks by the testing task ID they depend on
+  const reviewerByTestingId = new Map<string, Feature>();
+
+  for (const task of tasks) {
+    if (task.plugin_name === "testing") {
+      for (const depId of task.depends_on) {
+        const dep = byId.get(depId);
+        if (dep?.plugin_name === "coding") {
+          testingByCodingId.set(dep.id, task);
+          break;
+        }
+      }
+    } else if (task.plugin_name === "reviewer") {
+      for (const depId of task.depends_on) {
+        const dep = byId.get(depId);
+        if (dep?.plugin_name === "testing") {
+          reviewerByTestingId.set(dep.id, task);
+          break;
+        }
+      }
+    }
+  }
+
+  const groups: FeatureGroup[] = [];
+
+  for (const task of tasks) {
+    // Only coding (and bugfix/other non-standard) tasks are group roots
+    if (task.plugin_name === "testing" || task.plugin_name === "reviewer") continue;
+
+    const testing = task.plugin_name === "coding" ? testingByCodingId.get(task.id) : undefined;
+    const reviewer = testing ? reviewerByTestingId.get(testing.id) : undefined;
+    const stages = [task, testing, reviewer].filter(Boolean) as Feature[];
+
+    // Effective status: drives Kanban column placement
+    let effectiveStatus: FeatureStatus = "pending";
+    if (stages.some((s) => s.status === "running")) {
+      effectiveStatus = "running";
+    } else if (stages.some((s) => s.status === "failed")) {
+      effectiveStatus = "failed";
+    } else if (stages.some((s) => s.status === "blocked")) {
+      effectiveStatus = "blocked";
+    } else if (stages.every((s) => s.status === "completed")) {
+      effectiveStatus = "completed";
+    } else if (stages.some((s) => s.status === "queued")) {
+      effectiveStatus = "queued";
+    }
+
+    groups.push({
+      id: task.id,
+      name: task.name,
+      category: task.category,
+      depends_on: task.depends_on,
+      effectiveStatus,
+      coding: task,
+      testing,
+      reviewer,
+      cost_usd: stages.reduce((s, f) => s + (f.cost_usd ?? 0), 0),
+      input_tokens: stages.reduce((s, f) => s + (f.input_tokens ?? 0), 0),
+      output_tokens: stages.reduce((s, f) => s + (f.output_tokens ?? 0), 0),
+    });
+  }
+
+  return groups;
 }
 
-/** Filter features based on search, category, and status filters. */
-function applyFilters(features: Feature[], filters: FilterState): Feature[] {
-  return features.filter((f) => {
-    // Text search
+/** Derive project summary stats from feature groups (counts features, not subtasks). */
+function useSummary(groups: FeatureGroup[]) {
+  return useMemo(() => {
+    const passing = groups.filter((g) => g.effectiveStatus === "completed").length;
+    const failing = groups.filter((g) => g.effectiveStatus === "failed").length;
+    const running = groups.filter((g) => g.effectiveStatus === "running").length;
+    const blocked = groups.filter((g) => g.effectiveStatus === "blocked").length;
+    const totalCost = groups.reduce((s, g) => s + (g.cost_usd ?? 0), 0);
+    return { passing, failing, running, blocked, totalCost, total: groups.length };
+  }, [groups]);
+}
+
+/** Filter feature groups based on search, category, and status filters. */
+function applyFilters(groups: FeatureGroup[], filters: FilterState): FeatureGroup[] {
+  return groups.filter((g) => {
     if (
       filters.search &&
-      !f.name.toLowerCase().includes(filters.search.toLowerCase())
+      !g.name.toLowerCase().includes(filters.search.toLowerCase())
     ) {
       return false;
     }
-    // Category filter
     if (
       filters.category !== "All" &&
-      f.category.toLowerCase() !== filters.category.toLowerCase()
+      g.category.toLowerCase() !== filters.category.toLowerCase()
     ) {
       return false;
     }
-    // Status filter
     if (filters.statuses.size > 0) {
-      // Map "queued" to "pending" for filter purposes since they share a column
       const effectiveStatuses = new Set<FeatureStatus>(filters.statuses);
-      if (effectiveStatuses.has("pending")) {
-        effectiveStatuses.add("queued");
-      }
-      if (!effectiveStatuses.has(f.status)) {
-        return false;
-      }
+      if (effectiveStatuses.has("pending")) effectiveStatuses.add("queued");
+      if (!effectiveStatuses.has(g.effectiveStatus)) return false;
     }
     return true;
   });
@@ -139,7 +207,7 @@ function applyFilters(features: Feature[], filters: FilterState): Feature[] {
 
 interface PendingDropColumnProps {
   col: (typeof KANBAN_COLUMNS)[number];
-  cards: Feature[];
+  cards: FeatureGroup[];
   colIdx: number;
   setColumnRef: (el: HTMLDivElement | null, idx: number) => void;
   isMobile: boolean;
@@ -203,11 +271,11 @@ function PendingDropColumn({
                 className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
               />
             ))
-          : cards.map((feature) => (
+          : cards.map((group) => (
               <FeatureCard
-                key={feature.id}
-                feature={feature}
-                onClick={() => setSelectedFeatureId(feature.id)}
+                key={group.id}
+                group={group}
+                onClick={() => setSelectedFeatureId(group.id)}
                 onLongPress={(f) => setLongPressFeature(f)}
                 implicatedFeatureIds={implicatedFeatureIds}
               />
@@ -249,6 +317,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     queryFn: () => fetchSession(sessionId),
     staleTime: 60_000,
   });
+
+  // Build feature groups from raw tasks (declared early so all hooks below can use it)
+  const featureGroups = useMemo(() => groupFeatures(features ?? []), [features]);
 
   // Active executions for the ExecutionDrawer (declared before useWebSocket so callback can reference it)
   const [activeExecutions, setActiveExecutions] = useState<Execution[]>([]);
@@ -315,9 +386,10 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(
     null,
   );
+  // Resolve selected group → pass coding task to the detail drawer
   const selectedFeature = useMemo(
-    () => (features ?? []).find((f) => f.id === selectedFeatureId) ?? null,
-    [features, selectedFeatureId],
+    () => featureGroups.find((g) => g.id === selectedFeatureId)?.coding ?? null,
+    [featureGroups, selectedFeatureId],
   );
 
   // Task detail modal (long-press, mobile)
@@ -374,14 +446,14 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   }, [swipeDirection, clearSwipe, isMobile]);
 
   // ── Drag-and-drop (retry failed/blocked tasks) ───────────────────────────
-  const [activeFeature, setActiveFeature] = useState<Feature | null>(null);
+  const [activeFeature, setActiveFeature] = useState<FeatureGroup | null>(null);
 
   const handleDragStart = useCallback(
     ({ active }: DragStartEvent) => {
-      const feat = (features ?? []).find((f) => f.id === active.id);
-      setActiveFeature(feat ?? null);
+      const group = featureGroups.find((g) => g.id === active.id);
+      setActiveFeature(group ?? null);
     },
-    [features],
+    [featureGroups],
   );
 
   const handleDragEnd = useCallback(
@@ -390,16 +462,25 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       if (!over || over.id !== "pending") return;
       const data = active.data.current as { status: string } | undefined;
       if (!data || (data.status !== "failed" && data.status !== "blocked")) return;
-      const taskId = active.id as string;
 
-      // Optimistic update: move the card to pending immediately
+      const groupId = active.id as string;
+      const group = featureGroups.find((g) => g.id === groupId);
+      if (!group) return;
+
+      // Find the first failed/blocked task within this group to reset
+      const taskToReset = [group.reviewer, group.testing, group.coding]
+        .filter(Boolean)
+        .find((t) => t!.status === "failed" || t!.status === "blocked");
+      if (!taskToReset) return;
+
+      // Optimistic update
       qc.setQueryData<Feature[]>(["features", sessionId], (prev) =>
         (prev ?? []).map((f) =>
-          f.id === taskId ? { ...f, status: "pending" as const } : f,
+          f.id === taskToReset.id ? { ...f, status: "pending" as const } : f,
         ),
       );
 
-      void patchTaskStatus(sessionId, taskId, "pending")
+      void patchTaskStatus(sessionId, taskToReset.id, "pending")
         .then(() => {
           addToast("Task reset to pending — will retry on next run", "success");
         })
@@ -408,7 +489,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
           addToast("Failed to reset task status", "error");
         });
     },
-    [sessionId, qc, addToast],
+    [featureGroups, sessionId, qc, addToast],
   );
 
   // Stop-task controls
@@ -433,6 +514,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     const runningIds = (features ?? [])
       .filter((f) => f.status === "running")
       .map((f) => f.id);
+    // (uses raw features so all running subtasks are stopped)
     setStoppingTasks((prev) => {
       const s = new Set(prev);
       runningIds.forEach((id) => s.add(id));
@@ -471,27 +553,27 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     setScale(1);
   }, [setScale]);
 
-  const summary = useSummary(features);
+  const summary = useSummary(featureGroups);
   const projectName = (sessionData as Record<string, unknown>)?.project_path as
     | string
     | undefined;
 
-  // Apply filters
-  const filteredFeatures = useMemo(
-    () => applyFilters(features ?? [], filters),
-    [features, filters],
+  // Apply filters to groups
+  const filteredGroups = useMemo(
+    () => applyFilters(featureGroups, filters),
+    [featureGroups, filters],
   );
 
-  // Group features into columns
+  // Assign groups to Kanban columns by effectiveStatus
   const columnFeatures = useMemo(() => {
-    const map: Record<string, Feature[]> = {};
+    const map: Record<string, FeatureGroup[]> = {};
     for (const col of KANBAN_COLUMNS) {
-      map[col.id] = filteredFeatures.filter((f) =>
-        col.statuses.includes(f.status),
+      map[col.id] = filteredGroups.filter((g) =>
+        col.statuses.includes(g.effectiveStatus),
       );
     }
     return map;
-  }, [filteredFeatures]);
+  }, [filteredGroups]);
 
 
   // Execute a command
@@ -824,15 +906,17 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                                 className="h-20 rounded-lg bg-white/60 dark:bg-slate-700/40 animate-pulse"
                               />
                             ))
-                          : cards.map((feature) => (
+                          : cards.map((group) => (
                               <FeatureCard
-                                key={feature.id}
-                                feature={feature}
-                                onClick={() => setSelectedFeatureId(feature.id)}
+                                key={group.id}
+                                group={group}
+                                onClick={() => setSelectedFeatureId(group.id)}
                                 onLongPress={(f) => setLongPressFeature(f)}
                                 implicatedFeatureIds={implicatedFeatureIds}
-                                onStop={col.id === "in_progress" ? () => handleStopTask(feature.id) : undefined}
-                                isStopping={stoppingTasks.has(feature.id)}
+                                onStop={col.id === "in_progress" ? handleStopTask : undefined}
+                                isStopping={[group.coding, group.testing, group.reviewer].some(
+                                  (t) => t && stoppingTasks.has(t.id),
+                                )}
                               />
                             ))}
                         {!featuresLoading && cards.length === 0 && (
@@ -856,7 +940,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
               <DragOverlay>
                 {activeFeature ? (
                   <div className="shadow-xl opacity-90 rounded-lg">
-                    <FeatureCard feature={activeFeature} />
+                    <FeatureCard group={activeFeature} />
                   </div>
                 ) : null}
               </DragOverlay>
@@ -865,7 +949,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
         </main>
       ) : (
         <DependencyGraph
-          features={filteredFeatures}
+          features={features ?? []}
           onSelectFeature={(id) => setSelectedFeatureId(id)}
         />
       )}

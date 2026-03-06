@@ -1,15 +1,9 @@
 /**
- * FeatureCard — individual feature card for the Kanban board.
+ * FeatureCard — one card per spec feature, showing all pipeline stages inline.
  *
- * Shows:
- * - Feature ID + name
- * - Category badge
- * - Dependency count
- * - Agent session ID (if running)
- * - Progress bar (if progress is set)
- * - Cost in USD
- * - Agent mascot (if running)
- * - Left border accent by status
+ * Each feature maps to 1–3 tasks (coding → testing → reviewer).
+ * The card shows a compact stage strip with icon + mini progress bar per stage.
+ * The card's Kanban column is driven by the group's effectiveStatus.
  *
  * Touch features:
  * - Tap to expand output on mobile (replaces hover)
@@ -20,42 +14,42 @@
 import { useEffect, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import type { Feature } from "../types";
+import type { Feature, FeatureGroup } from "../types";
 import { AgentMascot } from "./AgentMascot";
 import { useLongPress } from "../hooks/useLongPress";
 import { useMobileDetect } from "../hooks/useMobileDetect";
 import { triggerHaptic } from "../utils/haptic";
 
 interface FeatureCardProps {
-  feature: Feature;
+  group: FeatureGroup;
   onClick?: () => void;
   /** IDs of features implicated by the last regression failure */
   implicatedFeatureIds?: number[];
-  /** Direct boolean flag — true when this feature is implicated in a regression */
-  implicatedInRegression?: boolean;
   /** Called when user selects a quick command action */
   onQuickCommand?: (commandId: string, args: Record<string, unknown>) => void;
   /** Called on long-press — opens task detail modal */
   onLongPress?: (feature: Feature) => void;
-  /** Called to stop this running task */
-  onStop?: () => void;
-  /** True while a stop request is in-flight for this task */
+  /** Called to stop the currently running task in this group */
+  onStop?: (taskId: string) => void;
+  /** True while a stop request is in-flight for any task in this group */
   isStopping?: boolean;
 }
 
-const STATUS_BADGE: Record<Feature["status"], string> = {
+const STATUS_BADGE: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
   queued: "bg-indigo-100 text-indigo-700 dark:bg-indigo-800 dark:text-indigo-200",
   running: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200",
+  paused: "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200",
   completed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200",
   failed: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200",
   blocked: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200",
 };
 
-const STATUS_BORDER: Record<Feature["status"], string> = {
+const STATUS_BORDER: Record<string, string> = {
   pending: "border-l-slate-300 dark:border-l-slate-600",
   queued: "border-l-indigo-400 dark:border-l-indigo-600",
   running: "border-l-blue-500 dark:border-l-blue-500",
+  paused: "border-l-purple-400 dark:border-l-purple-500",
   completed: "border-l-emerald-500 dark:border-l-emerald-500",
   failed: "border-l-red-500 dark:border-l-red-500",
   blocked: "border-l-amber-500 dark:border-l-amber-500",
@@ -70,27 +64,80 @@ const CATEGORY_COLOURS: Record<string, string> = {
   security: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200",
 };
 
-const PLUGIN_BADGE: Record<string, { icon: string; label: string; cls: string }> = {
-  testing:  { icon: "🧪", label: "Test Suite", cls: "bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-200" },
-  reviewer: { icon: "📋", label: "Code Review", cls: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200" },
-  bugfix:   { icon: "🐛", label: "Bug Fix",    cls: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200" },
-  coding:   { icon: "💻", label: "Coding",     cls: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200" },
+const STAGE_BAR_COLOR: Record<string, string> = {
+  completed: "bg-emerald-500",
+  running: "bg-blue-500",
+  failed: "bg-red-500",
+  blocked: "bg-amber-400",
+  paused: "bg-purple-400",
+  pending: "",
+  queued: "",
 };
 
-function categoryColour(category: string): string {
-  return CATEGORY_COLOURS[category.toLowerCase()] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
+const STAGE_LABEL_COLOR: Record<string, string> = {
+  completed: "text-emerald-600 dark:text-emerald-400",
+  running: "text-blue-600 dark:text-blue-400",
+  failed: "text-red-500 dark:text-red-400",
+  blocked: "text-amber-600 dark:text-amber-400",
+  paused: "text-purple-600 dark:text-purple-400",
+  pending: "text-slate-400 dark:text-slate-500",
+  queued: "text-slate-400 dark:text-slate-500",
+};
+
+function stageBarWidth(task: Feature): string {
+  if (task.status === "completed" || task.status === "failed" || task.status === "blocked") {
+    return "100%";
+  }
+  if (task.status === "running") {
+    return `${task.progress ?? 35}%`;
+  }
+  return "0%";
 }
 
-function shortId(id: string | undefined): string {
-  if (!id) return "?";
+function categoryColour(category: string): string {
+  return (
+    CATEGORY_COLOURS[category.toLowerCase()] ??
+    "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+  );
+}
+
+function shortId(id: string): string {
   return id.length > 8 ? `…${id.slice(-6)}` : id;
 }
 
+/** Single row in the pipeline strip: icon + mini bar + status label */
+function StageRow({ task, icon }: { task: Feature; icon: string }) {
+  const barColor = STAGE_BAR_COLOR[task.status] ?? "";
+  const isRunning = task.status === "running";
+  const label =
+    isRunning && task.progress !== undefined ? `${task.progress}%` : task.status;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] w-4 text-center shrink-0 select-none">{icon}</span>
+      <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${barColor} ${
+            isRunning ? "animate-pulse" : ""
+          }`}
+          style={{ width: stageBarWidth(task) }}
+        />
+      </div>
+      <span
+        className={`text-[9px] font-medium w-[52px] text-right shrink-0 tabular-nums ${
+          STAGE_LABEL_COLOR[task.status] ?? STAGE_LABEL_COLOR.pending
+        }`}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 export function FeatureCard({
-  feature,
+  group,
   onClick,
   implicatedFeatureIds = [],
-  implicatedInRegression = false,
   onQuickCommand,
   onLongPress,
   onStop,
@@ -99,48 +146,53 @@ export function FeatureCard({
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [tapped, setTapped] = useState(false);
   const isMobile = useMobileDetect();
-  const prevStatusRef = useRef(feature.status);
+  const prevStatusRef = useRef(group.effectiveStatus);
 
-  const isDraggable = feature.status === "failed" || feature.status === "blocked";
+  const isDraggable =
+    group.effectiveStatus === "failed" || group.effectiveStatus === "blocked";
+
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: feature.id,
-    data: { status: feature.status, sessionId: feature.session_id ?? "" },
+    id: group.id,
+    data: { status: group.effectiveStatus },
     disabled: !isDraggable,
   });
-  const depCount = (feature.depends_on ?? []).length;
-  const featureNumId = Number(feature.id);
+
+  const depCount = group.depends_on.length;
   const isImplicated =
-    implicatedInRegression ||
-    (implicatedFeatureIds.length > 0 && implicatedFeatureIds.includes(featureNumId));
-  const isFixingRegression = (
-    feature as Feature & { is_fixing_regression?: boolean }
-  ).is_fixing_regression;
+    implicatedFeatureIds.length > 0 &&
+    implicatedFeatureIds.includes(Number(group.id));
 
-  // Haptic feedback on status change
+  // The currently running task within this group (for stop button + mascot)
+  const runningTask = [group.coding, group.testing, group.reviewer].find(
+    (t) => t?.status === "running",
+  );
+
+  // Haptic feedback on effective status change
   useEffect(() => {
-    if (prevStatusRef.current !== feature.status) {
+    if (prevStatusRef.current !== group.effectiveStatus) {
       triggerHaptic(50);
-      prevStatusRef.current = feature.status;
+      prevStatusRef.current = group.effectiveStatus;
     }
-  }, [feature.status]);
+  }, [group.effectiveStatus]);
 
-  // Long-press handler
   const longPressHandlers = useLongPress({
     duration: 500,
     onLongPress: () => {
-      if (onLongPress) onLongPress(feature);
+      if (onLongPress) onLongPress(group.coding);
     },
     onTap: () => {
-      if (isMobile) {
-        // Toggle tap-to-expand on mobile
-        setTapped((v) => !v);
-      }
+      if (isMobile) setTapped((v) => !v);
       if (onClick) onClick();
     },
   });
 
-  // Whether to show expanded info (mobile tap or desktop hover via CSS)
   const showExpanded = isMobile && tapped;
+
+  const stages: { task: Feature; icon: string }[] = [
+    { task: group.coding, icon: group.coding.plugin_name === "bugfix" ? "🐛" : "💻" },
+    ...(group.testing ? [{ task: group.testing, icon: "🧪" }] : []),
+    ...(group.reviewer ? [{ task: group.reviewer, icon: "📋" }] : []),
+  ];
 
   return (
     <div
@@ -157,26 +209,29 @@ export function FeatureCard({
         hover:shadow-md transition-all duration-200 touch-manipulation
         border-slate-200 dark:border-slate-700
         ${isDraggable ? (isDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-pointer"}
-        ${STATUS_BORDER[feature.status]}
-        ${feature.status === "failed" ? "border-r-red-200 dark:border-r-red-900" : ""}
-        ${feature.status === "running" ? "border-r-blue-200 dark:border-r-blue-900" : ""}
-        ${isFixingRegression ? "animate-pulse border-yellow-400 dark:border-yellow-400" : ""}
+        ${STATUS_BORDER[group.effectiveStatus] ?? STATUS_BORDER.pending}
+        ${group.effectiveStatus === "running" ? "border-r-blue-200 dark:border-r-blue-900" : ""}
+        ${group.effectiveStatus === "failed" ? "border-r-red-200 dark:border-r-red-900" : ""}
         ${showExpanded ? "ring-2 ring-forge-500/50" : ""}
       `}
       data-testid="feature-card"
     >
-      {/* Header: ID + status + quick-action button */}
+      {/* Header: short ID + status badge + controls */}
       <div className="flex items-start justify-between gap-2">
         <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 select-none">
-          #{shortId(feature.id)}
+          #{shortId(group.id)}
         </span>
         <div className="flex items-center gap-1">
           <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_BADGE[feature.status]}`}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              STATUS_BADGE[group.effectiveStatus] ?? STATUS_BADGE.pending
+            }`}
           >
-            {isStopping ? "stopping…" : feature.status}
+            {isStopping ? "stopping…" : group.effectiveStatus}
           </span>
-          {feature.status === "running" && onStop && (
+
+          {/* Stop button */}
+          {group.effectiveStatus === "running" && onStop && runningTask && (
             <button
               type="button"
               title="Stop task"
@@ -185,12 +240,14 @@ export function FeatureCard({
                 disabled:opacity-40 transition-colors text-[10px] leading-none px-0.5"
               onClick={(e) => {
                 e.stopPropagation();
-                onStop();
+                onStop(runningTask.id);
               }}
             >
               ■
             </button>
           )}
+
+          {/* Quick actions */}
           {onQuickCommand && (
             <div className="relative">
               <button
@@ -217,7 +274,7 @@ export function FeatureCard({
                       hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                     onClick={() => {
                       onQuickCommand("create-bug-report", {
-                        feature_id: Number(feature.id),
+                        feature_id: Number(group.coding.id),
                       });
                       setQuickMenuOpen(false);
                     }}
@@ -252,105 +309,81 @@ export function FeatureCard({
 
       {/* Feature name */}
       <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100 leading-snug line-clamp-2">
-        {feature.name}
+        {group.name}
       </p>
 
       {/* Category badge */}
-      {feature.category && (
+      {group.category && (
         <span
-          className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${categoryColour(feature.category)}`}
+          className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${categoryColour(group.category)}`}
         >
-          {feature.category}
+          {group.category}
         </span>
       )}
 
-      {/* Plugin type badge (testing / reviewer / bugfix / coding) */}
-      {feature.plugin_name && PLUGIN_BADGE[feature.plugin_name] && (
-        <span
-          className={`mt-1 ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium ${PLUGIN_BADGE[feature.plugin_name].cls}`}
-          title={`Plugin: ${feature.plugin_name}`}
-        >
-          <span>{PLUGIN_BADGE[feature.plugin_name].icon}</span>
-          <span>{PLUGIN_BADGE[feature.plugin_name].label}</span>
-        </span>
-      )}
-
-      {/* QA result summary for completed testing / reviewer tasks */}
-      {(feature.plugin_name === "testing" || feature.plugin_name === "reviewer") &&
-        feature.status === "completed" &&
-        feature.result_json && (
-          <div className="mt-1.5 rounded bg-teal-50 dark:bg-teal-900/30 px-2 py-1 text-[10px] text-teal-700 dark:text-teal-300 leading-snug">
-            {typeof feature.result_json.verdict === "string"
-              ? feature.result_json.verdict
-              : typeof feature.result_json.summary === "string"
-              ? (feature.result_json.summary as string).slice(0, 80)
-              : "QA complete"}
-          </div>
-        )}
-
-      {/* Progress bar (when running) */}
-      {feature.status === "running" && feature.progress !== undefined && (
-        <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-blue-500 transition-all duration-300"
-            style={{ width: `${feature.progress}%` }}
-          />
-        </div>
-      )}
-
-      {/* Agent session ID */}
-      {feature.session_id && feature.status === "running" && (
-        <div className="mt-1.5 flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-          <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400 truncate">
-            {shortId(feature.session_id)}
-          </span>
-        </div>
-      )}
+      {/* Pipeline stage strip */}
+      <div className="mt-2 space-y-1">
+        {stages.map(({ task, icon }) => (
+          <StageRow key={task.id} task={task} icon={icon} />
+        ))}
+      </div>
 
       {/* Agent mascot */}
-      {feature.status === "running" && <AgentMascot featureId={feature.id} />}
+      {runningTask && <AgentMascot featureId={runningTask.id} />}
 
-      {/* Error message */}
-      {feature.status === "failed" && feature.error_message && (
-        <p className="mt-1.5 text-[10px] text-red-600 dark:text-red-400 line-clamp-2 leading-snug">
-          {feature.error_message}
-        </p>
-      )}
+      {/* Error message — first failed stage */}
+      {group.effectiveStatus === "failed" &&
+        (() => {
+          const failedTask = [group.reviewer, group.testing, group.coding].find(
+            (t) => t?.status === "failed" && t.error_message,
+          );
+          return failedTask?.error_message ? (
+            <p className="mt-1.5 text-[10px] text-red-600 dark:text-red-400 line-clamp-2 leading-snug">
+              {failedTask.error_message}
+            </p>
+          ) : null;
+        })()}
 
-      {/* Tap-to-expand section (mobile only) */}
+      {/* Tap-to-expand (mobile only) */}
       {showExpanded && (
-        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1.5 animate-fade-in" data-testid="card-expanded">
-          {feature.description && (
+        <div
+          className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1.5 animate-fade-in"
+          data-testid="card-expanded"
+        >
+          {group.coding.description && (
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
-              {feature.description}
+              {group.coding.description}
             </p>
           )}
-          {feature.session_id && (
+          {runningTask?.session_id && (
             <p className="text-[10px] font-mono text-blue-500 dark:text-blue-400 truncate">
-              Agent: {feature.session_id}
+              Agent: {runningTask.session_id}
             </p>
           )}
-          {feature.cost_usd > 0 && (
+          {group.cost_usd > 0 && (
             <p className="text-[10px] text-slate-400">
-              Tokens: {feature.input_tokens.toLocaleString()} in / {feature.output_tokens.toLocaleString()} out
+              Tokens: {group.input_tokens.toLocaleString()} in /{" "}
+              {group.output_tokens.toLocaleString()} out
             </p>
           )}
         </div>
       )}
 
-      {/* Footer: deps + cost */}
+      {/* Footer: dep count + total cost */}
       <div className="mt-2 flex items-center justify-between">
         {depCount > 0 ? (
-          <span className="text-[10px] text-slate-400 dark:text-slate-500" title="Dependency count">
+          <span
+            className="text-[10px] text-slate-400 dark:text-slate-500"
+            title="Cross-feature dependencies"
+          >
             🔗 {depCount} dep{depCount !== 1 ? "s" : ""}
           </span>
         ) : (
           <span />
         )}
-        {feature.cost_usd > 0 && (
+        {group.cost_usd > 0 && (
           <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
-            ${feature.cost_usd.toFixed(3)}
+            ${group.cost_usd.toFixed(3)}
           </span>
         )}
       </div>
