@@ -16,6 +16,31 @@ import { useLongPress } from "../hooks/useLongPress";
 import { useMobileDetect } from "../hooks/useMobileDetect";
 import { triggerHaptic } from "../utils/haptic";
 
+/** Compute time-based estimated progress (0–90%) from a start timestamp.
+ *  Uses 1 - e^(-t/τ) with τ=120s so the bar moves visibly without faking completion. */
+function useElapsedProgress(startedAt: string | undefined, isRunning: boolean): number {
+  const [pct, setPct] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning || !startedAt) {
+      setPct(0);
+      return;
+    }
+
+    const tick = () => {
+      const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
+      // asymptotically approaches 90%, reaches ~39% at 1min, ~63% at 2min, ~78% at 3min
+      setPct(Math.round((1 - Math.exp(-elapsed / 120)) * 90));
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isRunning, startedAt]);
+
+  return pct;
+}
+
 interface FeatureCardProps {
   feature: Feature;
   onClick?: () => void;
@@ -83,6 +108,8 @@ export function FeatureCard({
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [tapped, setTapped] = useState(false);
   const isMobile = useMobileDetect();
+  const elapsedPct = useElapsedProgress(feature.started_at, feature.status === "running");
+  const progressPct = feature.progress ?? elapsedPct;
   const prevStatusRef = useRef(feature.status);
 
   const isDraggable = feature.status === "failed" || feature.status === "blocked";
@@ -246,12 +273,12 @@ export function FeatureCard({
         </span>
       )}
 
-      {/* Progress bar (running only) */}
+      {/* Progress bar (running only) — width reflects elapsed time, never claims 100% */}
       {feature.status === "running" && (
         <div className="mt-2 h-1 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
           <div
-            className="h-full rounded-full bg-blue-500 animate-pulse transition-all duration-300"
-            style={{ width: `${feature.progress ?? 35}%` }}
+            className="h-full rounded-full bg-blue-500 transition-all duration-1000"
+            style={{ width: `${progressPct}%` }}
           />
         </div>
       )}

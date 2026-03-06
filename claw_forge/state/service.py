@@ -294,12 +294,21 @@ class AgentStateService:
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        # Reset tasks orphaned in 'running' state by a previously crashed runner
         from sqlalchemy import text
         async with self._engine.begin() as conn:
+            # Schema migration: add columns introduced after initial table creation.
+            # SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we catch errors.
+            for ddl in [
+                "ALTER TABLE sessions ADD COLUMN project_paused INTEGER NOT NULL DEFAULT 0",
+            ]:
+                with suppress(Exception):
+                    await conn.execute(text(ddl))
+            # Reset tasks orphaned in 'running' state by a previously crashed runner;
+            # also clear any project_paused flag so the dispatcher isn't permanently blocked.
             await conn.execute(
                 text("UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'")
             )
+            await conn.execute(text("UPDATE sessions SET project_paused=0"))
 
     async def dispose(self) -> None:
         """Dispose the async engine, closing all pooled connections.
