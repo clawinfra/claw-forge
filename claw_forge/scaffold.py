@@ -278,10 +278,15 @@ def scaffold_project(project_path: Path) -> dict[str, Any]:
         shutil.copy2(SPEC_TEMPLATE, spec_example_path)
         spec_example_written = True
 
+    from claw_forge.git.repo import init_or_detect
+
+    git_result = init_or_detect(project_path)
+
     return {
         "claude_md_written": claude_md_written,
         "dot_claude_created": dot_claude_created,
         "commands_copied": commands_copied,
         "spec_example_written": spec_example_written,
         "stack": stack,
+        "git_initialized": git_result["initialized"],
     }

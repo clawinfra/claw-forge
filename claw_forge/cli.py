@@ -1157,6 +1157,11 @@ def init(
     if scaffold["spec_example_written"]:
         console.print("✓ Created app_spec.example.xml  (reference format for your spec)")
 
+    if scaffold["git_initialized"]:
+        console.print("✓ Initialized git repository")
+    else:
+        console.print("[dim]✓ Git repository already exists — skipped[/dim]")
+
     # Guide user to next step
     spec_file = project_path / "app_spec.txt"
     xml_spec_file = project_path / "additions_spec.xml"
