@@ -20,6 +20,9 @@ from claude_agent_sdk import McpSdkServerConfig, create_sdk_mcp_server, tool
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session as DBSession
 
+from claw_forge.git.commits import commit_checkpoint as _git_checkpoint
+from claw_forge.git.commits import task_history as _git_task_history
+
 from claw_forge.mcp.feature_mcp import (
     Feature,
     FeatureBase,
@@ -295,6 +298,58 @@ def _make_tools(project_dir: Path) -> list[Any]:  # noqa: C901
                 success = True
         return {"content": [{"type": "text", "text": str(success)}]}
 
+    @tool(
+        "checkpoint",
+        "Save a git checkpoint commit with a message. Use before risky changes or at milestones.",
+        {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "What was accomplished (commit message)"},
+                "task_id": {"type": "string", "description": "Current task ID"},
+                "plugin": {"type": "string", "description": "Current plugin name"},
+                "phase": {
+                    "type": "string",
+                    "description": "Phase: milestone | save | risky",
+                    "enum": ["milestone", "save", "risky"],
+                },
+                "session_id": {"type": "string", "description": "Current session ID"},
+            },
+            "required": ["message", "task_id", "plugin", "session_id"],
+        },
+    )
+    async def checkpoint(args: dict[str, Any]) -> dict[str, Any]:
+        import json
+        result = _git_checkpoint(
+            project_dir,
+            message=args.get("message", "checkpoint"),
+            task_id=args.get("task_id", ""),
+            plugin=args.get("plugin", ""),
+            phase=args.get("phase", "milestone"),
+            session_id=args.get("session_id", ""),
+        )
+        return {"content": [{"type": "text", "text": json.dumps(result)}]}
+
+    @tool(
+        "task_history",
+        "Get git commit history for a task or the whole project. Use to understand what happened before.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Filter by task ID (optional)"},
+                "limit": {"type": "integer", "description": "Max commits to return (default 20)"},
+            },
+            "required": [],
+        },
+    )
+    async def git_task_history(args: dict[str, Any]) -> dict[str, Any]:
+        import json
+        commits = _git_task_history(
+            project_dir,
+            task_id=args.get("task_id"),
+            limit=args.get("limit", 20),
+        )
+        return {"content": [{"type": "text", "text": json.dumps(commits)}]}
+
     return [
         feature_get_stats,
         feature_get_by_id,
@@ -307,6 +362,8 @@ def _make_tools(project_dir: Path) -> list[Any]:  # noqa: C901
         feature_create_bulk,
         feature_create,
         feature_add_dependency,
+        checkpoint,
+        git_task_history,
     ]
 
 
