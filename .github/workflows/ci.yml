@@ -79,7 +79,7 @@ jobs:
       - name: Capture screenshots
         run: |
           cd ui
-          node scripts/mock-server.js &
+          node scripts/mock-server.cjs &
           sleep 2
           npm run dev &
           sleep 8

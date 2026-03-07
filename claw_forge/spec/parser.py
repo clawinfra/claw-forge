@@ -314,7 +314,7 @@ class ProjectSpec:
             tables_el = db_el.find("tables")
             if tables_el is not None:
                 for table_el in tables_el:
-                    # Support both <table name="…"><column>…</column> and legacy <tablename>- …</tablename>
+                    # Support new <table name="…"><column> format and legacy <tablename>- …
                     table_name = table_el.get("name") or table_el.tag
                     cols = []
                     col_els = table_el.findall("column")

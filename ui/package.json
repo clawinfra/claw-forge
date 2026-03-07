@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "screenshots": "node scripts/screenshots.mjs",
-    "mock-server": "node scripts/mock-server.js"
+    "mock-server": "node scripts/mock-server.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
