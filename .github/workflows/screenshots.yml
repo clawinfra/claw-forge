@@ -1,0 +1,35 @@
+name: Capture Screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI deps
+        run: npm --prefix ui install
+
+      - name: Install Playwright
+        run: npx --prefix ui playwright install chromium --with-deps
+
+      - name: Capture screenshots
+        run: |
+          cd ui
+          node scripts/screenshots.mjs
+
+      - name: Commit screenshots
+        run: |
+          git config user.name "Alex Chen"
+          git config user.email "alex.chen31337@gmail.com"
+          git add website/assets/screenshots/
+          git diff --staged --quiet || git commit -m "chore: update UI screenshots [skip ci]"
+          git push

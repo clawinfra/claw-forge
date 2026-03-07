@@ -55,11 +55,62 @@ const MOCK_TASKS = MOCK_FEATURES.map((f, i) => ({
   completed_at: f.status === 'completed' ? new Date(Date.now() - (12 - i) * 100000).toISOString() : undefined,
 }));
 
-const MOCK_POOL_STATUS = [
-  { name: "claude-oauth", status: "healthy", requests: 142, errors: 0, latency_p50_ms: 1200 },
-  { name: "anthropic-direct", status: "healthy", requests: 89, errors: 2, latency_p50_ms: 1450 },
-  { name: "groq", status: "degraded", requests: 31, errors: 8, latency_p50_ms: 890 },
-];
+const MOCK_POOL_STATUS = {
+  active: true,
+  strategy: "PRIORITY",
+  model_aliases: {
+    low: "claude-haiku-4-5-20251001",
+    med: "claude-sonnet-4-6",
+    high: "claude-opus-4-6",
+  },
+  providers: [
+    {
+      name: "claude-oauth",
+      type: "anthropic_oauth",
+      health: "healthy",
+      enabled: true,
+      rpm: 14,
+      max_rpm: 60,
+      circuit_state: "closed",
+      total_cost_usd: 0.142,
+      avg_latency_ms: 1200,
+      model: "claude-sonnet-4-6",
+      priority: 1,
+      model_map: {
+        low: "claude-haiku-4-5-20251001",
+        med: "claude-sonnet-4-6",
+        high: "claude-opus-4-6",
+      },
+      active_tiers: ["low", "med", "high"],
+    },
+    {
+      name: "anthropic-direct",
+      type: "anthropic",
+      health: "healthy",
+      enabled: true,
+      rpm: 8,
+      max_rpm: 60,
+      circuit_state: "closed",
+      total_cost_usd: 0.089,
+      avg_latency_ms: 1450,
+      model: "claude-sonnet-4-6",
+      priority: 2,
+    },
+    {
+      name: "bedrock-us",
+      type: "bedrock",
+      health: "degraded",
+      enabled: true,
+      rpm: 3,
+      max_rpm: 30,
+      circuit_state: "half_open",
+      total_cost_usd: 0.031,
+      avg_latency_ms: 2900,
+      model: "anthropic.claude-sonnet-4-6",
+      priority: 3,
+    },
+  ],
+};
 
 const MOCK_REGRESSION = {
   run_count: 7,
@@ -76,13 +127,55 @@ const MOCK_REGRESSION = {
 };
 
 const MOCK_COMMANDS = [
-  { name: "init", description: "Initialize a new project", usage: "claw-forge init <name>" },
-  { name: "run", description: "Run the agent harness", usage: "claw-forge run [--spec spec.txt]" },
-  { name: "status", description: "Show session status", usage: "claw-forge status [session-id]" },
-  { name: "retry", description: "Retry failed features", usage: "claw-forge retry [--all]" },
-  { name: "review", description: "Review completed features", usage: "claw-forge review" },
-  { name: "ui", description: "Launch the Kanban UI", usage: "claw-forge ui [--port 5173]" },
-  { name: "export", description: "Export session report", usage: "claw-forge export [--format json|html]" },
+  {
+    id: "run",
+    label: "Run Agent Harness",
+    icon: "⚙️",
+    description: "Start the autonomous coding agent on your spec",
+    category: "build",
+    shortcut: "R",
+    args: [{ name: "spec", label: "Spec file", type: "string", optional: true }],
+  },
+  {
+    id: "status",
+    label: "Show Session Status",
+    icon: "📊",
+    description: "Display current session progress and costs",
+    category: "monitoring",
+    args: [],
+  },
+  {
+    id: "retry",
+    label: "Retry Failed Tasks",
+    icon: "🔄",
+    description: "Reset failed or blocked tasks back to pending",
+    category: "fix",
+    args: [],
+  },
+  {
+    id: "review",
+    label: "Review Completed Features",
+    icon: "🔍",
+    description: "Run code review on all completed features",
+    category: "quality",
+    args: [],
+  },
+  {
+    id: "export",
+    label: "Export Session Report",
+    icon: "📤",
+    description: "Export session summary as JSON or HTML",
+    category: "save",
+    args: [{ name: "format", label: "Format (json|html)", type: "string", optional: true }],
+  },
+  {
+    id: "init",
+    label: "Initialize Project",
+    icon: "🚀",
+    description: "Set up a new claw-forge project",
+    category: "setup",
+    args: [{ name: "name", label: "Project name", type: "string", optional: false }],
+  },
 ];
 
 function sendJson(res, data, status = 200) {

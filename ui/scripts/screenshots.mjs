@@ -33,7 +33,7 @@ const SCREENSHOTS = [
     name: "feature-detail",
     description: "Feature detail drawer open",
     viewport: { width: 1440, height: 900 },
-    actions: [{ click: '.cursor-pointer' }],
+    actions: [{ click: '[data-testid="feature-card"]' }],
     path: resolve(SCREENSHOTS_DIR, 'feature-detail.png'),
   },
   {
@@ -48,6 +48,7 @@ const SCREENSHOTS = [
     description: "Provider pool health panel (always visible in header)",
     viewport: { width: 1440, height: 900 },
     actions: [],
+    crop: { x: 0, y: 0, width: 1440, height: 220 },
     path: resolve(SCREENSHOTS_DIR, 'pool-status.png'),
   },
   {
@@ -131,9 +132,12 @@ async function main() {
   await waitForPort(8888, 8000);
   console.log('✅ Mock server ready on port 8888');
 
-  // Start Vite dev server from ui/ directory
+  // Start Vite dev server from ui/ directory, pointing it at the mock server port
   const uiDir = resolve(__dirname, '..');
-  const viteServer = spawnServer('npm', ['run', 'dev'], { cwd: uiDir });
+  const viteServer = spawnServer('npm', ['run', 'dev'], {
+    cwd: uiDir,
+    env: { ...process.env, VITE_API_PORT: '8888' },
+  });
 
   console.log('Waiting for Vite dev server on port 5173...');
   await waitForPort(5173, 30000);

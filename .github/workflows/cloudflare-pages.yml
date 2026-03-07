@@ -5,17 +5,52 @@ on:
     branches: [main]
     paths:
       - "website/**"
+      - "ui/**"
   workflow_dispatch:
 
 jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI deps
+        run: npm --prefix ui install
+
+      - name: Install Playwright
+        run: npx --prefix ui playwright install chromium --with-deps
+
+      - name: Capture screenshots
+        run: |
+          cd ui
+          node scripts/screenshots.mjs
+
+      - name: Upload screenshots artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: website/assets/screenshots/
+          retention-days: 1
+
   deploy:
     runs-on: ubuntu-latest
+    needs: [screenshots]
     permissions:
       contents: read
       deployments: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download screenshots
+        uses: actions/download-artifact@v4
+        with:
+          name: screenshots
+          path: website/assets/screenshots/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
