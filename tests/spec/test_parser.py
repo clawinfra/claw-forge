@@ -543,7 +543,7 @@ class TestEdgeCases:
               <project_name>blanks</project_name>
               <core_features>
                 <misc>
-                  - 
+                  -
                   -
                   - Real feature
                 </misc>
@@ -553,3 +553,198 @@ class TestEdgeCases:
         spec = ProjectSpec._parse_xml(xml)
         assert len(spec.features) == 1
         assert spec.features[0].name == "Real feature"
+
+
+# ── New XML format: <category name="…"> / <table name="…"> / <domain name="…"> ─
+
+
+class TestNewXmlFormat:
+    """Tests for the new attribute-based XML spec format."""
+
+    def test_category_name_attribute_used_as_category(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>newformat</project_name>
+              <core_features>
+                <category name="Authentication &amp; User Management">
+                  - User can register with email and password
+                  - User can login and receive JWT tokens
+                </category>
+                <category name="Receipt Scanning">
+                  - System sends image to OCR API
+                </category>
+              </core_features>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 3
+        assert spec.features[0].category == "Authentication & User Management"
+        assert spec.features[1].category == "Authentication & User Management"
+        assert spec.features[2].category == "Receipt Scanning"
+
+    def test_category_name_attribute_preserves_spaces_and_ampersand(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>spaces</project_name>
+              <core_features>
+                <category name="Tags &amp; Organization">
+                  - User can add tags to any item
+                </category>
+              </core_features>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].category == "Tags & Organization"
+
+    def test_table_name_attribute_and_column_children(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>tables</project_name>
+              <database_schema>
+                <tables>
+                  <table name="users">
+                    <column>id UUID PRIMARY KEY</column>
+                    <column>email VARCHAR(255) UNIQUE NOT NULL</column>
+                    <column>password_hash VARCHAR(255) NOT NULL</column>
+                  </table>
+                  <table name="refresh_tokens">
+                    <column>id UUID PRIMARY KEY</column>
+                    <column>user_id UUID NOT NULL REFERENCES users(id)</column>
+                  </table>
+                </tables>
+              </database_schema>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert "users" in spec.database_tables
+        assert len(spec.database_tables["users"]) == 3
+        assert spec.database_tables["users"][0] == "id UUID PRIMARY KEY"
+        assert "refresh_tokens" in spec.database_tables
+        assert len(spec.database_tables["refresh_tokens"]) == 2
+
+    def test_domain_name_attribute_with_plain_text_routes(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>api</project_name>
+              <api_endpoints_summary>
+                <domain name="Authentication">
+                  POST   /api/auth/register    - Register new user
+                  POST   /api/auth/login       - Log in and receive JWT
+                  POST   /api/auth/logout      - Log out
+                </domain>
+                <domain name="Receipts">
+                  GET    /api/receipts         - List receipts
+                  POST   /api/receipts         - Create receipt
+                </domain>
+              </api_endpoints_summary>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert "Authentication" in spec.api_endpoints
+        assert len(spec.api_endpoints["Authentication"]) == 3
+        assert "Receipts" in spec.api_endpoints
+        assert len(spec.api_endpoints["Receipts"]) == 2
+
+    def test_phase_name_attribute_in_implementation_steps(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>phases</project_name>
+              <implementation_steps>
+                <phase name="Phase 1: Foundation &amp; Auth">
+                  Set up project structure
+                  Implement authentication
+                </phase>
+                <phase name="Phase 2: Core Features">
+                  Build CRUD endpoints
+                  Add pagination
+                </phase>
+              </implementation_steps>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.implementation_phases == [
+            "Phase 1: Foundation & Auth",
+            "Phase 2: Core Features",
+        ]
+
+    def test_empty_column_elements_ignored(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>emptycols</project_name>
+              <database_schema>
+                <tables>
+                  <table name="items">
+                    <column>id UUID PRIMARY KEY</column>
+                    <column></column>
+                    <column>name VARCHAR(255)</column>
+                  </table>
+                </tables>
+              </database_schema>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.database_tables["items"] == ["id UUID PRIMARY KEY", "name VARCHAR(255)"]
+
+    def test_domain_without_name_falls_back_to_tag(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification>
+              <project_name>fallback</project_name>
+              <api_endpoints_summary>
+                <auth_endpoints>
+                  - POST /api/auth/register
+                </auth_endpoints>
+              </api_endpoints_summary>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert "Auth Endpoints" in spec.api_endpoints
+
+    def test_full_new_format_spec_roundtrip(self) -> None:
+        xml = textwrap.dedent("""\
+            <project_specification mode="greenfield">
+              <project_name>Recipe Manager</project_name>
+              <overview>A recipe management app.</overview>
+              <target_audience>Home cooks.</target_audience>
+              <core_features>
+                <category name="Authentication &amp; User Management">
+                  - User can register with email and password
+                  - User can login and receive JWT tokens
+                </category>
+                <category name="Recipe Management">
+                  - User can create a recipe with title and description
+                  - User can delete a recipe
+                </category>
+              </core_features>
+              <database_schema>
+                <tables>
+                  <table name="users">
+                    <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+                    <column>email VARCHAR(255) UNIQUE NOT NULL</column>
+                  </table>
+                </tables>
+              </database_schema>
+              <api_endpoints_summary>
+                <domain name="Authentication">
+                  POST   /api/auth/register    - Register new user account
+                  POST   /api/auth/login       - Log in and receive JWT tokens
+                </domain>
+              </api_endpoints_summary>
+              <implementation_steps>
+                <phase name="Phase 1: Auth">
+                  Implement registration and login
+                </phase>
+                <phase name="Phase 2: Recipes">
+                  Build recipe CRUD
+                </phase>
+              </implementation_steps>
+            </project_specification>
+        """)
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.project_name == "Recipe Manager"
+        assert len(spec.features) == 4
+        assert spec.features[0].category == "Authentication & User Management"
+        assert spec.features[2].category == "Recipe Management"
+        assert "users" in spec.database_tables
+        assert spec.database_tables["users"][0] == "id UUID PRIMARY KEY DEFAULT gen_random_uuid()"
+        assert "Authentication" in spec.api_endpoints
+        assert spec.implementation_phases == ["Phase 1: Auth", "Phase 2: Recipes"]

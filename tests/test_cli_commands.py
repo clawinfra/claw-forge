@@ -1008,3 +1008,65 @@ class TestSdkAgentExecution:
         assert os.environ.get("CLAUDECODE") == "1"
         # run command itself should exit 0 (task fails, but CLI exits cleanly)
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# _port_in_use_error — standalone helper, no state service needed
+# ---------------------------------------------------------------------------
+
+
+class TestPortInUseError:
+    """Tests for the _port_in_use_error helper function (cli.py lines 1626-1659)."""
+
+    def _call(
+        self,
+        port: int,
+        service: str = "state service",
+        platform_name: str = "Darwin",
+    ) -> str:
+        """Call _port_in_use_error, suppress the Exit, return stdout."""
+        import io
+        import sys
+        from unittest.mock import patch
+
+        from claw_forge.cli import _port_in_use_error
+
+        buf = io.StringIO()
+        with patch("platform.system", return_value=platform_name):
+            old, sys.stdout = sys.stdout, buf
+            try:
+                _port_in_use_error(port, service)
+            except Exception:  # noqa: BLE001 — catches typer.Exit / click.Exit
+                pass
+            finally:
+                sys.stdout = old
+        return buf.getvalue()
+
+    def test_port_in_use_error_raises_exit(self) -> None:
+        """_port_in_use_error always raises a typer.Exit exception."""
+        from unittest.mock import patch
+
+        import click
+
+        from claw_forge.cli import _port_in_use_error
+
+        with patch("platform.system", return_value="Darwin"), pytest.raises(click.exceptions.Exit):
+            _port_in_use_error(8888)
+
+    def test_port_in_use_error_mac_output(self) -> None:
+        """On macOS, does not print Linux ss command."""
+        out = self._call(9000, platform_name="Darwin")
+        assert "9000" in out
+        assert "lsof" in out
+        assert "ss -tlnp" not in out  # macOS skips ss command
+
+    def test_port_in_use_error_linux_output(self) -> None:
+        """On Linux, prints ss command as alternative (line 1641)."""
+        out = self._call(7777, platform_name="Linux")
+        assert "7777" in out
+        assert "ss -tlnp" in out  # Linux includes ss command
+
+    def test_port_in_use_error_includes_shutdown_url(self) -> None:
+        """Output includes the shutdown endpoint URL."""
+        out = self._call(8420, platform_name="Darwin")
+        assert "http://localhost:8420/shutdown" in out

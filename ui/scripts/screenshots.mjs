@@ -127,7 +127,7 @@ async function main() {
   await new Promise(r => setTimeout(r, 600));
 
   // Start mock server
-  const mockServer = spawnServer('node', [resolve(__dirname, 'mock-server.js')]);
+  const mockServer = spawnServer('node', [resolve(__dirname, 'mock-server.cjs')]);
   await waitForPort(8888, 8000);
   console.log('✅ Mock server ready on port 8888');
 

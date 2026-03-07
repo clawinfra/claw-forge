@@ -174,6 +174,42 @@ class TestMakeCanUseTool:
         )
         assert isinstance(result, PermissionResultAllow)
 
+    @pytest.mark.asyncio
+    async def test_safe_bash_command_allows(self, tmp_path):
+        """Safe bash command loops through all patterns without match (119->127 branch)."""
+        callback = make_can_use_tool(project_dir=tmp_path)
+        result = await callback("Bash", {"command": "ls -la"}, {})
+        assert isinstance(result, PermissionResultAllow)
+
+    @pytest.mark.asyncio
+    async def test_write_tool_no_project_dir_allows(self):
+        """Write with project_dir=None → skip sandbox check (127->138 branch)."""
+        callback = make_can_use_tool(project_dir=None)
+        result = await callback("Write", {"file_path": "/etc/evil.py"}, {})
+        assert isinstance(result, PermissionResultAllow)
+
+    @pytest.mark.asyncio
+    async def test_non_write_tool_skips_sandbox(self, tmp_path):
+        """Read tool is not in WRITE_TOOLS → skip sandbox check (127->138 branch)."""
+        callback = make_can_use_tool(project_dir=tmp_path)
+        result = await callback("Read", {"file_path": "/etc/passwd"}, {})
+        assert isinstance(result, PermissionResultAllow)
+
+    @pytest.mark.asyncio
+    async def test_write_empty_file_path_allows(self, tmp_path):
+        """Empty file_path → skip path check → allow (129->138 branch)."""
+        callback = make_can_use_tool(project_dir=tmp_path)
+        result = await callback("Write", {"file_path": ""}, {})
+        assert isinstance(result, PermissionResultAllow)
+
+    @pytest.mark.asyncio
+    async def test_write_outside_project_dir_denies(self, tmp_path):
+        """Write outside project dir → deny (lines 132-133)."""
+        callback = make_can_use_tool(project_dir=tmp_path)
+        result = await callback("Write", {"file_path": "/etc/evil.py"}, {})
+        assert isinstance(result, PermissionResultDeny)
+        assert "outside project dir" in result.message
+
 
 # ---------------------------------------------------------------------------
 # Constants

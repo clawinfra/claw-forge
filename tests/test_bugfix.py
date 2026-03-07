@@ -392,3 +392,276 @@ def test_fix_help() -> None:
 def test_fix_no_args_shows_error() -> None:
     result = runner.invoke(app, ["fix"])
     assert result.exit_code != 0 or "provide" in result.output.lower() or "error" in result.output.lower()  # noqa: E501
+
+
+# ── Edge case coverage ─────────────────────────────────────────────────────────
+
+
+UNKNOWN_HEADING_MD = textwrap.dedent(
+    """\
+    # Bug: Unknown section test
+
+    ## Unknown section header XYZ
+    - some content
+
+    ## Symptoms
+    - real symptom
+    """
+)
+
+COMMENT_IN_LIST_MD = textwrap.dedent(
+    """\
+    # Bug: Comment in list
+
+    ## Symptoms
+    <!-- this is a comment -->
+    - real item
+    """
+)
+
+DUPLICATE_SECTION_MD = textwrap.dedent(
+    """\
+    # Bug: Duplicate section
+
+    ## Symptoms
+    - First occurrence
+
+    ## Symptoms
+    - Second occurrence
+    """
+)
+
+EMPTY_LINES_IN_SECTION_MD = textwrap.dedent(
+    """\
+    # Bug: Empty lines
+
+    ## Symptoms
+    - real item
+    not a bullet line
+    """
+)
+
+COMMENT_IN_TEXT_SECTION_MD = textwrap.dedent(
+    """\
+    # Bug: Comment in text
+
+    ## Expected behaviour
+    <!-- commented out -->
+    Real expected behaviour
+    """
+)
+
+REGRESSION_UNRECOGNIZED_MD = textwrap.dedent(
+    """\
+    # Bug: Unrecognized regression
+
+    ## Regression test required
+    maybe
+    """
+)
+
+ENV_WITH_COMMENT_MD = textwrap.dedent(
+    """\
+    # Bug: Env with comment
+
+    ## Environment
+    <!-- ignored -->
+    Python: 3.12
+    """
+)
+
+ENV_EMPTY_LINE_MD = textwrap.dedent(
+    """\
+    # Bug: Env empty line
+
+    ## Environment
+    Python: 3.12
+
+    OS: Linux
+    """
+)
+
+ENV_NO_KV_MD = textwrap.dedent(
+    """\
+    # Bug: Env no kv
+
+    ## Environment
+    just a plain line with no colon
+    """
+)
+
+
+def test_unknown_section_heading_ignored() -> None:
+    """Unknown heading sets current_section to None (line 129)."""
+    report = BugReport._parse(UNKNOWN_HEADING_MD)
+    assert report.title == "Unknown section test"
+    assert "real symptom" in report.symptoms
+
+
+def test_comment_line_in_list_ignored() -> None:
+    """Comment in list → _parse_list_item returns None (line 61, 139->137)."""
+    report = BugReport._parse(COMMENT_IN_LIST_MD)
+    assert "real item" in report.symptoms
+    assert len(report.symptoms) == 1  # comment not included
+
+
+def test_duplicate_section_uses_first() -> None:
+    """Same section appearing twice → second occurrence adds to existing list (126->130)."""
+    report = BugReport._parse(DUPLICATE_SECTION_MD)
+    # Both symptoms may appear (section_lines already has key)
+    assert len(report.symptoms) >= 1
+
+
+def test_non_bullet_lines_in_list_ignored() -> None:
+    """Non-bullet line in list section → item=None → skipped (139->137)."""
+    report = BugReport._parse(EMPTY_LINES_IN_SECTION_MD)
+    assert "real item" in report.symptoms
+
+
+def test_comment_in_text_section_skipped() -> None:
+    """Comment in text section → skipped (147->145)."""
+    report = BugReport._parse(COMMENT_IN_TEXT_SECTION_MD)
+    assert "Real expected behaviour" in report.expected_behaviour
+    assert "commented" not in report.expected_behaviour
+
+
+def test_regression_unrecognized_defaults_true() -> None:
+    """Unrecognized regression text → default True (157->153)."""
+    report = BugReport._parse(REGRESSION_UNRECOGNIZED_MD)
+    assert report.regression_test_required is True
+
+
+def test_env_comment_skipped() -> None:
+    """Comment in env section → continue (line 166)."""
+    report = BugReport._parse(ENV_WITH_COMMENT_MD)
+    assert report.environment.get("Python") == "3.12"
+
+
+def test_env_empty_line_skipped() -> None:
+    """Empty line in env section → skipped (line 171)."""
+    report = BugReport._parse(ENV_EMPTY_LINE_MD)
+    assert report.environment.get("Python") == "3.12"
+    assert report.environment.get("OS") == "Linux"
+
+
+def test_env_no_kv_match_skipped() -> None:
+    """Env line with no colon → KV match fails → skipped (173->163)."""
+    report = BugReport._parse(ENV_NO_KV_MD)
+    assert report.environment == {}
+
+
+def test_unknown_heading_returns_none_in_normalise() -> None:
+    """_normalise_heading with completely unknown text → returns None (line 43)."""
+    from claw_forge.bugfix.report import _normalise_heading
+    result = _normalise_heading("completely unknown section xyz 12345")
+    assert result is None
+
+
+# ── Plugin edge cases ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_assistant_message_with_text(tmp_path: Path) -> None:
+    """AssistantMessage with text blocks collected (lines 103-105). No bug_report → 81->84."""
+    from unittest.mock import MagicMock, patch
+
+    plugin = BugFixPlugin()
+    ctx = PluginContext(
+        project_path=str(tmp_path),
+        session_id="test",
+        task_id="test",
+        metadata={},  # no bug_report
+    )
+    block = MagicMock()
+    block.text = "fixing the bug now"
+    mock_message = MagicMock()
+    mock_message.__class__ = type("AssistantMessage", (), {})
+    mock_message.content = [block]
+
+    async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
+        yield mock_message
+
+    with patch("claw_forge.plugins.bugfix.run_agent", side_effect=_fake_run_agent):
+        result = await plugin.execute(ctx)
+
+    assert result.success is True
+    assert "fixing the bug now" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_result_message_with_files(tmp_path: Path) -> None:
+    """ResultMessage with files_modified recorded (106->92 branch)."""
+    from unittest.mock import MagicMock, patch
+
+    plugin = BugFixPlugin()
+    ctx = PluginContext(
+        project_path=str(tmp_path),
+        session_id="test",
+        task_id="test",
+    )
+    mock_message = MagicMock()
+    mock_message.__class__ = type("ResultMessage", (), {})
+    mock_message.files_modified = ["src/main.py", "tests/test_main.py"]
+
+    async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
+        yield mock_message
+
+    with patch("claw_forge.plugins.bugfix.run_agent", side_effect=_fake_run_agent):
+        result = await plugin.execute(ctx)
+
+    assert result.success is True
+    assert "src/main.py" in result.files_modified
+
+
+@pytest.mark.asyncio
+async def test_execute_assistant_message_block_without_text(tmp_path: Path) -> None:
+    """AssistantMessage block without .text attr is skipped (104->103 branch)."""
+    from unittest.mock import MagicMock, patch
+
+    plugin = BugFixPlugin()
+    ctx = PluginContext(
+        project_path=str(tmp_path),
+        session_id="test",
+        task_id="test",
+    )
+    # A block that has NO text attribute (e.g., ToolUseBlock)
+    block_no_text = MagicMock(spec=["type"])  # spec with only 'type', no 'text'
+    block_with_text = MagicMock()
+    block_with_text.text = "some output"
+
+    mock_message = MagicMock()
+    mock_message.__class__ = type("AssistantMessage", (), {})
+    mock_message.content = [block_no_text, block_with_text]  # first block has no text
+
+    async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
+        yield mock_message
+
+    with patch("claw_forge.plugins.bugfix.run_agent", side_effect=_fake_run_agent):
+        result = await plugin.execute(ctx)
+
+    assert result.success is True
+    assert "some output" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_unknown_message_type_skipped(tmp_path: Path) -> None:
+    """Unknown message type → elif False → loop continues (106->92 branch)."""
+    from unittest.mock import MagicMock, patch
+
+    plugin = BugFixPlugin()
+    ctx = PluginContext(
+        project_path=str(tmp_path),
+        session_id="test",
+        task_id="test",
+    )
+    # Neither AssistantMessage nor ResultMessage
+    mock_message = MagicMock()
+    mock_message.__class__ = type("ToolResultMessage", (), {})
+
+    async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
+        yield mock_message
+
+    with patch("claw_forge.plugins.bugfix.run_agent", side_effect=_fake_run_agent):
+        result = await plugin.execute(ctx)
+
+    assert result.success is True

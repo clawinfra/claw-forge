@@ -249,3 +249,76 @@ class TestProviderConfigOauthDefaults:
             oauth_token_file="/path/to/token",
         )
         assert cfg.oauth_token_file == "/path/to/token"
+
+
+# ---------------------------------------------------------------------------
+# Registry: additional coverage for registry.py
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryCoverage:
+    def test_oauth_token_from_config_field_used_directly(self) -> None:
+        """oauth_token set on config with no auto-detected token → logger.debug (line 55)."""
+        from unittest.mock import patch
+
+        from claw_forge.pool.providers.anthropic import AnthropicProvider
+        from claw_forge.pool.providers.registry import create_provider
+
+        cfg = ProviderConfig(
+            name="oauth-config-token",
+            provider_type=ProviderType.ANTHROPIC_OAUTH,
+            oauth_token="tok-direct-from-config",
+        )
+
+        with patch("claw_forge.pool.providers.oauth.get_oauth_token_optional", return_value=None):
+            provider = create_provider(cfg)
+
+        assert isinstance(provider, AnthropicProvider)
+
+    def test_create_providers_unexpected_exception_logged(self) -> None:
+        """Unexpected error in create_provider → logged, provider skipped (lines 109-111)."""
+        from unittest.mock import patch
+
+        from claw_forge.pool.providers.registry import create_providers_from_configs
+
+        cfg = ProviderConfig(
+            name="bad-provider",
+            provider_type=ProviderType.ANTHROPIC,
+            api_key="sk-test",
+        )
+
+        with patch(
+            "claw_forge.pool.providers.registry._import_class",
+            side_effect=ImportError("missing module"),
+        ):
+            providers = create_providers_from_configs([cfg])
+
+        assert providers == []
+
+    def test_load_configs_from_yaml_unknown_type_skipped(self) -> None:
+        """Unknown provider type string → ValueError caught → skipped (lines 177-178)."""
+        from claw_forge.pool.providers.registry import load_configs_from_yaml
+
+        data = {
+            "providers": {
+                "bad-provider": {"type": "unknown_provider_type_xyz"},
+                "good-provider": {"type": "anthropic", "api_key": "sk-test"},
+            }
+        }
+        configs = load_configs_from_yaml(data)
+        # bad-provider should be skipped, good-provider should be included
+        assert len(configs) == 1
+        assert configs[0].name == "good-provider"
+
+    def test_load_configs_disabled_provider_skipped(self) -> None:
+        """Disabled provider (enabled=False) is skipped in create_providers_from_configs."""
+        from claw_forge.pool.providers.registry import create_providers_from_configs
+
+        cfg_disabled = ProviderConfig(
+            name="disabled",
+            provider_type=ProviderType.ANTHROPIC,
+            api_key="sk-test",
+            enabled=False,
+        )
+        providers = create_providers_from_configs([cfg_disabled])
+        assert providers == []

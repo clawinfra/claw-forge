@@ -198,6 +198,89 @@ class TestWithTasks:
             out = self._run(tasks, tmp)
             assert "run" in out.lower()
 
+    def test_total_zero_shows_plan_message(self) -> None:
+        """DB exists with 0 tasks → claw-forge plan suggested (line 149)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run([], tmp)
+            assert "plan" in out.lower()
+
+    def test_running_tasks_shows_running_message(self) -> None:
+        """Running tasks → shows running message (lines 155-156)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks = [{"status": "running"}] * 2 + [{"status": "pending"}]
+            out = self._run(tasks, tmp)
+            assert "running" in out.lower() or "Agents" in out
+
+    def test_failed_without_error_message(self) -> None:
+        """Failed task with no error_message → no error line printed (141->137)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks = [{"status": "failed"}]  # no error_message
+            out = self._run(tasks, tmp)
+            assert "failed" in out.lower() or "Failed" in out
+
+    def test_many_failed_tasks_truncated(self) -> None:
+        """More than 5 failed tasks → shows truncation message (line 144)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks = [
+                {"status": "failed", "description": f"task-{i}", "error_message": "err"}
+                for i in range(7)
+            ]
+            out = self._run(tasks, tmp)
+            assert "more" in out or "7" in out
+
+
+class TestReadDbEdgeCases:
+    def test_db_exists_no_session_for_project(self) -> None:
+        """DB exists but no session for project → returns [] (lines 60-61)."""
+        import uuid
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from claw_forge.commands.help_cmd import _read_db
+        from claw_forge.state.models import Base
+        from claw_forge.state.models import Session as DbSession
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            db_dir = project / ".claw-forge"
+            db_dir.mkdir(parents=True)
+
+            async def setup() -> None:
+                engine = create_async_engine(
+                    f"sqlite+aiosqlite:///{db_dir / 'state.db'}", echo=False
+                )
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with maker() as sess:
+                    sess.add(DbSession(
+                        id=str(uuid.uuid4()),
+                        project_path="/different/project/path",
+                        status="pending",
+                    ))
+                    await sess.commit()
+                await engine.dispose()
+
+            asyncio.run(setup())
+            result = _read_db(project)
+            assert result == []
+
+    def test_db_exception_returns_none(self) -> None:
+        """Exception during asyncio.run → returns None (lines 80-81)."""
+        from unittest.mock import patch
+
+        from claw_forge.commands.help_cmd import _read_db
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            db_dir = project / ".claw-forge"
+            db_dir.mkdir()
+            (db_dir / "state.db").touch()  # DB file exists
+
+            with patch("asyncio.run", side_effect=RuntimeError("db error")):
+                result = _read_db(project)
+            assert result is None
+
 
 # ── CLI integration via typer runner ─────────────────────────────────────────
 

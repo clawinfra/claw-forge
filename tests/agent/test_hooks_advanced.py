@@ -12,9 +12,50 @@ from claw_forge.agent.hooks import (
     make_stop_hook,
     post_tool_failure_hook,
     post_tool_hook,
+    pre_compact_hook,
     subagent_start_hook,
     subagent_stop_hook,
 )
+
+# ---------------------------------------------------------------------------
+# pre_compact_hook
+# ---------------------------------------------------------------------------
+
+
+class TestPreCompactHook:
+    @pytest.mark.asyncio
+    async def test_auto_trigger_prints_auto(self, capsys):
+        result = await pre_compact_hook({"trigger": "auto"}, None, {})
+        assert result["hookSpecificOutput"]["hookEventName"] == "PreCompact"
+        captured = capsys.readouterr()
+        assert "Auto-compaction" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_manual_trigger_prints_manual(self, capsys):
+        result = await pre_compact_hook({"trigger": "manual"}, None, {})
+        assert result["hookSpecificOutput"]["hookEventName"] == "PreCompact"
+        captured = capsys.readouterr()
+        assert "Manual-compaction" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_non_dict_input_defaults_to_auto(self, capsys):
+        result = await pre_compact_hook("not-a-dict", None, {})
+        assert result["hookSpecificOutput"]["hookEventName"] == "PreCompact"
+        captured = capsys.readouterr()
+        assert "Auto-compaction" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_custom_instructions_contain_preserve(self):
+        result = await pre_compact_hook({}, None, {})
+        instructions = result["hookSpecificOutput"]["customInstructions"]
+        assert "PRESERVE" in instructions
+
+    @pytest.mark.asyncio
+    async def test_custom_instructions_contain_discard(self):
+        result = await pre_compact_hook({}, None, {})
+        instructions = result["hookSpecificOutput"]["customInstructions"]
+        assert "DISCARD" in instructions
+
 
 # ---------------------------------------------------------------------------
 # post_tool_hook
