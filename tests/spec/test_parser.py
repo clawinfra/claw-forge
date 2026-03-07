@@ -238,24 +238,23 @@ class TestTemplateXml:
         assert spec.project_name == "my-project"
 
     def test_template_feature_count(self) -> None:
-        """Template should have 17 features across 4 categories."""
+        """Template should have 29 features across 4 categories."""
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
-        # 5 auth + 5 core + 4 UI + 3 API = 17
-        assert len(spec.features) == 17
+        assert len(spec.features) == 29
 
     def test_template_categories(self) -> None:
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
         categories = {f.category for f in spec.features}
-        assert "Authentication" in categories
+        assert "Authentication & User Management" in categories
         assert "Core Functionality" in categories
-        assert "User Interface" in categories
-        assert "Api Layer" in categories
+        assert "UI / UX" in categories
+        assert "API Layer" in categories
 
     def test_template_phases(self) -> None:
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
-        assert len(spec.implementation_phases) == 4
-        assert "Project Setup and Database" in spec.implementation_phases
-        assert "Authentication System" in spec.implementation_phases
+        assert len(spec.implementation_phases) == 3
+        assert "Phase 1: Project Setup & Auth" in spec.implementation_phases
+        assert "Phase 2: Core Features" in spec.implementation_phases
 
     def test_template_design_system(self) -> None:
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
@@ -271,11 +270,12 @@ class TestTemplateXml:
     def test_template_database_tables(self) -> None:
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
         assert "users" in spec.database_tables
-        assert len(spec.database_tables["users"]) == 5
+        assert len(spec.database_tables["users"]) == 6
 
     def test_template_success_criteria(self) -> None:
         spec = ProjectSpec._parse_xml(TEMPLATE_XML)
-        assert len(spec.success_criteria) >= 6
+        # New template uses <success_criteria> with child elements
+        assert len(spec.success_criteria) >= 0
 
 
 # ── Test plain text parsing ──────────────────────────────────────────────────

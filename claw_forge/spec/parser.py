@@ -163,7 +163,9 @@ class ProjectSpec:
         feature_root_el = _cf if _cf is not None else _fta
         if feature_root_el is not None:
             for category_el in feature_root_el:
-                category = category_el.tag.replace("_", " ").title()
+                # Support both <category name="…"> and legacy <tag_name> formats
+                _name_attr = category_el.get("name", "")
+                category = _name_attr if _name_attr else category_el.tag.replace("_", " ").title()
                 feature_els = category_el.findall("feature")
                 if feature_els:
                     # New format: <feature><description>…</description><steps>…</steps></feature>
@@ -291,12 +293,17 @@ class ProjectSpec:
         endpoints: dict[str, Any] = {}
         if api_el is not None:
             for cat in api_el:
-                cat_name = cat.tag.replace("_", " ").title()
+                # Support both <domain name="…"> and legacy <tag_name> formats
+                _domain_name = cat.get("name", "")
+                cat_name = _domain_name if _domain_name else cat.tag.replace("_", " ").title()
                 items = []
                 for line in (cat.text or "").splitlines():
                     stripped = line.strip()
                     if stripped.startswith("- "):
                         items.append(stripped[2:].strip())
+                    elif stripped:
+                        # Plain lines like "POST /api/auth/register - Register …"
+                        items.append(stripped)
                 if items:
                     endpoints[cat_name] = items
 
@@ -307,13 +314,22 @@ class ProjectSpec:
             tables_el = db_el.find("tables")
             if tables_el is not None:
                 for table_el in tables_el:
+                    # Support both <table name="…"><column>…</column> and legacy <tablename>- …</tablename>
+                    table_name = table_el.get("name") or table_el.tag
                     cols = []
-                    for line in (table_el.text or "").splitlines():
-                        stripped = line.strip()
-                        if stripped.startswith("- "):
-                            cols.append(stripped[2:].strip())
+                    col_els = table_el.findall("column")
+                    if col_els:
+                        for col_el in col_els:
+                            text = (col_el.text or "").strip()
+                            if text:
+                                cols.append(text)
+                    else:
+                        for line in (table_el.text or "").splitlines():
+                            stripped = line.strip()
+                            if stripped.startswith("- "):
+                                cols.append(stripped[2:].strip())
                     if cols:
-                        tables[table_el.tag] = cols
+                        tables[table_name] = cols
 
         return cls(
             project_name=name,

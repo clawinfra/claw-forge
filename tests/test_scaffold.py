@@ -223,7 +223,7 @@ def test_scaffold_project_creates_spec_example(tmp_path: Path) -> None:
     assert result["spec_example_written"] is True
     assert (tmp_path / "app_spec.example.xml").exists()
     content = (tmp_path / "app_spec.example.xml").read_text()
-    assert "<project_specification>" in content
+    assert "<project_specification" in content
     assert "<core_features>" in content
 
 

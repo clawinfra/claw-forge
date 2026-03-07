@@ -195,7 +195,7 @@ From what you described, I'm generating these features:
 Does this capture it? Anything to add or change?
 ```
 
-The heading name in bold becomes the `name` attribute of `<category name="...">` in `<core_features>`.
+The heading name in bold becomes the `name` attribute of a `<category>` element in `<core_features>`.
 Keep a note of each confirmed heading — you will use them verbatim as `name` attributes in Phase 5.
 
 Continue through categories:
@@ -243,53 +243,110 @@ Use the template structure from `claw_forge/spec/app_spec.template.xml` but fill
 user's project details. The XML must include:
 
 - `<project_specification>` root element
-- `<project_name>`, `<overview>`
-- `<technology_stack>` with frontend/backend/communication
-- `<prerequisites>` with environment setup
+- `<project_name>`, `<overview>`, `<target_audience>`
+- `<technology_stack>` with `<frontend>`, `<backend>`, `<database>`, `<communication>`, `<infrastructure>`
+- `<prerequisites>` with environment setup bullet list
 - `<core_features>` with categorized bullet lists (this is the bulk — 100-300 bullets)
-- `<database_schema>` with `<tables>` containing column definitions
-- `<api_endpoints_summary>` categorized by domain
+- `<database_schema>` with `<tables>` containing `<table name="…">` / `<column>` elements
+- `<api_endpoints_summary>` with `<domain name="…">` sections
 - `<ui_layout>` with main structure
 - `<design_system>` with color palette, typography, animations
-- `<key_interactions>` with numbered user flows
-- `<implementation_steps>` with 4-6 phased steps
-- `<success_criteria>` with functionality, UX, and technical quality
+- `<key_interactions>` with `<interaction number="N" name="…">` flows
+- `<implementation_steps>` with `<phase name="…">` elements
+- `<success_criteria>` with `<functionality>`, `<ux>`, and `<technical_quality>`
 
 **Important:** Use `&amp;` for `&` in XML content. Each bullet in `<core_features>` becomes one
 agent task.
 
-**CRITICAL — `<core_features>` category format:**
-Each category group inside `<core_features>` MUST use `<category name="...">` with a
-**descriptive human-readable name**. The `name` attribute becomes the task category shown in
-the Kanban board and used for routing and filtering.
+**CRITICAL — `<core_features>` element format:**
+Each category group inside `<core_features>` MUST be a `<category name="…">` element with the
+full human-readable name as the `name` attribute. The name becomes the task category shown in the
+Kanban board and used for routing and filtering.
 
-✅ Correct — use `<category name="...">` with readable names (spaces and `&amp;` allowed):
+✅ Correct — `<category name="…">` with descriptive names:
 ```xml
 <core_features>
-  <category name="Authentication &amp; User Management">...</category>
-  <category name="Receipt Scanning">...</category>
-  <category name="Payment Processing">...</category>
-  <category name="Notifications">...</category>
+  <category name="Authentication &amp; User Management">
+    - User can register with email and password (returns 201 with user_id)
+    - User can login and receive JWT access_token and refresh_token
+  </category>
+  <category name="Receipt Scanning">
+    - System sends the receipt image to OpenAI Vision API…
+  </category>
+  <category name="API Layer">
+    - API returns consistent JSON envelope: { "data": ..., "error": null }
+  </category>
 </core_features>
 ```
 
-❌ Wrong — never use bare snake_case element names:
+❌ Wrong — bare snake_case tags lose display names; generic `<category>` loses all names:
 ```xml
 <core_features>
-  <authentication>...</authentication>     <!-- BAD: old format, no spaces allowed -->
-  <receipt_scanning>...</receipt_scanning> <!-- BAD: renders as "Receipt_scanning" -->
+  <authentication>...</authentication>     <!-- loses "&amp; User Management" -->
+  <category>...</category>                 <!-- BAD: every task becomes "Category" -->
 </core_features>
 ```
 
-❌ Also wrong — never use the generic `<category>` tag without a name attribute:
+Use the exact heading confirmed with the user in Phase 3 as the `name` attribute.
+
+**CRITICAL — `<database_schema>` format:**
+Use `<table name="…">` with `<column>` children for each table. Full SQL-style column definitions.
+
 ```xml
-<core_features>
-  <category>...</category>  <!-- BAD: becomes "Category" for every task -->
-</core_features>
+<database_schema>
+  <tables>
+    <table name="users">
+      <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+      <column>email VARCHAR(255) UNIQUE NOT NULL</column>
+      <column>password_hash VARCHAR(255) NOT NULL</column>
+      <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+    </table>
+    <table name="refresh_tokens">
+      <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+      <column>user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE</column>
+      <column>token_hash VARCHAR(255) NOT NULL UNIQUE</column>
+      <column>expires_at TIMESTAMP WITH TIME ZONE NOT NULL</column>
+    </table>
+  </tables>
+</database_schema>
 ```
 
-Derive the name from the feature group heading you used in Phase 3. The name can contain
-spaces, ampersands (`&amp;`), slashes, and any readable characters.
+**CRITICAL — `<api_endpoints_summary>` format:**
+Use `<domain name="…">` sections with plain-text route lines (no bullet prefix needed).
+
+```xml
+<api_endpoints_summary>
+  <domain name="Authentication">
+    POST   /api/auth/register   - Register new user account
+    POST   /api/auth/login      - Log in and receive JWT tokens
+    POST   /api/auth/logout     - Log out and invalidate refresh token
+  </domain>
+  <domain name="Receipts">
+    POST   /api/receipts/upload - Upload image and trigger OCR
+    GET    /api/receipts        - List receipts with filters and pagination
+    GET    /api/receipts/{id}   - Get single receipt with line items
+    PUT    /api/receipts/{id}   - Update receipt fields
+    DELETE /api/receipts/{id}   - Delete receipt and associated file
+  </domain>
+</api_endpoints_summary>
+```
+
+**CRITICAL — `<implementation_steps>` format:**
+Use `<phase name="…">` elements with plain-text task lines inside.
+
+```xml
+<implementation_steps>
+  <phase name="Phase 1: Foundation &amp; Auth">
+    Set up project structure and tooling
+    Implement users and refresh_tokens tables
+    Implement POST /api/auth/register and POST /api/auth/login
+  </phase>
+  <phase name="Phase 2: Core Features">
+    Implement core data models and CRUD endpoints
+    Build primary UI pages
+  </phase>
+</implementation_steps>
+```
 
 #### `claw-forge.yaml`
 
