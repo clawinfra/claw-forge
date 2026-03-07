@@ -659,6 +659,7 @@ def run(
 
                     output = ""
                     success = False
+                    _cancelled = False
 
                     try:
                         # ── Option 1: claude_agent_sdk + claude CLI (full autonomous agent) ──
@@ -830,6 +831,10 @@ def run(
                                 "to claw-forge.yaml"
                             )
                             success = False
+
+                    except asyncio.CancelledError:
+                        _cancelled = True
+                        raise
 
                     except Exception as exc:
                         output = str(exc)
