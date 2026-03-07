@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claw_forge.lsp import (
+    _skill_plugin,
     detect_lsp_plugins,
     lsp_plugins_for_extensions,
+    skills_for_agent,
 )
 
 # ---------------------------------------------------------------------------
@@ -103,6 +105,68 @@ class TestDetectLspPlugins:
 # ---------------------------------------------------------------------------
 # lsp_plugins_for_extensions
 # ---------------------------------------------------------------------------
+
+
+class TestSkillPlugin:
+    def test_returns_none_when_skill_md_missing(self, tmp_path: Path) -> None:
+        """_skill_plugin returns None when SKILL.md is absent (line 115)."""
+        with patch("claw_forge.lsp.SKILLS_DIR", tmp_path / "skills"):
+            result = _skill_plugin("nonexistent-skill")
+        assert result is None
+
+    def test_returns_config_when_skill_md_exists(self, tmp_path: Path) -> None:
+        """_skill_plugin returns config when SKILL.md is present."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# My Skill")
+        with patch("claw_forge.lsp.SKILLS_DIR", skills_dir):
+            result = _skill_plugin("my-skill")
+        assert result is not None
+        assert result["type"] == "local"
+
+
+class TestSkillsForAgent:
+    def test_returns_empty_when_skills_dir_missing(self) -> None:
+        """skills_for_agent with missing SKILLS_DIR → _skill_plugin returns None → 158->156."""
+        with patch("claw_forge.lsp.SKILLS_DIR", Path("/nonexistent_skills_dir_xyz")):
+            plugins = skills_for_agent("coding")
+        assert plugins == []
+
+    def test_includes_agent_type_skills(self, tmp_path: Path) -> None:
+        """skills_for_agent injects agent-type skills when SKILL.md exists."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# My Skill")
+        with patch("claw_forge.lsp.SKILLS_DIR", skills_dir), \
+             patch("claw_forge.lsp.AGENT_TYPE_SKILLS", {"coding": ["my-skill"]}):
+            plugins = skills_for_agent("coding")
+        assert len(plugins) == 1
+
+    def test_keyword_match_injects_skills(self, tmp_path: Path) -> None:
+        """skills_for_agent injects keyword-matched skills for matching task_description."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# My Skill")
+        with patch("claw_forge.lsp.SKILLS_DIR", skills_dir), \
+             patch("claw_forge.lsp.AGENT_TYPE_SKILLS", {}), \
+             patch("claw_forge.lsp.TASK_KEYWORD_SKILLS", {"api": ["my-skill"]}):
+            plugins = skills_for_agent("coding", task_description="api integration test")
+        assert len(plugins) == 1
+
+    def test_deduplicates_across_type_and_keyword(self, tmp_path: Path) -> None:
+        """Duplicate skill name from type+keyword → appears only once."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "shared-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Shared")
+        with patch("claw_forge.lsp.SKILLS_DIR", skills_dir), \
+             patch("claw_forge.lsp.AGENT_TYPE_SKILLS", {"coding": ["shared-skill"]}), \
+             patch("claw_forge.lsp.TASK_KEYWORD_SKILLS", {"api": ["shared-skill"]}):
+            plugins = skills_for_agent("coding", task_description="api test")
+        assert len(plugins) == 1
 
 
 class TestLspPluginsForExtensions:

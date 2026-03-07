@@ -76,6 +76,17 @@ class TestScheduler:
         # validate should not raise — external dep is skipped
         s.validate_no_cycles()
 
+    def test_validate_no_cycles_already_visited_node_skipped(self):
+        """When dep is added before dependency, outer loop skips already-BLACK tid (89->88)."""
+        s = Scheduler()
+        # b (depends on a) added FIRST → b comes first in dict iteration
+        s.add_task(TaskNode("b", "code", 1, ["a"]))
+        # a added second
+        s.add_task(TaskNode("a", "init", 1, []))
+        # dfs("b") will recursively call dfs("a"), setting color["a"]=BLACK.
+        # When outer loop reaches "a", color["a"] != WHITE → 89->88 branch taken.
+        s.validate_no_cycles()  # should not raise
+
     def test_execution_order_with_blocked_cycle_breaks(self):
         """All remaining tasks blocked (no progress) → break (line 106)."""
         s = Scheduler()

@@ -73,6 +73,13 @@ class TestPreToolUseHook:
         result = await hook.check("move_file", {"target": "/etc/passwd"})
         assert not result.allow
 
+    @pytest.mark.asyncio
+    async def test_safe_execute_command_exhausts_blocked_list(self):
+        """Safe command that doesn't match any blocked pattern → loop exhausts (75->80, 76->75)."""
+        hook = PreToolUseHook()
+        result = await hook.check("execute_command", {"command": "echo hello"})
+        assert result.allow
+
 
 class TestPreCompactHook:
     @pytest.mark.asyncio

@@ -60,6 +60,13 @@ class TestDetectTestCommand:
         )
         assert detect_test_command(tmp_path) is None
 
+    def test_detect_makefile_oserror(self, tmp_path: Path) -> None:
+        """OSError reading Makefile → except branch taken (lines 66-67)."""
+        makefile = tmp_path / "Makefile"
+        # Create a directory named "Makefile" so read_text raises an error
+        makefile.mkdir()
+        assert detect_test_command(tmp_path) is None
+
     def test_detect_unknown(self, tmp_path: Path) -> None:
         assert detect_test_command(tmp_path) is None
 
