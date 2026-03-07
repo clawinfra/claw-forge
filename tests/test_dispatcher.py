@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -227,3 +228,105 @@ class TestRunTaskCancellation:
         except asyncio.CancelledError:
             result = None
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _cancel_monitor
+# ---------------------------------------------------------------------------
+
+
+class TestCancelMonitor:
+    @pytest.mark.asyncio
+    async def test_cancel_monitor_full_signal_coverage(self):
+        """Drive _cancel_monitor through all signal paths (lines 406-432)."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:0")
+
+        # A regular running task (not in _resumed_tasks → freeze + cancel)
+        mock_task = MagicMock()
+        d._running_tasks["t-stop"] = mock_task
+
+        # A resumed task (in _resumed_tasks → cancel but NO freeze)
+        resumed_mock = MagicMock()
+        d._running_tasks["t-resumed"] = resumed_mock
+        d._resumed_tasks.add("t-resumed")
+
+        # A node for resume_task_ids path
+        resume_node = TaskNode("t-resume-node", "coding", 1, [])
+        d._scheduler.add_task(resume_node)
+
+        # Also add a non-existent node to cover `if node is not None:` False branch
+        responses = [
+            # iter 1: stop t-stop (not resumed → freeze+cancel) and t-resumed (resumed → no freeze)
+            {
+                "task_ids": ["t-stop", "t-resumed", "t-unknown"],
+                "pause": False,
+                "resume": False,
+                "resume_task_ids": [],
+            },
+            # iter 2: pause → pause() + cancel all running
+            {
+                "task_ids": [],
+                "pause": True,
+                "resume": False,
+                "resume_task_ids": [],
+            },
+            # iter 3: resume + resume_task_ids (known node + unknown node)
+            {
+                "task_ids": [],
+                "pause": False,
+                "resume": True,
+                "resume_task_ids": ["t-resume-node", "t-missing-node"],
+            },
+        ]
+
+        sleep_count = 0
+        get_count = 0
+        created_tasks = []
+
+        async def mock_sleep(_: float) -> None:
+            nonlocal sleep_count
+            sleep_count += 1
+            if sleep_count > len(responses):
+                # Signal done after all responses consumed
+                raise asyncio.CancelledError()
+
+        async def mock_get(*args: object, **kwargs: object) -> MagicMock:
+            nonlocal get_count
+            if get_count < len(responses):
+                data = responses[get_count]
+                get_count += 1
+            else:
+                # cover except Exception: pass
+                get_count += 1
+                raise RuntimeError("transient http error")
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = data
+            return mock_resp
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = mock_get
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        def fake_create_task(coro: object) -> MagicMock:
+            # Prevent real tasks from being spawned; close the coroutine
+            if hasattr(coro, "close"):
+                coro.close()  # type: ignore[union-attr]
+            t = MagicMock()
+            created_tasks.append(t)
+            return t
+
+        with (
+            patch("claw_forge.orchestrator.dispatcher.asyncio.sleep", mock_sleep),
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("claw_forge.orchestrator.dispatcher.asyncio.create_task", fake_create_task),
+            contextlib.suppress(asyncio.CancelledError),
+        ):
+            await d._cancel_monitor()
+
+        # t-stop was in running_tasks and NOT in resumed_tasks → freeze + cancel
+        assert mock_task.cancel.called
+        # t-resumed was in running_tasks AND in resumed_tasks → cancel (no freeze)
+        assert resumed_mock.cancel.called
+        # resume_task_ids: t-resume-node should have spawned a task
+        assert len(created_tasks) >= 1

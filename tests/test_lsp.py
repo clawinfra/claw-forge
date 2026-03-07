@@ -168,6 +168,19 @@ class TestSkillsForAgent:
             plugins = skills_for_agent("coding", task_description="api test")
         assert len(plugins) == 1
 
+    def test_deduplicates_within_agent_type_list(self, tmp_path: Path) -> None:
+        """Duplicate name within AGENT_TYPE_SKILLS list → 141->140 False branch taken."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# My Skill")
+        # Duplicate "my-skill" in the list triggers the `name in seen` False branch
+        with patch("claw_forge.lsp.SKILLS_DIR", skills_dir), \
+             patch("claw_forge.lsp.AGENT_TYPE_SKILLS", {"coding": ["my-skill", "my-skill"]}), \
+             patch("claw_forge.lsp.TASK_KEYWORD_SKILLS", {}):
+            plugins = skills_for_agent("coding")
+        assert len(plugins) == 1  # deduped
+
 
 class TestLspPluginsForExtensions:
     def test_py_and_ts_returns_two_plugins(self) -> None:
