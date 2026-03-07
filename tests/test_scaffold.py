@@ -447,6 +447,21 @@ def test_scaffold_commands_skips_existing(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_scaffold_config_has_git_section(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    import yaml
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert "git" in data
+    assert data["git"]["enabled"] is True
+    assert data["git"]["merge_strategy"] == "auto"
+
+
 def test_scaffold_project_returns_git_initialized_key(tmp_path: Path) -> None:
     result = scaffold_project(tmp_path)
     assert "git_initialized" in result

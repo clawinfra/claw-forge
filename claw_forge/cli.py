@@ -134,6 +134,12 @@ state:
   database_url: "sqlite+aiosqlite:///claw_forge.db"
   host: "0.0.0.0"
   port: 8420
+
+git:
+  enabled: true
+  merge_strategy: auto    # auto | manual
+  branch_prefix: feat
+  commit_on_plugin_boundary: true
 """
 
 _DEFAULT_ENV_EXAMPLE = """\
