@@ -2300,6 +2300,60 @@ def dev(
 
 
 @app.command()
+def merge(
+    branch: str = typer.Argument(None, help="Branch to squash-merge (e.g. feat/user-auth)"),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    target: str = typer.Option("main", "--target", "-t", help="Target branch to merge into."),
+) -> None:
+    """Squash-merge a feature branch to the target branch.
+
+    Used with merge_strategy: manual to control when features land on main.
+    If no branch is specified, lists branches with the configured prefix.
+
+    Examples:
+
+        # Merge a specific branch
+        claw-forge merge feat/user-auth
+
+        # List ready feature branches
+        claw-forge merge
+
+        # Merge into a custom target
+        claw-forge merge feat/user-auth --target develop
+    """
+    import subprocess as sp
+
+    project_path = Path(project).resolve()
+
+    if branch is None:
+        # List feature branches
+        try:
+            result = sp.run(
+                ["git", "branch", "--list", "feat/*"],
+                cwd=project_path, capture_output=True, text=True, check=True,
+            )
+            branches = [b.strip().lstrip("* ") for b in result.stdout.strip().splitlines() if b.strip()]
+            if not branches:
+                console.print("[dim]No feature branches found.[/dim]")
+                return
+            console.print("[bold]Feature branches:[/bold]")
+            for b in branches:
+                console.print(f"  \u2022 {b}")
+            console.print(f"\n[dim]Run: claw-forge merge <branch>[/dim]")
+        except sp.CalledProcessError:
+            console.print("[red]Not a git repository or git not available.[/red]")
+        return
+
+    from claw_forge.git.merge import squash_merge
+
+    result = squash_merge(project_path, branch, target)
+    if result["merged"]:
+        console.print(f"[green]\u2713 Merged {branch} \u2192 {target} ({result['commit_hash']})[/green]")
+    else:
+        console.print(f"[red]\u2717 Merge failed: {result.get('error', 'unknown')}[/red]")
+
+
+@app.command()
 def fix(
     description: str | None = typer.Argument(
         None, help="Bug description (use --report for structured reports)"
