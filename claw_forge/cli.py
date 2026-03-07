@@ -419,6 +419,16 @@ def run(
     _state_port = _ensure_state_service(project_path, _state_port)
     console.print(f"[dim]State service on port {_state_port}[/dim]")
 
+    # Set up git tracking
+    from claw_forge.git import GitOps
+
+    git_cfg = cfg.get("git", {})
+    git_enabled = git_cfg.get("enabled", True)
+    git_merge_strategy = git_cfg.get("merge_strategy", "auto")
+    git_branch_prefix = git_cfg.get("branch_prefix", "feat")
+    git_commit_on_boundary = git_cfg.get("commit_on_plugin_boundary", True)
+    git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
+
     # Set up async engine
     engine = create_async_engine(db_url, echo=False)
     async_session_maker = async_sessionmaker(
@@ -657,6 +667,18 @@ def run(
                     # Notify UI via state service HTTP (best-effort)
                     await _patch_task(http, task_node.id, status="running")
 
+                    # Create a feature branch for this task
+                    import re as _re
+
+                    _slug = _re.sub(
+                        r"[^a-z0-9]+", "-",
+                        (task_node.plugin_name + "-" + task_node.id[:8]).lower(),
+                    ).strip("-")
+                    if git_enabled:
+                        await git_ops.create_branch(
+                            task_node.id, _slug, prefix=git_branch_prefix,
+                        )
+
                     output = ""
                     success = False
                     _cancelled = False
@@ -871,6 +893,20 @@ def run(
                             fin_task.error_message = None if success else output
                             fin_task.result_json = {"output": output} if success else None
                             await fin_session.commit()
+
+                        # Git: checkpoint + optional merge on success
+                        if git_enabled and success and git_commit_on_boundary:
+                            await git_ops.checkpoint(
+                                message=f"{task_node.plugin_name}({_slug}): completed",
+                                task_id=task_node.id,
+                                plugin=task_node.plugin_name,
+                                phase=task_node.plugin_name,
+                                session_id=db_session.id,
+                            )
+                            if git_merge_strategy == "auto":
+                                _branch_name = f"{git_branch_prefix}/{_slug}"
+                                await git_ops.merge(_branch_name)
+
                         # Notify UI via state service HTTP (best-effort)
                         await _patch_task(
                             http, task_node.id,
