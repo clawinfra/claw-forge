@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claw-forge"
-version = "0.1.0a64"
+version = "0.0.0.dev0"
 description = "Multi-provider autonomous coding agent harness with API rotation pool"
 readme = "README.md"
 license = "Apache-2.0"

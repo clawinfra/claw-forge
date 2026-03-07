@@ -18,12 +18,13 @@ CI runs `uv sync --extra dev` (not plain `uv sync`) — plain sync omits pytest 
 
 ## Release Process
 
-1. Bump `version` in `pyproject.toml` (e.g. `0.1.0a54`)
-2. Commit and push to `main`
-3. Create a GitHub Release with a matching tag (e.g. `v0.1.0a54`)
-4. The `Publish to PyPI` workflow triggers automatically — it re-runs tests, builds the UI, patches the version from the tag, and publishes the wheel
+1. Push to `main`
+2. Create a GitHub Release with a tag (e.g. `v0.1.0a64`)
+3. The `Publish to PyPI` workflow triggers automatically — it re-runs tests, builds the UI, patches the version from the tag, and publishes the wheel
 
 The publish workflow is **not** triggered by CI passing — only by a GitHub Release publication.
+
+**Version in `pyproject.toml` is a static `0.0.0.dev0` placeholder** — do NOT bump it manually. The publish workflow overwrites it with the version from the release tag at build time.
 
 ## Architecture Overview
 
@@ -107,5 +108,5 @@ Parses `app_spec.txt` or `app_spec.xml` (greenfield or brownfield) into a `Proje
 - **No DB migrations**: state service creates tables fresh on startup (`CREATE TABLE IF NOT EXISTS`).
 - **`uv run`** is always used to execute Python tools — never activate the venv manually.
 - **Coverage gate**: CI enforces `fail_under = 90` (branch coverage). Adding new source files without tests will fail CI.
-- **Version in `pyproject.toml`** is the development version; the actual published version is set from the release tag at publish time via `sed` in the workflow.
+- **Version in `pyproject.toml`** is a static `0.0.0.dev0` placeholder — never bump it manually. The publish workflow sets the real version from the release tag.
 - **`.claw-forge/state.log`** is a runtime file, gitignored. Do not commit it.
