@@ -440,3 +440,41 @@ def test_scaffold_commands_skips_existing(tmp_path: Path) -> None:
     assert "cmd1.md" not in names
     # Verify cmd1.md was NOT overwritten
     assert (dest_dir / "cmd1.md").read_text() == "existing content"
+
+
+# ---------------------------------------------------------------------------
+# git init integration
+# ---------------------------------------------------------------------------
+
+
+def test_scaffold_config_has_git_section(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    import yaml
+
+    from claw_forge.cli import _scaffold_config
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert "git" in data
+    assert data["git"]["enabled"] is True
+    assert data["git"]["merge_strategy"] == "auto"
+
+
+def test_scaffold_project_returns_git_initialized_key(tmp_path: Path) -> None:
+    result = scaffold_project(tmp_path)
+    assert "git_initialized" in result
+
+
+def test_scaffold_project_initializes_git_repo(tmp_path: Path) -> None:
+    result = scaffold_project(tmp_path)
+    assert (tmp_path / ".git").is_dir()
+    assert result["git_initialized"] is True
+
+
+def test_scaffold_project_existing_git_repo_skips_init(tmp_path: Path) -> None:
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    result = scaffold_project(tmp_path)
+    assert result["git_initialized"] is False
