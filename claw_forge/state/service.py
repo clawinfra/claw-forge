@@ -248,6 +248,8 @@ class AgentStateService:
         # Pause/resume signals for the dispatcher (cleared atomically on each poll)
         self._pause_requested: bool = False
         self._resume_requested: bool = False
+        # Per-task resume requests; polled and cleared by dispatcher
+        self._resume_task_requested: set[str] = set()
         # Task IDs currently paused via stop-all; agent logs for these are suppressed
         self._paused_task_ids: set[str] = set()
         # Derive project root from DB path for config discovery
@@ -641,26 +643,44 @@ class AgentStateService:
 
         @app.post("/tasks/{task_id}/stop")
         async def stop_task(task_id: str) -> dict[str, Any]:
-            """Stop a running task and reset it to pending.
+            """Stop a running task and pause it.
 
-            Immediately resets the task status to ``pending`` in the DB and
-            records the task ID in the in-memory ``_stop_requested`` set.
-            The dispatcher polls ``GET /stop-poll`` and cancels the matching
-            asyncio task within ~2 s.
+            Immediately sets the task status to ``paused`` in the DB so it
+            remains visible in the In Progress column.  Records the task ID
+            in the in-memory ``_stop_requested`` set.  The dispatcher polls
+            ``GET /stop-poll`` and cancels the matching asyncio task within
+            ~2 s.
             """
             async with self._session_factory() as db:
                 task = await db.get(Task, task_id)
                 if not task:
                     raise HTTPException(404, "Task not found")
-                task.status = "pending"
-                task.started_at = None
+                task.status = "paused"
                 task.error_message = None
+                task_name = task.description or task.plugin_name
                 await db.commit()
             self._stop_requested.add(task_id)
             await self.ws_manager.broadcast_feature_update(
-                {"id": task_id, "status": "pending"}
+                {"id": task_id, "status": "paused", "name": task_name}
             )
-            return {"task_id": task_id, "status": "pending"}
+            return {"task_id": task_id, "status": "paused"}
+
+        @app.post("/tasks/{task_id}/resume")
+        async def resume_task(task_id: str) -> dict[str, Any]:
+            """Request resumption of a paused task.
+
+            The task stays ``paused`` in the DB (so it remains in the
+            In Progress column on page refresh).  The dispatcher picks up
+            the resume request via ``GET /stop-poll`` and transitions the
+            task to ``pending`` → ``running`` during its next cycle.
+            """
+            async with self._session_factory() as db:
+                task = await db.get(Task, task_id)
+                if not task:
+                    raise HTTPException(404, "Task not found")
+            self._resume_task_requested.add(task_id)
+            self._paused_task_ids.discard(task_id)
+            return {"task_id": task_id, "status": "resuming"}
 
         @app.post("/sessions/{session_id}/tasks/stop-all")
         async def stop_all_running(session_id: str) -> dict[str, Any]:
@@ -682,19 +702,20 @@ class AgentStateService:
                     )
                 )
                 running_tasks = result.scalars().all()
-                stopped_ids: list[str] = []
+                stopped_tasks: list[tuple[str, str]] = []
                 for task in running_tasks:
                     task.status = "paused"
-                    stopped_ids.append(str(task.id))
+                    stopped_tasks.append((str(task.id), task.description or task.plugin_name))
                 await db.commit()
+            stopped_ids = [t[0] for t in stopped_tasks]
             # Signal dispatcher to cancel these tasks and enter drain mode
             for task_id in stopped_ids:
                 self._stop_requested.add(task_id)
                 self._paused_task_ids.add(task_id)
             self._pause_requested = True
-            for task_id in stopped_ids:
+            for task_id, task_name in stopped_tasks:
                 await self.ws_manager.broadcast_feature_update(
-                    {"id": task_id, "status": "paused"}
+                    {"id": task_id, "status": "paused", "name": task_name}
                 )
             return {"stopped": stopped_ids}
 
@@ -716,18 +737,19 @@ class AgentStateService:
                     )
                 )
                 paused_tasks = result.scalars().all()
-                resumed_ids: list[str] = []
+                resumed_tasks: list[tuple[str, str]] = []
                 for task in paused_tasks:
                     task.status = "pending"
-                    resumed_ids.append(str(task.id))
+                    resumed_tasks.append((str(task.id), task.description or task.plugin_name))
                 await db.commit()
+            resumed_ids = [t[0] for t in resumed_tasks]
             self._resume_requested = True
             # Re-allow log broadcasting for these tasks
             for task_id in resumed_ids:
                 self._paused_task_ids.discard(task_id)
-            for task_id in resumed_ids:
+            for task_id, task_name in resumed_tasks:
                 await self.ws_manager.broadcast_feature_update(
-                    {"id": task_id, "status": "pending"}
+                    {"id": task_id, "status": "pending", "name": task_name}
                 )
             return {"resumed": resumed_ids}
 
@@ -745,7 +767,14 @@ class AgentStateService:
             self._pause_requested = False
             resume = self._resume_requested
             self._resume_requested = False
-            return {"task_ids": task_ids, "pause": pause, "resume": resume}
+            resume_task_ids = list(self._resume_task_requested)
+            self._resume_task_requested.clear()
+            return {
+                "task_ids": task_ids,
+                "pause": pause,
+                "resume": resume,
+                "resume_task_ids": resume_task_ids,
+            }
 
         # ── Human input endpoints ────────────────────────────────────────────
 

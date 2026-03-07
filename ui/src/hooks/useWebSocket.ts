@@ -232,7 +232,9 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
         if (event.feature.status === "failed") {
           addToast(`❌ Feature failed: ${event.feature.name}`, "error");
         }
-        // Free the agent slot when a task finishes so the number can be reused
+        // Free the agent slot only on terminal states — NOT on "paused", because
+        // late agent_log events may still arrive during the ~2s cancellation window
+        // and would be assigned a new slot, creating phantom agents in the log.
         if (event.feature.status === "completed" || event.feature.status === "failed") {
           const taskId = String((event.feature as any).id);
           const slot = agentSlotMapRef.current.get(taskId);
@@ -241,6 +243,16 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
             freeSlotsRef.current.push(slot);
             freeSlotsRef.current.sort((a, b) => a - b);
           }
+        }
+        // Clear stale agent_log entries when a task is paused so the activity
+        // log no longer shows in-progress work for stopped tasks.
+        if (event.feature.status === "paused" && event.feature.name) {
+          const pausedName = event.feature.name;
+          setActivityLog((prev) =>
+            prev.filter(
+              (e) => !(e.type === "agent_log" && e.taskName === pausedName),
+            ),
+          );
         }
       } else if (event.type === "agent_completed") {
         void queryClient.invalidateQueries({

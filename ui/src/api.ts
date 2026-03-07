@@ -113,6 +113,11 @@ export async function stopAllRunning(sessionId: string): Promise<void> {
   });
 }
 
+/** Resume a single paused task (stays "paused" in DB until dispatcher picks it up). */
+export async function resumeTask(taskId: string): Promise<void> {
+  await fetchJSON<unknown>(`/tasks/${taskId}/resume`, { method: "POST" });
+}
+
 /** Resume all paused tasks in a session (moves them back to "pending"). */
 export async function resumeAllPaused(sessionId: string): Promise<void> {
   await fetchJSON<unknown>(`/sessions/${sessionId}/tasks/resume-all`, {

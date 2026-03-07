@@ -248,7 +248,7 @@ export function ActivityLogPanel({
                 )}
 
                 {/* Content */}
-                <span className={`${contentColor} truncate`}>
+                <span className={`${contentColor} break-words min-w-0`}>
                   {entry.message}
                 </span>
               </div>

@@ -23,6 +23,24 @@
   background: #475569;
 }
 
+/* ── Progress bar shimmer ───────────────────────────────────────────────── */
+@keyframes progress-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(350%);  }
+}
+.progress-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.progress-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+  animation: progress-shimmer 2.2s ease-in-out infinite;
+}
+
 /* ── Custom animations ─────────────────────────────────────────────────── */
 
 /* Toast slide in */

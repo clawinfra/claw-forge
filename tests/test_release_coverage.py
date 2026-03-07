@@ -110,7 +110,7 @@ class TestAgentLogEndpoint:
 
 
 class TestStopTask:
-    async def test_stop_resets_to_pending(
+    async def test_stop_pauses_task(
         self, client: AsyncClient, service: AgentStateService,
     ) -> None:
         sid = await _create_session(client)
@@ -119,7 +119,7 @@ class TestStopTask:
 
         r = await client.post(f"/tasks/{tid}/stop")
         assert r.status_code == 200
-        assert r.json() == {"task_id": tid, "status": "pending"}
+        assert r.json() == {"task_id": tid, "status": "paused"}
         assert tid in service._stop_requested
 
     async def test_stop_unknown_task_404(self, client: AsyncClient) -> None:

@@ -18,26 +18,36 @@ import { POOL_KEY } from "../hooks/usePoolStatus";
 
 type ToastKind = "success" | "error";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Health badge ──────────────────────────────────────────────────────────────
 
-function healthDot(health: ProviderStatus["health"], enabled: boolean): string {
-  if (!enabled) return "\u23F8";
-  switch (health) {
-    case "healthy": return "\uD83D\uDFE2";
-    case "degraded": return "\uD83D\uDFE1";
-    case "unhealthy": return "\uD83D\uDD34";
-    default: return "\u26AA";
-  }
-}
+const HEALTH_CONFIG: Record<string, {
+  dot: string; bg: string; border: string; text: string; label: string; pulse: boolean;
+}> = {
+  healthy:   { dot: "bg-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/40", border: "border-emerald-200 dark:border-emerald-800", text: "text-emerald-700 dark:text-emerald-300", label: "OK",   pulse: true  },
+  degraded:  { dot: "bg-amber-400",   bg: "bg-amber-50 dark:bg-amber-950/30",     border: "border-amber-200 dark:border-amber-800",   text: "text-amber-700 dark:text-amber-400",   label: "SLOW", pulse: false },
+  unhealthy: { dot: "bg-red-500",     bg: "bg-red-50 dark:bg-red-950/30",         border: "border-red-200 dark:border-red-800",       text: "text-red-700 dark:text-red-400",       label: "DOWN", pulse: false },
+};
 
-function healthLabel(health: ProviderStatus["health"], enabled: boolean): string {
-  if (!enabled) return "OFF";
-  switch (health) {
-    case "healthy": return "OK";
-    case "degraded": return "SLOW";
-    case "unhealthy": return "DOWN";
-    default: return "IDLE";
+function HealthBadge({ health, enabled }: { health: ProviderStatus["health"]; enabled: boolean }) {
+  if (!enabled) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold
+        border bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-700/50 dark:border-slate-600 dark:text-slate-500">
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-slate-600 shrink-0" />
+        OFF
+      </span>
+    );
   }
+  const cfg = HEALTH_CONFIG[health] ?? {
+    dot: "bg-slate-400", bg: "bg-slate-100 dark:bg-slate-700", border: "border-slate-200 dark:border-slate-600",
+    text: "text-slate-500 dark:text-slate-400", label: "IDLE", pulse: false,
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${cfg.bg} ${cfg.border} ${cfg.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cfg.dot} ${cfg.pulse ? "animate-pulse" : ""}`} />
+      {cfg.label}
+    </span>
+  );
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -174,11 +184,19 @@ function ProviderRow({
   const typeClass = TYPE_COLORS[provider.type] ?? "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
   const model = displayModel(provider.model);
 
+  const rowBorder =
+    !provider.enabled
+      ? "border-slate-200 dark:border-slate-700"
+      : provider.health === "unhealthy"
+        ? "border-red-200 dark:border-red-800/60"
+        : provider.health === "degraded"
+          ? "border-amber-200 dark:border-amber-800/60"
+          : "border-slate-200 dark:border-slate-700";
+
   return (
     <div
-      className={`rounded-lg border border-slate-200 dark:border-slate-700
-        bg-white dark:bg-slate-800 text-xs transition-all duration-200
-        ${provider.enabled ? "" : "opacity-60"}`}
+      className={`rounded-lg border bg-white dark:bg-slate-800 text-xs transition-all duration-200
+        ${rowBorder} ${provider.enabled ? "" : "opacity-55"}`}
     >
       {/* ── Summary row ─────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2">
@@ -223,11 +241,8 @@ function ProviderRow({
           </span>
         )}
 
-        {/* Health dot + label */}
-        <span className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300 shrink-0">
-          <span className="text-sm leading-none">{healthDot(provider.health, provider.enabled)}</span>
-          <span className="font-medium">{healthLabel(provider.health, provider.enabled)}</span>
-        </span>
+        {/* Health badge */}
+        <HealthBadge health={provider.health} enabled={provider.enabled} />
 
         {/* Cost */}
         <span className="text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">

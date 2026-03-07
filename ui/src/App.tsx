@@ -40,6 +40,7 @@ import {
   Zap,
   ChevronLeft,
   ChevronRight,
+  FolderOpen,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { gsap } from "gsap";
@@ -68,7 +69,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning, resumeAllPaused } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning, resumeTask, resumeAllPaused } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -414,6 +415,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
   // Stop-task controls
   const [stoppingTasks, setStoppingTasks] = useState<Set<string>>(new Set());
+  const [stoppingAll, setStoppingAll] = useState(false);
+  const [resumingAll, setResumingAll] = useState(false);
+  const [resumingTasks, setResumingTasks] = useState<Set<string>>(new Set());
 
   const handleStopTask = useCallback(
     (taskId: string) => {
@@ -439,7 +443,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       runningIds.forEach((id) => s.add(id));
       return s;
     });
+    setStoppingAll(true);
     void stopAllRunning(sessionId).catch(() => {
+      setStoppingAll(false);
       setStoppingTasks((prev) => {
         const s = new Set(prev);
         runningIds.forEach((id) => s.delete(id));
@@ -450,18 +456,61 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   }, [features, sessionId, addToast]);
 
   const handleResumeAll = useCallback(() => {
+    setResumingAll(true);
     void resumeAllPaused(sessionId).catch(() => {
+      setResumingAll(false);
       addToast("Failed to resume tasks", "error");
     });
   }, [sessionId, addToast]);
 
-  // Remove task IDs from stoppingTasks once they leave the "running" state
+  const handleResumeTask = useCallback(
+    (taskId: string) => {
+      setResumingTasks((prev) => new Set(prev).add(taskId));
+      void resumeTask(taskId).catch(() => {
+        setResumingTasks((prev) => {
+          const s = new Set(prev);
+          s.delete(taskId);
+          return s;
+        });
+        addToast("Failed to resume task", "error");
+      });
+    },
+    [addToast],
+  );
+
+  // Clear per-task and bulk loading states once tasks actually transition
   useEffect(() => {
-    const runningIds = new Set(
-      allFeatures.filter((f) => f.status === "running").map((f) => f.id),
-    );
+    const hasRunning = allFeatures.some((f) => f.status === "running");
+    const hasPaused = allFeatures.some((f) => f.status === "paused");
+
+    // Clear stoppingAll once no tasks are "running" anymore
+    if (!hasRunning) setStoppingAll(false);
+    // Clear resumingAll once no tasks are "paused" anymore
+    if (!hasPaused) setResumingAll(false);
+
+    // stoppingTasks: clear once the task reaches "paused" (stop complete)
     setStoppingTasks((prev) => {
-      const next = new Set([...prev].filter((id) => runningIds.has(id)));
+      if (prev.size === 0) return prev;
+      const next = new Set(
+        [...prev].filter((id) => {
+          const f = allFeatures.find((feat) => feat.id === id);
+          // Keep while still "running" (stop in flight); clear on "paused" or gone
+          return f?.status === "running";
+        }),
+      );
+      return next.size === prev.size ? prev : next;
+    });
+
+    // resumingTasks: clear once the task reaches "running" (resume complete)
+    setResumingTasks((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(
+        [...prev].filter((id) => {
+          const f = allFeatures.find((feat) => feat.id === id);
+          // Keep while "paused" or "pending" (resume in flight); clear on "running" or gone
+          return f != null && f.status !== "running" && f.status !== "completed" && f.status !== "failed";
+        }),
+      );
       return next.size === prev.size ? prev : next;
     });
   }, [features]);
@@ -481,6 +530,11 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   const projectName = (sessionData as Record<string, unknown>)?.project_path as
     | string
     | undefined;
+
+  /** Last folder name of the project path, e.g. "claw-forge-test" */
+  const projectFolder = projectName
+    ? (projectName.replace(/\/$/, "").split("/").pop() ?? projectName)
+    : undefined;
 
   const agentCountRef = useRef<HTMLSpanElement>(null);
   const displayedRunningRef = useRef(summary.running);
@@ -511,12 +565,15 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   const columnFeatures = useMemo(() => {
     const map: Record<string, Feature[]> = {};
     for (const col of KANBAN_COLUMNS) {
-      map[col.id] = filteredFeatures.filter((f) =>
-        col.statuses.includes(f.status),
-      );
+      map[col.id] = filteredFeatures.filter((f) => {
+        // Cards being resumed stay in the In Progress column during transition
+        if (resumingTasks.has(f.id) && col.id === "in_progress") return true;
+        if (resumingTasks.has(f.id) && col.id !== "in_progress") return false;
+        return col.statuses.includes(f.status);
+      });
     }
     return map;
-  }, [filteredFeatures]);
+  }, [filteredFeatures, resumingTasks]);
 
 
   // Execute a command
@@ -597,23 +654,53 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
               <span className="text-xl font-bold text-forge-700 dark:text-forge-100">
                 ⚒ claw-forge
               </span>
-              {projectName && (
-                <span className="text-sm text-slate-500 dark:text-slate-400 font-mono truncate max-w-xs">
-                  {projectName}
-                </span>
+              {projectFolder && (
+                <div className="relative group flex items-center gap-1.5 cursor-default">
+                  <FolderOpen size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                  <span className="text-sm text-slate-500 dark:text-slate-400 font-mono">
+                    {projectFolder}
+                  </span>
+                  {/* Tooltip: full absolute path on hover */}
+                  <div className="absolute left-0 top-full mt-2 z-50 hidden group-hover:flex
+                    items-center gap-1.5 bg-slate-900 dark:bg-slate-950 text-slate-100
+                    text-xs font-mono px-3 py-1.5 rounded-lg shadow-xl whitespace-nowrap
+                    pointer-events-none border border-slate-700">
+                    <FolderOpen size={11} className="text-slate-400 shrink-0" />
+                    {projectName}
+                  </div>
+                </div>
               )}
             </div>
 
             <div className="flex items-center gap-3 text-sm">
-              {/* Active agents */}
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`h-2 w-2 rounded-full ${summary.running > 0 ? "bg-blue-500 animate-pulse" : "bg-slate-300 dark:bg-slate-600"}`}
-                />
-                <span className="text-slate-600 dark:text-slate-300 font-medium">
-                  <span ref={agentCountRef}>{summary.running}</span>
-                  {" "}agent{summary.running !== 1 ? "s" : ""} live
-                </span>
+              {/* Active agents + task progress */}
+              <div className="flex items-center gap-2.5">
+                {/* Running agents pill */}
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors duration-300
+                    ${summary.running > 0
+                      ? "bg-blue-50 border-blue-200 dark:bg-blue-950/40 dark:border-blue-800"
+                      : "bg-slate-100 border-slate-200 dark:bg-slate-800 dark:border-slate-700"}`}
+                  title={`${summary.running} agent${summary.running !== 1 ? "s" : ""} currently running`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full shrink-0 transition-colors duration-300
+                      ${summary.running > 0 ? "bg-blue-500 animate-pulse" : "bg-slate-400 dark:bg-slate-500"}`}
+                  />
+                  <span
+                    className={`text-sm font-semibold tabular-nums leading-none transition-colors duration-300
+                      ${summary.running > 0 ? "text-blue-700 dark:text-blue-300" : "text-slate-500 dark:text-slate-400"}`}
+                  >
+                    <span ref={agentCountRef}>{summary.running}</span>
+                  </span>
+                  <span
+                    className={`text-xs leading-none transition-colors duration-300
+                      ${summary.running > 0 ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-slate-500"}`}
+                  >
+                    {summary.running !== 1 ? "agents" : "agent"} live
+                  </span>
+                </div>
+
               </div>
 
               {/* Cost sparkline */}
@@ -824,26 +911,42 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                       >
                         <span className="text-sm font-semibold">{col.label}</span>
                         <div className="flex items-center gap-2">
-                          {col.id === "in_progress" && cards.some((c) => c.status === "paused") && (
+                          {col.id === "in_progress" && (cards.some((c) => c.status === "paused") || resumingAll) && (
                             <button
                               type="button"
                               onClick={handleResumeAll}
-                              className="text-[10px] font-medium text-purple-500 hover:text-purple-700 dark:text-purple-400
-                                dark:hover:text-purple-300 transition-colors flex items-center gap-0.5"
+                              disabled={resumingAll}
+                              className={`text-[10px] font-medium transition-colors flex items-center gap-0.5 ${
+                                resumingAll
+                                  ? "text-purple-400 dark:text-purple-500 cursor-wait"
+                                  : "text-purple-500 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+                              }`}
                               title="Resume all paused tasks"
                             >
-                              ▶ Resume All
+                              {resumingAll ? (
+                                <><span className="inline-block w-2.5 h-2.5 border border-purple-400 border-t-transparent rounded-full animate-spin" /> Resuming…</>
+                              ) : (
+                                <>▶ Resume All</>
+                              )}
                             </button>
                           )}
-                          {col.id === "in_progress" && cards.some((c) => c.status === "running") && !cards.some((c) => c.status === "paused") && (
+                          {col.id === "in_progress" && (cards.some((c) => c.status === "running") || stoppingAll) && !cards.some((c) => c.status === "paused") && !resumingAll && (
                             <button
                               type="button"
                               onClick={handleStopAll}
-                              className="text-[10px] font-medium text-red-500 hover:text-red-700 dark:text-red-400
-                                dark:hover:text-red-300 transition-colors flex items-center gap-0.5"
+                              disabled={stoppingAll}
+                              className={`text-[10px] font-medium transition-colors flex items-center gap-0.5 ${
+                                stoppingAll
+                                  ? "text-red-400 dark:text-red-500 cursor-wait"
+                                  : "text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              }`}
                               title="Pause all running tasks"
                             >
-                              ■ Stop All
+                              {stoppingAll ? (
+                                <><span className="inline-block w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin" /> Stopping…</>
+                              ) : (
+                                <>■ Stop All</>
+                              )}
                             </button>
                           )}
                           <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">
@@ -871,7 +974,9 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                                   onLongPress={(f) => setLongPressFeature(f)}
                                   implicatedFeatureIds={implicatedFeatureIds}
                                   onStop={col.id === "in_progress" ? handleStopTask : undefined}
+                                  onResume={col.id === "in_progress" ? handleResumeTask : undefined}
                                   isStopping={stoppingTasks.has(feature.id)}
+                                  isResuming={resumingTasks.has(feature.id)}
                                 />
                               ))}
                             </AnimatePresence>

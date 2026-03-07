@@ -24,6 +24,45 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class _FreezableSemaphore:
+    """Wraps ``asyncio.Semaphore`` with the ability to swallow releases.
+
+    When ``freeze_one()`` is called, the next ``release()`` is silently
+    consumed instead of actually freeing a slot.  This prevents a queued
+    task from filling a slot that was vacated by an individually-stopped task.
+    """
+
+    def __init__(self, value: int) -> None:
+        self._sem = asyncio.Semaphore(value)
+        self._frozen: int = 0
+        self._value: int = value
+
+    async def acquire(self) -> None:
+        await self._sem.acquire()
+
+    def release(self) -> None:
+        if self._frozen > 0:
+            self._frozen -= 1
+            return  # swallow — don't actually free the slot
+        self._sem.release()
+
+    def freeze_one(self) -> None:
+        """Make the next ``release()`` a no-op, consuming the freed slot."""
+        self._frozen += 1
+
+    def unfreeze_one(self) -> None:
+        """Cancel a pending freeze (if the release hasn't happened yet)."""
+        if self._frozen > 0:
+            self._frozen -= 1
+
+    async def __aenter__(self) -> _FreezableSemaphore:
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        self.release()
+
 TaskHandler = Callable[[TaskNode], Awaitable[dict[str, Any]]]
 
 _YOLO_WARNING = (
@@ -115,7 +154,7 @@ class Dispatcher:
             )
 
         self._handler = handler
-        self._semaphore = asyncio.Semaphore(self._config.max_concurrency)
+        self._semaphore = _FreezableSemaphore(self._config.max_concurrency)
         self._scheduler = Scheduler()
         self._paused: bool = False
         self._reviewer: ParallelReviewer | None = None
@@ -123,6 +162,8 @@ class Dispatcher:
         self._state_url: str | None = state_url
         # Registry of currently-running asyncio Tasks keyed by task ID
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
+        # Task IDs running outside the semaphore (individually resumed tasks)
+        self._resumed_tasks: set[str] = set()
 
         if self._config.yolo:
             logger.warning(_YOLO_WARNING)
@@ -319,6 +360,31 @@ class Dispatcher:
         finally:
             self._running_tasks.pop(task.id, None)
 
+    async def _run_resumed_task(self, task: TaskNode) -> None:
+        """Run an individually-resumed task, bypassing the semaphore.
+
+        The semaphore slot was consumed during stop (via ``freeze_one``).
+        This task runs in that reserved slot without acquiring the semaphore.
+        On normal completion, the underlying semaphore slot is restored so
+        overall concurrency is preserved.
+        """
+        self._resumed_tasks.add(task.id)
+        self._running_tasks[task.id] = asyncio.current_task()  # type: ignore[assignment]
+        try:
+            logger.info("Resuming task %s (%s)", task.id, task.plugin_name)
+            await self._handler(task)
+        except asyncio.CancelledError:
+            logger.info("Resumed task %s stopped again", task.id)
+            # Don't restore the slot — it stays consumed for the next resume
+            return
+        except Exception:
+            logger.exception("Resumed task %s failed", task.id)
+        finally:
+            self._running_tasks.pop(task.id, None)
+            self._resumed_tasks.discard(task.id)
+        # Normal completion or failure: restore the semaphore slot
+        self._semaphore._sem.release()
+
     async def _cancel_monitor(self) -> None:
         """Poll the state service for stop/pause/resume signals.
 
@@ -341,6 +407,9 @@ class Dispatcher:
                     for task_id in data.get("task_ids", []):
                         t = self._running_tasks.get(task_id)
                         if t is not None:
+                            # Only freeze for semaphore-managed tasks (not resumed ones)
+                            if task_id not in self._resumed_tasks:
+                                self._semaphore.freeze_one()
                             t.cancel()
                     if data.get("pause"):
                         self.pause()
@@ -352,5 +421,12 @@ class Dispatcher:
                             t.cancel()
                     if data.get("resume"):
                         self.resume()
+                    # Individual task resumes: bypass the semaphore and
+                    # spawn directly — the frozen slot is already reserved.
+                    for task_id in data.get("resume_task_ids", []):
+                        node = self._scheduler._tasks.get(task_id)
+                        if node is not None:
+                            node.status = "pending"
+                            asyncio.create_task(self._run_resumed_task(node))
                 except Exception:  # noqa: BLE001
                     pass  # transient errors are fine — we'll retry next cycle

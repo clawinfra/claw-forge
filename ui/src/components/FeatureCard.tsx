@@ -53,8 +53,12 @@ interface FeatureCardProps {
   onLongPress?: (feature: Feature) => void;
   /** Called to stop the currently running task */
   onStop?: (taskId: string) => void;
+  /** Called to resume a paused task */
+  onResume?: (taskId: string) => void;
   /** True while a stop request is in-flight */
   isStopping?: boolean;
+  /** True while a resume request is in-flight */
+  isResuming?: boolean;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -104,7 +108,9 @@ export function FeatureCard({
   onQuickCommand,
   onLongPress,
   onStop,
+  onResume,
   isStopping = false,
+  isResuming = false,
 }: FeatureCardProps) {
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [tapped, setTapped] = useState(false);
@@ -180,7 +186,7 @@ export function FeatureCard({
         </span>
         <div className="flex items-center gap-1">
           <motion.span
-            key={isStopping ? "stopping" : feature.status}
+            key={isStopping ? "stopping" : isResuming ? "resuming" : feature.status}
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 400, damping: 20 }}
@@ -188,7 +194,7 @@ export function FeatureCard({
               STATUS_BADGE[feature.status] ?? STATUS_BADGE.pending
             }`}
           >
-            {isStopping ? "stopping…" : feature.status}
+            {isStopping ? "stopping…" : isResuming ? "resuming…" : feature.status}
           </motion.span>
 
           {/* Stop button */}
@@ -205,6 +211,30 @@ export function FeatureCard({
               }}
             >
               ■
+            </button>
+          )}
+
+          {/* Resume button — visible while paused or during resume transition */}
+          {(feature.status === "paused" || isResuming) && onResume && (
+            <button
+              type="button"
+              title="Resume task"
+              disabled={isResuming}
+              className={`transition-colors text-[10px] leading-none px-0.5 ${
+                isResuming
+                  ? "text-purple-400 dark:text-purple-500 cursor-wait"
+                  : "text-purple-500 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onResume(feature.id);
+              }}
+            >
+              {isResuming ? (
+                <span className="inline-block w-2.5 h-2.5 border border-purple-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                "▶"
+              )}
             </button>
           )}
 

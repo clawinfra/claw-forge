@@ -836,6 +836,26 @@ def run(
                         success = False
 
                     finally:
+                        if _cancelled:
+                            # Stop-all only pauses tasks that were "running" in the DB.
+                            # Tasks that raced from pending → running (acquired the
+                            # semaphore after stop-all committed) are still "running".
+                            # Reset those to "pending" so they don't appear as active.
+                            try:
+                                async with async_session_maker() as cancel_session:
+                                    stmt_c = select(Task).where(Task.id == task_node.id)
+                                    res_c = await cancel_session.execute(stmt_c)
+                                    c_task = res_c.scalar_one()
+                                    if c_task.status == "running":
+                                        c_task.status = "pending"
+                                        c_task.started_at = None
+                                        await cancel_session.commit()
+                                        await _patch_task(
+                                            http, task_node.id, status="pending",
+                                        )
+                            except Exception:
+                                pass  # best-effort cleanup
+                            return {"success": False, "output": "cancelled"}  # noqa: B012
                         # Persist final status directly to DB
                         async with async_session_maker() as fin_session:
                             stmt_fin = select(Task).where(Task.id == task_node.id)
@@ -855,34 +875,95 @@ def run(
 
                 return {"success": success, "output": output}
 
-            # Run dispatcher
-            dispatcher = Dispatcher(
-                handler=task_handler,
-                max_concurrency=concurrency,
-                yolo=yolo,
-                state_url=_state_base,
-            )
+            # Run dispatcher with pause/resume re-dispatch loop.
+            # When Stop All pauses the dispatcher, we wait for Resume All,
+            # then re-fetch remaining tasks from the DB and re-dispatch.
+            total_completed: dict[str, dict[str, Any]] = {}
+            total_failed: dict[str, str] = {}
 
-            for node in task_nodes:
-                dispatcher.add_task(node)
+            current_nodes = task_nodes
+            while current_nodes:
+                dispatcher = Dispatcher(
+                    handler=task_handler,
+                    max_concurrency=concurrency,
+                    yolo=yolo,
+                    state_url=_state_base,
+                )
+                for node in current_nodes:
+                    dispatcher.add_task(node)
 
-            dispatch_result = await dispatcher.run()
+                dispatch_result = await dispatcher.run()
+                total_completed.update(dispatch_result.completed)
+                total_failed.update(dispatch_result.failed)
+
+                if not dispatcher.is_paused:
+                    break  # Normal completion — all waves done
+
+                # ── Paused: wait for Resume All ────────────────────────────
+                console.print(
+                    "\n[bold yellow]⏸  Paused — waiting for Resume All…[/bold yellow]"
+                )
+                async with httpx.AsyncClient() as poll_client:
+                    while True:
+                        await asyncio.sleep(1)
+                        try:
+                            resp = await poll_client.get(
+                                f"{_state_base}/project/paused"
+                                f"?session_id={db_session.id}",
+                                timeout=3.0,
+                            )
+                            if not resp.json().get("paused", True):
+                                break
+                        except Exception:  # noqa: BLE001
+                            pass
+                console.print(
+                    "[bold green]▶  Resumed — re-dispatching tasks…[/bold green]"
+                )
+
+                # Re-fetch pending/paused tasks from DB for the next cycle
+                _seen_logs.clear()
+                async with async_session_maker() as resume_session:
+                    stmt_resume = select(Task).where(
+                        Task.session_id == db_session.id,
+                        Task.status.in_(["pending", "paused"]),
+                    )
+                    res_resume = await resume_session.execute(stmt_resume)
+                    remaining = res_resume.scalars().all()
+                    # Reset "paused" tasks to "pending" for re-dispatch
+                    for t in remaining:
+                        if t.status == "paused":
+                            t.status = "pending"
+                            t.started_at = None
+                    await resume_session.commit()
+
+                current_nodes = [
+                    TaskNode(
+                        id=t.id,
+                        plugin_name=t.plugin_name,
+                        priority=t.priority,
+                        depends_on=t.depends_on or [],
+                        status="pending",
+                        category=t.category or "",
+                        steps=t.steps or [],
+                    )
+                    for t in remaining
+                ]
 
             # Print summary
-            completed = len(dispatch_result.completed)
-            failed = len(dispatch_result.failed)
+            completed = len(total_completed)
+            failed = len(total_failed)
             console.print("\n[bold]Run complete:[/bold]")
             console.print(f"  ✅ Completed: {completed}")
             if failed > 0:
                 console.print(f"  ❌ Failed: {failed}")
                 # Show a concise per-task failure reason (first line only)
-                for task_id, err in list(dispatch_result.failed.items())[:5]:
+                for task_id, err in list(total_failed.items())[:5]:
                     short = err.splitlines()[0][:120] if err else "unknown error"
                     console.print(f"     [dim]{task_id[:8]}…[/dim] {short}")
-                if len(dispatch_result.failed) > 5:
-                    console.print(f"     [dim]… and {len(dispatch_result.failed) - 5} more[/dim]")
+                if len(total_failed) > 5:
+                    console.print(f"     [dim]… and {len(total_failed) - 5} more[/dim]")
                 # Give an actionable hint when the error is provider exhaustion
-                sample_err = next(iter(dispatch_result.failed.values()), "")
+                sample_err = next(iter(total_failed.values()), "")
                 if "All providers exhausted" in sample_err or "No agent executor" in sample_err:
                     console.print(
                         "\n[yellow]💡 No working providers found.[/yellow]\n"
@@ -988,22 +1069,27 @@ def state(
     db_url = f"sqlite+aiosqlite:///{db_path}"
     console.print(f"[dim]Database: {db_path}[/dim]")
 
-    if reload:
-        console.print("[bold yellow]🔄 Hot-reload enabled[/bold yellow]")
-        os.environ["CLAW_FORGE_DB_URL"] = db_url
-        uvicorn.run(
-            "claw_forge.state.service:create_app_from_env",
-            factory=True,
-            host=host,
-            port=port,
-            reload=True,
-            reload_dirs=[str(Path(__file__).parent)],
-        )
-    else:
-        from claw_forge.state.service import AgentStateService
+    try:
+        if reload:
+            console.print("[bold yellow]🔄 Hot-reload enabled[/bold yellow]")
+            os.environ["CLAW_FORGE_DB_URL"] = db_url
+            uvicorn.run(
+                "claw_forge.state.service:create_app_from_env",
+                factory=True,
+                host=host,
+                port=port,
+                reload=True,
+                reload_dirs=[str(Path(__file__).parent)],
+            )
+        else:
+            from claw_forge.state.service import AgentStateService
 
-        svc = AgentStateService(database_url=db_url)
-        uvicorn.run(svc.create_app(), host=host, port=port)
+            svc = AgentStateService(database_url=db_url)
+            uvicorn.run(svc.create_app(), host=host, port=port)
+    except OSError as exc:
+        if "Address already in use" in str(exc) or getattr(exc, "errno", None) in (48, 98):
+            _port_in_use_error(port, "state service")
+        raise
 
 
 @app.command()
@@ -1530,6 +1616,44 @@ def _build_session_redirect_js(session_id: str) -> str:
     )
 
 
+def _port_in_use_error(port: int, service: str = "state service") -> None:
+    """Print a rich, actionable error when a port is already in use and exit."""
+    import platform
+
+    is_mac = platform.system() == "Darwin"
+    lsof_cmd   = f"lsof -i :{port}"
+    kill_cmd   = f"kill $(lsof -ti :{port})"
+    ss_cmd     = f"ss -tlnp | grep {port}"         # Linux alternative
+
+    console.print(f"\n[bold red]✖  Port {port} is already in use[/bold red]\n")
+    console.print(
+        f"  Another process is bound to [bold]{port}[/bold] and the {service} cannot start.\n"
+    )
+
+    console.print("[bold yellow]▶  How to find what is using the port:[/bold yellow]")
+    console.print(f"     [cyan]{lsof_cmd}[/cyan]")
+    if not is_mac:
+        console.print(f"     [cyan]{ss_cmd}[/cyan]   [dim]# Linux alternative[/dim]")
+
+    console.print("\n[bold yellow]▶  How to kill the conflicting process:[/bold yellow]")
+    console.print(f"     [cyan]{kill_cmd}[/cyan]")
+
+    console.print(
+        "\n[bold yellow]▶  If a previous claw-forge session is still running:[/bold yellow]"
+    )
+    console.print("     [cyan]ps aux | grep 'claw-forge state'[/cyan]   [dim]# find PID[/dim]")
+    shutdown_url = f"http://localhost:{port}/shutdown"
+    console.print(f"     [cyan]curl -s -X POST {shutdown_url}[/cyan]   [dim]# graceful stop[/dim]")
+
+    console.print("\n[bold yellow]▶  Use a different port instead:[/bold yellow]")
+    console.print(f"     [cyan]claw-forge state --port {port + 1}[/cyan]")
+    console.print(
+        f"     [dim]Or set it permanently in[/dim] [bold]claw-forge.yaml[/bold][dim]:[/dim]\n"
+        f"     [cyan]state:\n       port: {port + 1}[/cyan]"
+    )
+    raise typer.Exit(1)
+
+
 def _ensure_state_service(project_path: Path, port: int) -> int:
     """Start state service if not running or serving the wrong project.
 
@@ -1955,7 +2079,12 @@ def ui(
             webbrowser.open(url)
         threading.Thread(target=_open_static, daemon=True).start()
 
-    uvicorn.run(static_app, host="0.0.0.0", port=port, log_level="warning")  # noqa: S104
+    try:
+        uvicorn.run(static_app, host="0.0.0.0", port=port, log_level="warning")  # noqa: S104
+    except OSError as exc:
+        if "Address already in use" in str(exc) or getattr(exc, "errno", None) in (48, 98):
+            _port_in_use_error(port, "UI server")
+        raise
 
 
 @app.command()
