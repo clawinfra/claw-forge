@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from claw_forge.git.repo import _run_git
@@ -43,7 +44,5 @@ def delete_branch(project_dir: Path, name: str, *, force: bool = False) -> None:
     if not branch_exists(project_dir, name):
         return
     flag = "-D" if force else "-d"
-    try:
+    with suppress(Exception):
         _run_git(["branch", flag, name], project_dir)
-    except Exception:
-        pass  # branch not fully merged and not force — skip

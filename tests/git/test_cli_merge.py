@@ -48,7 +48,10 @@ class TestMergeCommand:
             git_project, message="feat: add x",
             task_id="t1", plugin="coding", phase="milestone", session_id="s1",
         )
-        subprocess.run(["git", "checkout", "main"], cwd=git_project, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=git_project, check=True, capture_output=True,
+        )
 
         result = runner.invoke(app, ["merge", "feat/test-feat", "--project", str(git_project)])
         assert "merged" in result.output.lower() or result.exit_code == 0
@@ -57,7 +60,10 @@ class TestMergeCommand:
         from claw_forge.git.branching import create_feature_branch
 
         create_feature_branch(git_project, "t1", "list-test")
-        subprocess.run(["git", "checkout", "main"], cwd=git_project, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=git_project, check=True, capture_output=True,
+        )
 
         result = runner.invoke(app, ["merge", "--project", str(git_project)])
         assert "feat/list-test" in result.output or "feature branches" in result.output.lower()

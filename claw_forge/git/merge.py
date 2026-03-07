@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -29,12 +30,8 @@ def squash_merge(
         return {"merged": True, "commit_hash": short_hash}
     except Exception as exc:
         # Abort merge if in progress, restore original branch
-        try:
+        with suppress(Exception):
             _run_git(["merge", "--abort"], project_dir)
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             switch_branch(project_dir, original_branch)
-        except Exception:
-            pass
         return {"merged": False, "error": str(exc)}

@@ -5,9 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-from claw_forge.git.repo import init_or_detect, ensure_gitignore
+from claw_forge.git.repo import ensure_gitignore, init_or_detect
 
 
 class TestInitOrDetect:

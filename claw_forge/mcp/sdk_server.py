@@ -22,7 +22,6 @@ from sqlalchemy.orm import Session as DBSession
 
 from claw_forge.git.commits import commit_checkpoint as _git_checkpoint
 from claw_forge.git.commits import task_history as _git_task_history
-
 from claw_forge.mcp.feature_mcp import (
     Feature,
     FeatureBase,
@@ -304,7 +303,10 @@ def _make_tools(project_dir: Path) -> list[Any]:  # noqa: C901
         {
             "type": "object",
             "properties": {
-                "message": {"type": "string", "description": "What was accomplished (commit message)"},
+                "message": {
+                    "type": "string",
+                    "description": "Commit message",
+                },
                 "task_id": {"type": "string", "description": "Current task ID"},
                 "plugin": {"type": "string", "description": "Current plugin name"},
                 "phase": {
@@ -331,7 +333,7 @@ def _make_tools(project_dir: Path) -> list[Any]:  # noqa: C901
 
     @tool(
         "task_history",
-        "Get git commit history for a task or the whole project. Use to understand what happened before.",
+        "Get git commit history for a task or the whole project.",  # noqa: E501
         {
             "type": "object",
             "properties": {

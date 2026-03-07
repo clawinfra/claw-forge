@@ -2338,14 +2338,18 @@ def merge(
                 ["git", "branch", "--list", "feat/*"],
                 cwd=project_path, capture_output=True, text=True, check=True,
             )
-            branches = [b.strip().lstrip("* ") for b in result.stdout.strip().splitlines() if b.strip()]
+            branches = [
+                b.strip().lstrip("* ")
+                for b in result.stdout.strip().splitlines()
+                if b.strip()
+            ]
             if not branches:
                 console.print("[dim]No feature branches found.[/dim]")
                 return
             console.print("[bold]Feature branches:[/bold]")
             for b in branches:
                 console.print(f"  \u2022 {b}")
-            console.print(f"\n[dim]Run: claw-forge merge <branch>[/dim]")
+            console.print("\n[dim]Run: claw-forge merge <branch>[/dim]")
         except sp.CalledProcessError:
             console.print("[red]Not a git repository or git not available.[/red]")
         return
@@ -2354,7 +2358,8 @@ def merge(
 
     result = squash_merge(project_path, branch, target)
     if result["merged"]:
-        console.print(f"[green]\u2713 Merged {branch} \u2192 {target} ({result['commit_hash']})[/green]")
+        _hash = result['commit_hash']
+        console.print(f"[green]\u2713 Merged {branch} \u2192 {target} ({_hash})[/green]")
     else:
         console.print(f"[red]\u2717 Merge failed: {result.get('error', 'unknown')}[/red]")
 
