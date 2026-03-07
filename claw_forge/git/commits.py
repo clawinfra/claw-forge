@@ -1,0 +1,102 @@
+"""Checkpoint commits with structured trailers and history parsing."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from claw_forge.git.branching import current_branch
+from claw_forge.git.repo import _run_git
+
+_TRAILER_PATTERN = re.compile(r"^(Task-ID|Plugin|Phase|Session):\s*(.+)$", re.MULTILINE)
+
+
+def commit_checkpoint(
+    project_dir: Path,
+    *,
+    message: str,
+    task_id: str,
+    plugin: str,
+    phase: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    # Stage all changes
+    _run_git(["add", "-A"], project_dir)
+
+    # Check if there's anything to commit
+    try:
+        _run_git(["diff", "--cached", "--quiet"], project_dir)
+        return None  # no staged changes
+    except Exception:
+        pass  # there ARE staged changes — proceed
+
+    body = (
+        f"{message}\n\n"
+        f"Task-ID: {task_id}\n"
+        f"Plugin: {plugin}\n"
+        f"Phase: {phase}\n"
+        f"Session: {session_id}"
+    )
+    _run_git(["commit", "-m", body], project_dir)
+
+    short_hash = _run_git(
+        ["rev-parse", "--short", "HEAD"], project_dir
+    ).stdout.strip()
+    branch = current_branch(project_dir)
+
+    return {"commit_hash": short_hash, "branch": branch}
+
+
+def task_history(
+    project_dir: Path,
+    *,
+    task_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    # Use a delimiter to parse commits
+    sep = "---COMMIT-SEP---"
+    fmt = f"%H{sep}%s{sep}%aI{sep}%B{sep}"
+    try:
+        result = _run_git(
+            ["log", f"--format={fmt}", f"-n{limit * 3 if task_id else limit}"],
+            project_dir,
+        )
+    except Exception:
+        return []
+
+    commits: list[dict[str, Any]] = []
+    raw_commits = result.stdout.strip().split(f"{sep}\n")
+
+    for raw in raw_commits:
+        parts = raw.split(sep)
+        if len(parts) < 4:
+            continue
+        full_hash, subject, timestamp, body = (
+            parts[0].strip(),
+            parts[1].strip(),
+            parts[2].strip(),
+            parts[3].strip(),
+        )
+        if not full_hash:
+            continue
+
+        trailers: dict[str, str] = {}
+        for match in _TRAILER_PATTERN.finditer(body):
+            key = match.group(1).lower().replace("-", "_")
+            trailers[key] = match.group(2).strip()
+
+        if task_id and trailers.get("task_id") != task_id:
+            continue
+
+        commits.append({
+            "hash": full_hash[:10],
+            "message": subject,
+            "timestamp": timestamp,
+            "trailers": trailers,
+        })
+
+        if len(commits) >= limit:
+            break
+
+    return commits
