@@ -286,7 +286,10 @@ providers:
           <p>Run <code>claw-forge init</code> <strong>first</strong> — before writing a spec. This scaffolds the <code>.claude/commands/</code> folder (including the <code>/create-spec</code> slash command you'll need in the next step) and creates default config files if they don't exist yet.</p>
 
           <pre><code class="language-bash">cd my-project
-claw-forge init</code></pre>
+claw-forge init
+
+# Or bootstrap a specific directory without cd:
+claw-forge init --project ~/projects/my-app</code></pre>
 
           <div class="output-block">✓ Created claw-forge.yaml  (edit providers as needed)
 ✓ Created .env.example     (copy to .env and fill keys)
@@ -506,7 +509,7 @@ Aim for 100-300 bullets total.</div>
           <h3>Run agents</h3>
           <p>Start the harness. The dispatcher executes features in dependency-ordered waves — features with no unsatisfied dependencies run in parallel up to <code>--concurrency</code>.</p>
 
-          <pre><code class="language-bash">claw-forge run task-manager-api --concurrency 3</code></pre>
+          <pre><code class="language-bash">claw-forge run --project task-manager-api --concurrency 3</code></pre>
 
           <div class="output-block">🔥 claw-forge v0.2.0b1
 Project:   task-manager-api
@@ -534,16 +537,19 @@ Wave 4/4 — 1 task
 ✅ All 4 features passing  •  total: $0.30  •  4m 23s
 ────────────────────────────────────────────────</div>
 
-          <p>The state service runs automatically on port <strong>8888</strong>. Open <code>http://localhost:8888/docs</code> to explore the REST API, or use the Kanban UI (next step).</p>
+          <p>The state service runs automatically on port <strong>8420</strong>. Open <code>http://localhost:8420/docs</code> to explore the REST API, or use the Kanban UI (next step).</p>
 
           <div class="callout tip">
             <strong>💡 Useful flags</strong>
             <table class="field-table" style="margin-top:8px">
-              <tr><td>--concurrency N</td><td></td><td>Max parallel agents (default: 3)</td></tr>
+              <tr><td>--concurrency N</td><td></td><td>Max parallel agents (default: 5)</td></tr>
               <tr><td>--model MODEL</td><td></td><td>Override the default model</td></tr>
               <tr><td>--config FILE</td><td></td><td>Use a different claw-forge.yaml</td></tr>
               <tr><td>--yolo</td><td></td><td>Max speed, no approval pauses (see <a href="#yolo">YOLO mode</a>)</td></tr>
+              <tr><td>--dry-run</td><td></td><td>Print tasks in dependency order without executing</td></tr>
             </table>
+            <p style="margin-top:12px">Check provider health at any time:</p>
+            <pre><code class="language-bash">claw-forge pool-status   # show all providers, rate limits, and health</code></pre>
           </div>
         </div>
       </div>
@@ -559,7 +565,7 @@ Wave 4/4 — 1 task
 
           <div class="output-block">🔥 Starting claw-forge Kanban UI
    UI:        http://localhost:5173/?session=abc-123-def
-   State API: http://localhost:8888
+   State API: http://localhost:8420
    Press Ctrl+C to stop
 
   vite v5.4.0 dev server running at:
@@ -584,6 +590,14 @@ Wave 4/4 — 1 task
             <pre style="margin-top:8px"><code class="language-bash">claw-forge ui --port 3000        # custom port
 claw-forge ui --no-open          # don't auto-open browser
 claw-forge ui --state-port 9000  # different state service port</code></pre>
+          </div>
+
+          <div class="callout tip" style="margin-top:16px">
+            <strong>💡 All-in-one dev mode</strong>
+            Use <code>claw-forge dev</code> to start the state service API <em>and</em> the Kanban UI in a single command with hot-reload:
+            <pre style="margin-top:8px"><code class="language-bash">claw-forge dev                          # state API + Vite UI, both with hot-reload
+claw-forge dev --state-port 9000 --ui-port 3000   # custom ports
+claw-forge dev --project /path/to/project --run   # also run agents</code></pre>
           </div>
 
           <p>You can also open the board manually at any time at <code>http://localhost:5173/?session=&lt;uuid&gt;</code>.</p>
@@ -643,7 +657,7 @@ claw-forge plan app_spec.txt --project task-manager-api</code></pre>
             <li><strong>Aggressive retry</strong> — 5 attempts per task instead of 3</li>
           </ul>
 
-          <pre><code class="language-bash">claw-forge run task-manager-api --yolo</code></pre>
+          <pre><code class="language-bash">claw-forge run --project task-manager-api --yolo</code></pre>
 
           <div class="output-block"><span style="color:#d29922">⚠️  YOLO MODE: Human approval skipped, max concurrency (12), aggressive retry</span>
 
@@ -768,6 +782,12 @@ claw-forge run --concurrency 3
           <div class="callout tip">
             <strong>Key:</strong> The manifest teaches agents your naming conventions, async patterns, and test style — so new code matches existing code.
           </div>
+
+          <h4 style="margin-top:16px">Merging completed features</h4>
+          <p>When using <code>merge_strategy: manual</code>, use <code>claw-forge merge</code> to squash-merge completed feature branches:</p>
+          <pre><code class="language-bash">claw-forge merge                     # list ready feature branches
+claw-forge merge feat/user-auth      # squash-merge a specific branch
+claw-forge merge feat/user-auth --target develop  # merge into develop</code></pre>
         </div>
 
         <div id="wf-bugfix" class="tab-content">
@@ -781,7 +801,14 @@ claw-forge run --concurrency 3
 #    Writes: bug_report.md
 
 # 2. Run fix (or let /create-bug-report trigger it)
+# Fix from a bug description
+claw-forge fix 'users get 500 on login with uppercase email'
+
+# Fix from a structured bug report
 claw-forge fix --report bug_report.md
+
+# Fix without creating a branch
+claw-forge fix --report bug_report.md --no-branch
 
 # Agent does:
 #   Phase 1 (RED):    Write test_password_reset_uppercase_email → FAILS ✓
