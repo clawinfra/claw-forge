@@ -70,7 +70,7 @@ def test_status_with_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_run_with_config(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path, providers={"p1": {"type": "anthropic", "api_key": "k"}})
     with patch("claw_forge.cli._ensure_state_service", return_value=8420):
-        result = runner.invoke(app, ["run", "--config", str(cfg)])
+        result = runner.invoke(app, ["run", "--config", str(cfg), "--project", str(tmp_path)])
     assert result.exit_code == 0
     assert "claw-forge" in result.output
 
@@ -83,7 +83,7 @@ def test_run_missing_config(tmp_path: Path) -> None:
 def test_run_yolo_mode(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path)
     with patch("claw_forge.cli._ensure_state_service", return_value=8420):
-        result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo"])
+        result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo", "--project", str(tmp_path)])
     assert result.exit_code == 0
     assert "YOLO" in result.output
 
@@ -132,6 +132,7 @@ def test_init_scaffolds_project(tmp_path: Path) -> None:
         "spec_example_written": True,
         "commands_copied": [".claude/commands/create-spec.md"],
         "stack": {"language": "python", "framework": "unknown"},
+        "git_initialized": True,
     }
     with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
         result = runner.invoke(app, ["init", "--project", str(tmp_path)])
@@ -163,6 +164,7 @@ def test_init_creates_env_example_when_yaml_already_exists(tmp_path: Path) -> No
         "spec_example_written": False,
         "commands_copied": [],
         "stack": {"language": "unknown", "framework": "unknown"},
+        "git_initialized": False,
     }
     with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
         result = runner.invoke(app, ["init", "--project", str(tmp_path)])
@@ -182,6 +184,7 @@ def test_init_shows_next_step_hint(tmp_path: Path) -> None:
         "spec_example_written": False,
         "commands_copied": [],
         "stack": {"language": "unknown", "framework": "unknown"},
+        "git_initialized": False,
     }
     with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
         result = runner.invoke(app, ["init", "--project", str(tmp_path)])
@@ -483,7 +486,7 @@ def test_load_config_with_env_file(tmp_path: Path) -> None:
     cfg_path = tmp_path / "claw-forge.yaml"
     cfg_path.write_text(yaml.dump({"providers": {}, "key": "${MY_KEY}"}))
     with patch("claw_forge.cli._ensure_state_service", return_value=8420):
-        result = runner.invoke(app, ["run", "--config", str(cfg_path)])
+        result = runner.invoke(app, ["run", "--config", str(cfg_path), "--project", str(tmp_path)])
     assert result.exit_code == 0
 
 

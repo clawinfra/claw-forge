@@ -49,6 +49,16 @@ importlib.reload(_sdk_server_mod)
 
 from claw_forge.mcp.sdk_server import _make_tools  # noqa: E402
 
+# Restore the real claude_agent_sdk modules so that test files collected
+# afterward (e.g. tests/test_lsp.py) import claw_forge.lsp with the real
+# SdkPluginConfig TypedDict instead of a MagicMock.
+for _key in ("claude_agent_sdk", "claude_agent_sdk.types"):
+    sys.modules.pop(_key, None)
+importlib.import_module("claude_agent_sdk")
+importlib.import_module("claude_agent_sdk.types")
+# Invalidate claw_forge.lsp if it was imported during the mock window.
+sys.modules.pop("claw_forge.lsp", None)
+
 
 def _run(coro: Any) -> Any:
     return asyncio.run(coro)
@@ -68,7 +78,7 @@ async def _call_tool(t: Any, args: dict[str, Any]) -> Any:
 
 @pytest.fixture()
 def git_repo(tmp_path: Path) -> Path:
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, check=True, capture_output=True,

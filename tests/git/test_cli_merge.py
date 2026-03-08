@@ -15,7 +15,7 @@ runner = CliRunner()
 
 @pytest.fixture()
 def git_project(tmp_path: Path) -> Path:
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, check=True, capture_output=True,
