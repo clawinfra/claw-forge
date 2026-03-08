@@ -83,7 +83,9 @@ def test_run_missing_config(tmp_path: Path) -> None:
 def test_run_yolo_mode(tmp_path: Path) -> None:
     cfg = _yaml_config(tmp_path)
     with patch("claw_forge.cli._ensure_state_service", return_value=8420):
-        result = runner.invoke(app, ["run", "--config", str(cfg), "--yolo", "--project", str(tmp_path)])
+        result = runner.invoke(
+            app, ["run", "--config", str(cfg), "--yolo", "--project", str(tmp_path)]
+        )
     assert result.exit_code == 0
     assert "YOLO" in result.output
 
