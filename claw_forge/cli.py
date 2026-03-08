@@ -200,6 +200,7 @@ def _scaffold_config(config_path: str) -> bool:
     path = Path(config_path)
     created = False
     if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_DEFAULT_CONFIG_YAML)
         console.print(f"[green]✓ Created {path}[/green]  (edit providers as needed)")
         created = True
@@ -1189,6 +1190,7 @@ def init(
     from claw_forge.scaffold import scaffold_project
 
     project_path = Path(project).resolve()
+    project_path.mkdir(parents=True, exist_ok=True)
     if config == "claw-forge.yaml":
         config = str(project_path / "claw-forge.yaml")
 

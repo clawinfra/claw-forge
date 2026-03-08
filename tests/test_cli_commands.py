@@ -609,6 +609,37 @@ def test_scaffold_config_existing_file(tmp_path: Path) -> None:
     assert result is False
 
 
+def test_scaffold_config_creates_parent_dirs(tmp_path: Path) -> None:
+    """_scaffold_config creates parent directories when they don't exist."""
+    from claw_forge.cli import _scaffold_config
+
+    nested = tmp_path / "deep" / "nested" / "dir"
+    cfg_path = str(nested / "claw-forge.yaml")
+    result = _scaffold_config(cfg_path)
+    assert result is True
+    assert (nested / "claw-forge.yaml").exists()
+    assert (nested / ".env.example").exists()
+
+
+def test_init_creates_project_dir(tmp_path: Path) -> None:
+    """init --project creates the project directory if it doesn't exist."""
+    new_dir = tmp_path / "brand-new" / "project"
+    assert not new_dir.exists()
+    mock_scaffold = {
+        "claude_md_written": True,
+        "dot_claude_created": True,
+        "spec_example_written": True,
+        "commands_copied": [],
+        "stack": {"language": "unknown", "framework": "unknown"},
+        "git_initialized": False,
+    }
+    with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):
+        result = runner.invoke(app, ["init", "--project", str(new_dir)])
+    assert result.exit_code == 0, result.output
+    assert new_dir.exists(), "project directory was not created"
+    assert (new_dir / "claw-forge.yaml").exists()
+
+
 # ── _load_config tests ────────────────────────────────────────────────────────
 
 
