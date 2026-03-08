@@ -54,12 +54,19 @@ class Scheduler:
         for task in self._tasks.values():
             if task.status != "pending":
                 continue
-            deps = set(task.depends_on)
-            if deps & failed:
+            # Deps absent from this scheduler were completed in a prior dispatch cycle.
+            known_failed = {dep for dep in task.depends_on if dep in failed}
+            if known_failed:
                 # Dependency failed — mark as blocked
                 task.status = "blocked"
                 continue
-            if deps <= completed:
+            # A dep is satisfied when it is completed in this cycle OR not present in
+            # this scheduler at all (meaning it finished before this dispatch cycle).
+            unsatisfied = {
+                dep for dep in task.depends_on
+                if dep in self._tasks and dep not in completed
+            }
+            if not unsatisfied:
                 ready.append(task)
 
         return sorted(ready, key=lambda t: t.priority, reverse=True)
@@ -90,7 +97,11 @@ class Scheduler:
                 dfs(tid)
 
     def get_execution_order(self) -> list[list[str]]:
-        """Return tasks grouped by execution wave (parallelizable within each wave)."""
+        """Return tasks grouped by execution wave (parallelizable within each wave).
+
+        Dependency IDs absent from this scheduler are treated as already satisfied —
+        they were completed in a prior dispatch cycle (e.g. after pause/resume).
+        """
         self.validate_no_cycles()
         waves: list[list[str]] = []
         completed: set[str] = set()
@@ -100,7 +111,13 @@ class Scheduler:
             wave: list[str] = []
             for tid in list(remaining):
                 task = self._tasks[tid]
-                if set(task.depends_on) <= completed:
+                # A dep is satisfied when completed in this cycle OR absent from this
+                # scheduler (finished before this dispatch cycle, e.g. after resume).
+                unsatisfied = {
+                    dep for dep in task.depends_on
+                    if dep in self._tasks and dep not in completed
+                }
+                if not unsatisfied:
                     wave.append(tid)
             if not wave:
                 break  # Blocked tasks

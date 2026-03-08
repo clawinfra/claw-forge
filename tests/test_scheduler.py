@@ -87,11 +87,35 @@ class TestScheduler:
         # When outer loop reaches "a", color["a"] != WHITE → 89->88 branch taken.
         s.validate_no_cycles()  # should not raise
 
-    def test_execution_order_with_blocked_cycle_breaks(self):
-        """All remaining tasks blocked (no progress) → break (line 106)."""
+    def test_execution_order_missing_dep_treated_as_satisfied(self):
+        """Deps absent from the scheduler are treated as already completed.
+
+        This is the resume-after-pause scenario: tasks completed in a prior
+        dispatch cycle are removed from the re-dispatch list, so a pending task
+        whose dep is "missing" should still be schedulable.
+        """
         s = Scheduler()
-        # Task a depends on b, but b is not in the scheduler (so no wave can be formed)
-        s.add_task(TaskNode("a", "coding", 1, ["b-not-here"]))
+        # Task a depends on b, but b is not in this scheduler (completed earlier).
+        s.add_task(TaskNode("a", "coding", 1, ["b-completed-earlier"]))
         waves = s.get_execution_order()
-        # No waves can be formed since dep is missing → empty
+        # a should be scheduled because its dep is considered satisfied.
+        assert waves == [["a"]]
+
+    def test_execution_order_with_blocked_cycle_breaks(self):
+        """All remaining tasks blocked (circular / unsatisfiable) → break."""
+        s = Scheduler()
+        # Both tasks are in the scheduler and depend on each other (cycle-like
+        # deadlock without an actual cycle in validate_no_cycles sense).
+        s.add_task(TaskNode("a", "coding", 1, ["b"]))
+        s.add_task(TaskNode("b", "coding", 1, ["a"]))
+        # validate_no_cycles detects this as a cycle — it will raise.
+        # Use a simpler non-cycle deadlock: both tasks depend on a third that
+        # is in the scheduler but not pending (stuck as running, never completes).
+        s2 = Scheduler()
+        stuck = TaskNode("blocker", "coding", 1, [])
+        stuck.status = "running"  # not pending, so never completes in this cycle
+        s2.add_task(stuck)
+        s2.add_task(TaskNode("a", "coding", 1, ["blocker"]))
+        waves = s2.get_execution_order()
+        # "a" cannot run because "blocker" is in the scheduler but not completed.
         assert waves == []

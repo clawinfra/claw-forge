@@ -690,7 +690,9 @@ def run(
                     # Notify UI via state service HTTP (best-effort)
                     await _patch_task(http, task_node.id, status="running")
 
-                    # Create a feature branch for this task
+                    # Create a feature branch for this task (best-effort — git
+                    # errors must not crash the dispatcher or leave tasks stuck).
+                    import logging as _logging
                     import re as _re
 
                     _slug = _re.sub(
@@ -698,9 +700,15 @@ def run(
                         (task_node.plugin_name + "-" + task_node.id[:8]).lower(),
                     ).strip("-")
                     if git_enabled:
-                        await git_ops.create_branch(
-                            task_node.id, _slug, prefix=git_branch_prefix,
-                        )
+                        try:
+                            await git_ops.create_branch(
+                                task_node.id, _slug, prefix=git_branch_prefix,
+                            )
+                        except Exception as _git_branch_err:
+                            _logging.getLogger(__name__).warning(
+                                "Git branch creation failed for task %s (continuing): %s",
+                                task_node.id, _git_branch_err,
+                            )
 
                     output = ""
                     success = False

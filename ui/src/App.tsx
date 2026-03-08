@@ -456,12 +456,27 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   }, [features, sessionId, addToast]);
 
   const handleResumeAll = useCallback(() => {
+    // Optimistically keep all paused cards in the In Progress column during
+    // the transition (same behaviour as per-task resume via resumingTasks).
+    const pausedIds = allFeatures
+      .filter((f) => f.status === "paused")
+      .map((f) => f.id);
     setResumingAll(true);
+    setResumingTasks((prev) => {
+      const next = new Set(prev);
+      pausedIds.forEach((id) => next.add(id));
+      return next;
+    });
     void resumeAllPaused(sessionId).catch(() => {
       setResumingAll(false);
+      setResumingTasks((prev) => {
+        const next = new Set(prev);
+        pausedIds.forEach((id) => next.delete(id));
+        return next;
+      });
       addToast("Failed to resume tasks", "error");
     });
-  }, [sessionId, addToast]);
+  }, [sessionId, allFeatures, addToast]);
 
   const handleResumeTask = useCallback(
     (taskId: string) => {
