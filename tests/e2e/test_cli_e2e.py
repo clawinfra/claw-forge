@@ -546,7 +546,9 @@ class TestZRunExecutesTasks:
             "    api_key: test-key\n"
             "    models: [claude-sonnet-4-20250514]\n"
             "    priority: 1\n"
-            "    enabled: true\n",
+            "    enabled: true\n"
+            "git:\n"
+            "  enabled: false\n",
             encoding="utf-8",
         )
 
@@ -562,13 +564,16 @@ class TestZRunExecutesTasks:
             spec = project / "app_spec.xml"
             self._make_spec(spec)
 
+            cfg_path = str(project / "claw-forge.yaml")
             # plan first — writes tasks to DB
-            plan_result = runner.invoke(app, ["plan", str(spec), "--project", tmp])
+            plan_result = runner.invoke(
+                app, ["plan", str(spec), "--project", tmp, "--config", cfg_path]
+            )
             assert plan_result.exit_code == 0, plan_result.output
 
             # run with concurrency=5 (triggers concurrent task_handler coroutines)
             run_result = runner.invoke(
-                app, ["run", "--project", tmp, "--concurrency", "5"]
+                app, ["run", "--project", tmp, "--concurrency", "5", "--config", cfg_path]
             )
             # Must not crash with SQLAlchemy session error
             assert "commit()" not in run_result.output, (
@@ -596,8 +601,11 @@ class TestZRunExecutesTasks:
             spec = project / "app_spec.xml"
             self._make_spec(spec)
 
-            runner.invoke(app, ["plan", str(spec), "--project", tmp])
-            run_result = runner.invoke(app, ["run", "--project", tmp, "--concurrency", "3"])
+            cfg_path = str(project / "claw-forge.yaml")
+            runner.invoke(app, ["plan", str(spec), "--project", tmp, "--config", cfg_path])
+            run_result = runner.invoke(
+                app, ["run", "--project", tmp, "--concurrency", "3", "--config", cfg_path]
+            )
             assert run_result.exit_code == 0, run_result.output
 
             db_path = project / ".claw-forge" / "state.db"

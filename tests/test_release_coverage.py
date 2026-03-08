@@ -1217,6 +1217,7 @@ class TestInitWithExistingSpec:
             "spec_example_written": False,
             "commands_copied": [],
             "stack": {"language": "python", "framework": "unknown"},
+            "git_initialized": False,
         }
         runner_cli = CliRunner()
         with patch("claw_forge.scaffold.scaffold_project", return_value=mock_scaffold):

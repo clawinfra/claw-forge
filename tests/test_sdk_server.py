@@ -64,8 +64,6 @@ for _key in ("claude_agent_sdk", "claude_agent_sdk.types"):
     sys.modules.pop(_key, None)
 importlib.import_module("claude_agent_sdk")
 importlib.import_module("claude_agent_sdk.types")
-# Invalidate claw_forge.lsp if it was imported during the mock window.
-sys.modules.pop("claw_forge.lsp", None)
 
 # ---------------------------------------------------------------------------
 # Helpers
