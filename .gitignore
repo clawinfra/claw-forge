@@ -14,5 +14,5 @@ ui/dist/
 
 .coverage*
 <MagicMock*
-.claw-forge/state.log
+.claw-forge/
 .worktrees/

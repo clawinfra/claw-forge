@@ -414,6 +414,23 @@ def run(
 
     # Resolve project path and create .claw-forge directory
     project_path = Path(project).resolve()
+
+    # Guard: prevent running agents against the claw-forge source tree itself.
+    # Detect by checking whether project_path contains claw_forge/cli.py — if so,
+    # the user is pointing the orchestrator at its own repo, which would cause agents
+    # to commit generated app code into claw-forge.
+    _self_marker = Path(__file__).resolve()
+    if (_self_marker.parent.parent == project_path) or project_path in _self_marker.parents:
+        console.print(
+            "[bold red]ERROR:[/bold red] The project path resolves to the claw-forge "
+            "source directory itself.\n"
+            "Running agents here would commit generated code into the claw-forge repo.\n"
+            f"  project_path : {project_path}\n"
+            f"  claw-forge   : {_self_marker.parent.parent}\n\n"
+            "Point --project at your target application directory instead."
+        )
+        raise SystemExit(1)
+
     claw_forge_dir = project_path / ".claw-forge"
     claw_forge_dir.mkdir(parents=True, exist_ok=True)
     db_path = claw_forge_dir / "state.db"
