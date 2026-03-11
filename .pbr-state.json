@@ -3,7 +3,7 @@
   "task": "Add brownfield project support to claw-forge (/tmp/claw-forge). Full spec in PLAN.md which the Planner must write first.\n\n## What brownfield support means\nclaw-forge currently only works on greenfield (new) projects. It must also work on existing codebases to:\n1. Understand the existing codebase (analyze command)\n2. Add new features respecting existing patterns (add command)\n3. Fix bugs with reproduce-first protocol (fix command)\n\n## Planner must produce PLAN.md covering:\n\n### Documentation first (write these files as part of PLAN.md output)\n- docs/brownfield.md \u2014 full user-facing guide: how brownfield mode works, all commands, workflow diagrams, examples\n- Update README.md brownfield section\n- Update ARCHITECTURE.md with brownfield components\n\n### New components to design\n1. BrownfieldAnalyzer (claw_forge/plugins/analyzer.py)\n   - Scans existing project: language, framework, conventions, test baseline\n   - Reads git log --stat to find hot files (most changed = business logic)\n   - Detects code style: naming conventions, error handling patterns, logging approach\n   - Outputs brownfield_manifest.json\n\n2. brownfield_manifest.json schema\n   - stack: {language, framework, package_manager, test_runner}\n   - conventions: {naming, error_handling, logging, imports}\n   - test_baseline: {framework, total_tests, passing, coverage_pct}\n   - hot_files: [{path, change_count, role}]\n   - entry_points: [{type, path, description}]\n   - architecture: {layers, patterns, key_modules}\n\n3. claw-forge analyze command\n   - Runs BrownfieldAnalyzer\n   - Writes brownfield_manifest.json to project root\n   - Prints summary: stack, test count, hot files\n\n4. claw-forge add <feature> command\n   - auto-runs analyze if no brownfield_manifest.json\n   - Creates git branch feat/<slug>\n   - Adds single feature to feature queue\n   - Runs with brownfield-aware agent prompts (read manifest first, match patterns, dont break tests)\n   - Runs existing tests before and after\n\n5. claw-forge fix <description> command\n   - auto-runs analyze if no brownfield_manifest.json\n   - Creates git branch fix/<slug>\n   - Specialized bug-fix flow:\n     a. Write failing test that reproduces bug (RED)\n     b. Find root cause (systematic-debug skill)\n     c. Surgical fix \u2014 minimum code change\n     d. Confirm failing test now passes (GREEN)\n     e. Run full test suite \u2014 must be green\n   - Generates fix report\n\n6. Enhanced agent system prompts for brownfield\n   - Read brownfield_manifest.json before any code changes\n   - Run existing tests first to establish baseline\n   - Match existing code conventions (from manifest)\n   - Never change files not related to the task\n   - Branch-first always\n\n7. New CLI commands wired into claw_forge/cli.py\n\n### Tests to plan\n- tests/test_analyzer.py \u2014 BrownfieldAnalyzer unit tests (mock git, mock filesystem)\n- tests/test_brownfield_commands.py \u2014 CLI command tests\n\n### Constraints for Builder\n- Line length <= 100 (ruff)\n- Full type annotations\n- No new dependencies (use subprocess for git, pathlib, json)\n- All existing 557+ tests must still pass\n- New code >= 90% coverage\n- Git: Alex Chen / alex.chen31337@gmail.com",
   "workspace": "/tmp/claw-forge",
   "created_at": "2026-03-02T10:39:06.553902+00:00",
-  "current_phase": "plan",
+  "current_phase": "build",
   "config": {
     "models": {
       "plan": "anthropic/claude-opus-4-6",
@@ -16,22 +16,22 @@
   "phases": {
     "plan": {
       "name": "plan",
-      "status": "running",
+      "status": "completed",
       "started_at": "2026-03-02T10:39:06.554346+00:00",
-      "completed_at": null,
-      "duration_seconds": null,
+      "completed_at": "2026-03-11T22:55:31.514875+00:00",
+      "duration_seconds": 821784.960529,
       "artifacts": [],
       "attempt": 1,
       "error": null
     },
     "build": {
       "name": "build",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-03-11T22:55:34.348503+00:00",
       "completed_at": null,
       "duration_seconds": null,
       "artifacts": [],
-      "attempt": 0,
+      "attempt": 1,
       "error": null
     },
     "review": {
