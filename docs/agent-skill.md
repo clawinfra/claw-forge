@@ -81,14 +81,29 @@ Source: [can1357/hashline experiments](http://blog.can.ac/2026/02/12/the-harness
 
 ### When to use hashline
 
-- Weaker or cost-optimised models (Haiku, GPT-4o-mini, local models)
-- Files >500 lines where context compression is needed
-- Brownfield projects with complex existing code
-- When you're seeing agents making "changes" that don't stick
+**Use it by default for production/CI runs.** It's strictly more reliable than `str_replace` on real codebases.
+
+| Situation | Recommendation |
+|-----------|----------------|
+| Weaker/faster models (Haiku, Sonnet, local) | **Always use hashline** — removes exact-match failure mode |
+| Python / YAML / Rust (indentation-heavy) | **Use hashline** — indentation drift kills str_replace |
+| Long unattended runs (CI, overnight, auto-push) | **Use hashline** — no edit-rejection loops at 3 AM |
+| Opus on a short greenfield task | Either works, str_replace is simpler to inspect |
+| Debugging agent edit behaviour | Skip hashline — hash annotations add log noise |
+| Reviewing diffs as patches | Skip hashline — hashline blocks aren't unified diff format |
 
 ```bash
+# Any production run — just add --edit-mode hashline
+claw-forge run --edit-mode hashline
+
+# High-throughput with cheaper model
 claw-forge run --edit-mode hashline --model claude-haiku-4-5 --concurrency 10
+
+# CI / autonomous run
+claw-forge run --edit-mode hashline --auto-push /path/to/repo
 ```
+
+**Full use-case guide:** [`docs/middleware/hashline.md`](middleware/hashline.md)
 
 ## Middleware Stack
 
