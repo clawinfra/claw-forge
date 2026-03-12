@@ -357,6 +357,16 @@ def run(
             "[default: str_replace]"
         ),
     ),
+    loop_detect_threshold: int = typer.Option(
+        5,
+        "--loop-detect-threshold",
+        help=(
+            "Max edits to a single file before injecting a 'reconsider' prompt (0=disable). "
+            "When --edit-mode hashline is active, threshold is auto-raised by 3 "
+            "(e.g. default 5 → 8). "
+            "[default: 5]"
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -406,6 +416,15 @@ def run(
     _config_edit_mode = cfg.get("agent", {}).get("edit_mode", "str_replace")
     if edit_mode == "str_replace" and _config_edit_mode == "hashline":
         edit_mode = _config_edit_mode
+
+    # Allow config to set loop_detect_threshold (CLI flag takes priority)
+    _config_threshold = cfg.get("agent", {}).get("loop_detect_threshold", 5)
+    if loop_detect_threshold == 5 and _config_threshold != 5:
+        loop_detect_threshold = int(_config_threshold)
+
+    if loop_detect_threshold < 0:
+        console.print("[red]--loop-detect-threshold must be ≥ 0[/red]")
+        raise typer.Exit(1) from None
 
     resolved = resolve_model(model, cfg)
     if resolved.alias_resolved:
@@ -751,6 +770,7 @@ def run(
                         if sdk_available:
                             from claude_agent_sdk import ClaudeAgentOptions
 
+                            from claw_forge.agent.hooks import get_default_hooks as _ghooks
                             from claw_forge.agent.session import AgentSession
 
                             # UNDER LOCK: env reads + options construction
@@ -774,11 +794,17 @@ def run(
                                     if _oauth_tok:
                                         sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
 
+                                _hooks = _ghooks(
+                                    edit_mode=edit_mode,
+                                    loop_detect_threshold=loop_detect_threshold,
+                                )
+
                                 options = ClaudeAgentOptions(
                                     model=model,
                                     cwd=str(project_path),
                                     env=sdk_env,
                                     permission_mode="bypassPermissions",
+                                    hooks=_hooks,  # type: ignore[arg-type]
                                 )
 
                             # OUTSIDE LOCK: connect + run (parallel with other agents)

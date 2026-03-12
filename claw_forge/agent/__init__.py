@@ -1,5 +1,6 @@
 from .hooks import get_default_hooks
 from .lock import AgentLockError, agent_lock
+from .middleware import LoopContext, loop_detection_hook
 from .output import ALL_SCHEMAS, CODE_REVIEW_SCHEMA, FEATURE_SUMMARY_SCHEMA, PLAN_SCHEMA
 from .permissions import make_can_use_tool, smart_can_use_tool
 from .rate_limit import calculate_rate_limit_backoff, is_rate_limit_error, parse_retry_after
@@ -41,4 +42,7 @@ __all__ = [
     # Permissions
     "smart_can_use_tool",
     "make_can_use_tool",
+    # Loop detection middleware
+    "loop_detection_hook",
+    "LoopContext",
 ]
