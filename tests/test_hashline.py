@@ -820,6 +820,8 @@ def bar():
 class TestCLIEditMode:
     def test_run_accepts_edit_mode_flag(self) -> None:
         """claw-forge run --edit-mode hashline doesn't error on parsing."""
+        import re
+
         from typer.testing import CliRunner
 
         from claw_forge.cli import app
@@ -827,7 +829,9 @@ class TestCLIEditMode:
         runner = CliRunner()
         # We just test that the CLI parses the option correctly by using --help
         result = runner.invoke(app, ["run", "--help"])
-        assert "--edit-mode" in result.output
+        # Strip ANSI escape sequences before asserting (rich may split flag names)
+        clean_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "--edit-mode" in clean_output
         assert result.exit_code == 0
 
     def test_run_default_edit_mode(self) -> None:

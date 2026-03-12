@@ -12,6 +12,7 @@ from claude_agent_sdk.types import HookEvent, HookMatcher, SdkPluginConfig, Thin
 
 from claw_forge.pool.providers.base import ProviderConfig
 
+from .hooks import get_default_hooks
 from .tools import get_max_turns, get_tools_for_agent
 
 
@@ -99,7 +100,6 @@ async def run_agent(
 
     # Use hashline hooks when in hashline mode
     if hooks is None:
-        from claw_forge.agent.hooks import get_default_hooks
         hooks = get_default_hooks(edit_mode=edit_mode)  # type: ignore[assignment]
 
     # Apply provider config overrides via environment variables
