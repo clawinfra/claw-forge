@@ -868,6 +868,9 @@ uv run mypy claw_forge/ --ignore-missing-imports                 # type check
 | [`docs/bmad-integration.md`](docs/bmad-integration.md) | Using claw-forge with BMAD Method — convert epics/stories to spec |
 | [`docs/brownfield.md`](docs/brownfield.md) | Brownfield mode — analyze existing codebases, add features, fix bugs |
 | [`docs/agent-skill.md`](docs/agent-skill.md) | OpenClaw agent skill — install via `clawhub install claw-forge-cli` |
+| [`docs/middleware/pre-completion-checklist.md`](docs/middleware/pre-completion-checklist.md) | Design doc: PreCompletionChecklistMiddleware (issue #4) |
+| [`docs/middleware/loop-detection.md`](docs/middleware/loop-detection.md) | Design doc: LoopDetectionMiddleware (issue #5) |
+| [`docs/benchmarks/terminal-bench.md`](docs/benchmarks/terminal-bench.md) | Terminal Bench 2.0 evaluation harness design (issue #6) |
 | [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
 | [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
 | [`website/features.html`](website/features.html) | Full feature list |
