@@ -1480,9 +1480,9 @@ All three middleware layers (hashline edit mode + loop detection + pre-completio
 claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
 ```
 
-This is **Config E** in Terminal Bench 2.0 terminology — the full middleware stack.
+This is **Config E** — the only configuration to achieve **100%** on the claw-forge-bench ablation (30 tasks, `claude-opus-4-6`).
 
-See [`docs/benchmarks/terminal-bench.md`](benchmarks/terminal-bench.md) for ablation results across configs A–E.
+See [`docs/benchmarks/results.md`](benchmarks/results.md) for full ablation results across configs A–E.
 
 ---
 

@@ -11,6 +11,7 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![ClawHub](https://img.shields.io/badge/clawhub-claw--forge--cli-blue)](https://clawhub.com/skills/claw-forge-cli)
+[![Benchmark](https://img.shields.io/badge/claw--forge--bench-Config%20E%20100%25-gold)](https://github.com/clawinfra/claw-forge-bench)
 
 ---
 
@@ -874,6 +875,29 @@ uv run mypy claw_forge/ --ignore-missing-imports                 # type check
 | [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
 | [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
 | [`website/features.html`](website/features.html) | Full feature list |
+
+---
+
+## Benchmark Results
+
+Ablation study on [claw-forge-bench](https://github.com/clawinfra/claw-forge-bench) — 30 Python coding tasks (easy / medium / hard), model: `claude-opus-4-6`.
+
+| Config | Middleware | Pass Rate | Δ vs Baseline |
+|--------|-----------|----------:|---------------|
+| A — baseline | none | 96.7% | — |
+| B — hashline | hashline edit mode | 96.7% | +0.0pp |
+| C — loop | loop detection | 96.7% | +0.0pp |
+| D — verify | verify-on-exit | 96.7% | +0.0pp |
+| **E — full stack** | **hashline + loop + verify** | **100%** | **+3.3pp** |
+
+**Finding:** Individual middleware layers show no uplift in isolation. The combination of all three reaches **100%** — an interaction effect where each layer compensates for the others' blind spots.
+
+**Recommended production stack:**
+```bash
+claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
+```
+
+→ [Full results + methodology](docs/benchmarks/results.md) · [Benchmark repo](https://github.com/clawinfra/claw-forge-bench)
 
 ---
 

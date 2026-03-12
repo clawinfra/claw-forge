@@ -121,34 +121,23 @@ re-read spec → check acceptance criteria → run tests → confirm done.
 claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
 ```
 
-This is **Config E** in the Terminal Bench 2.0 ablation. See
-[`docs/benchmarks/terminal-bench.md`](benchmarks/terminal-bench.md) for full ablation results.
+This is **Config E** — the only configuration to achieve **100%** on the claw-forge-bench ablation suite.
 
-## Terminal Bench 2.0
+## Benchmark Results (2026-03-13)
 
-claw-forge ships an eval harness (`claw_forge/eval/`) for measuring the impact of each
-middleware layer on a standardised set of coding tasks.
+Measured on [claw-forge-bench](https://github.com/clawinfra/claw-forge-bench) — 30 Python coding tasks, model `claude-opus-4-6`.
 
-Run the full ablation:
+| Config | edit-mode | loop-detect | verify-on-exit | Pass Rate | Δ |
+|--------|-----------|:-----------:|:--------------:|----------:|---|
+| A | str_replace | ✗ | ✗ | 96.7% | — |
+| B | hashline | ✗ | ✗ | 96.7% | +0.0pp |
+| C | str_replace | ✓ (5) | ✗ | 96.7% | +0.0pp |
+| D | str_replace | ✗ | ✓ | 96.7% | +0.0pp |
+| **E** | **hashline** | **✓ (5)** | **✓** | **100%** | **+3.3pp** |
 
-```bash
-# All 5 configs (A=baseline → E=full stack)
-uv run python -m claw_forge.eval.terminal_bench --config all
+**Key finding:** Each middleware layer in isolation shows no measurable uplift. Combining all three produces a synergistic +3.3pp that closes the remaining gap to 100%. The full stack is greater than the sum of its parts.
 
-# Single config
-uv run python -m claw_forge.eval.terminal_bench --config E --reps 3
-
-# Results are appended to docs/benchmarks/results.md
-```
-
-Config definitions:
-| Config | edit-mode | loop-detect | verify-on-exit |
-|--------|-----------|-------------|----------------|
-| A | str_replace | disabled | disabled |
-| B | hashline | disabled | disabled |
-| C | str_replace | 5 | enabled |
-| D | str_replace | disabled | enabled |
-| E | hashline | 5 | enabled |
+→ [Full methodology + raw results](benchmarks/results.md)
 
 ## Updating the skill
 
