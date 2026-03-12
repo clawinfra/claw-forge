@@ -375,6 +375,16 @@ def run(
             "Disable for fast iteration / debugging. [default: enabled]"
         ),
     ),
+    auto_push: str | None = typer.Option(
+        None, "--auto-push",
+        help=(
+            "Automatically git push to remote after agent completion.\n"
+            "Value: path to git repo (uses 'origin' by default), or 'path:remote' to\n"
+            "specify a custom remote. Example: --auto-push /path/to/repo\n"
+            "or --auto-push /path/to/repo:upstream\n"
+            "Skipped silently if remote doesn't exist. [default: disabled]"
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -437,6 +447,13 @@ def run(
     # verify_on_exit: CLI flag takes priority; config is fallback for the True default
     _config_verify = cfg.get("agent", {}).get("verify_on_exit", True)
     effective_verify_on_exit: bool = verify_on_exit and bool(_config_verify)
+
+    # auto_push: CLI flag takes priority; config fallback
+    effective_auto_push: str | None = auto_push
+    if effective_auto_push is None:
+        _config_auto_push = cfg.get("agent", {}).get("auto_push")
+        if _config_auto_push:
+            effective_auto_push = str(_config_auto_push)
 
     resolved = resolve_model(model, cfg)
     if resolved.alias_resolved:
@@ -810,6 +827,7 @@ def run(
                                     edit_mode=edit_mode,
                                     loop_detect_threshold=loop_detect_threshold,
                                     verify_on_exit=effective_verify_on_exit,
+                                    auto_push=effective_auto_push,
                                 )
 
                                 options = ClaudeAgentOptions(

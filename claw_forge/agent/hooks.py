@@ -298,6 +298,69 @@ async def subagent_stop_hook(
     )
 
 
+# ── Auto-push hook factory ────────────────────────────────────────────────────
+
+
+def auto_push_hook(project_dir: str, remote: str = "origin") -> Any:
+    """Return a Stop hook that pushes to remote after agent completion.
+
+    Only pushes if:
+    - The project directory is a git repository
+    - The specified remote exists
+    - There is at least one commit ahead of remote
+
+    Args:
+        project_dir: Absolute path to the git repository.
+        remote: Remote name to push to (default: "origin").
+    """
+    from pathlib import Path
+
+    from claw_forge.git.commits import has_remote, push_to_remote
+
+    async def _auto_push_hook(
+        input_data: HookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> SyncHookJSONOutput:
+        project_path = Path(project_dir)
+
+        if not (project_path / ".git").is_dir():
+            print(f"[AutoPush] Skipped — {project_dir} is not a git repository")
+            return SyncHookJSONOutput(
+                hookSpecificOutput={  # type: ignore[typeddict-item,misc]
+                    "hookEventName": "Stop",
+                    "additionalContext": "",
+                }
+            )
+
+        if not has_remote(project_path, remote):
+            print(f"[AutoPush] Skipped — remote '{remote}' not found")
+            return SyncHookJSONOutput(
+                hookSpecificOutput={  # type: ignore[typeddict-item,misc]
+                    "hookEventName": "Stop",
+                    "additionalContext": "",
+                }
+            )
+
+        result = push_to_remote(project_path, remote=remote)
+        if result["success"]:
+            print(f"[AutoPush] ✅ Pushed {result['branch']} → {remote}")
+        else:
+            print(f"[AutoPush] ⚠️  Push failed: {result['error']}")
+
+        return SyncHookJSONOutput(
+            hookSpecificOutput={  # type: ignore[typeddict-item,misc]
+                "hookEventName": "Stop",
+                "additionalContext": (
+                    f"[AutoPush] {'✅ Pushed' if result['success'] else '⚠️ Push failed'}: "
+                    f"{result.get('branch', '')} → {remote}"
+                ),
+            }
+        )
+
+    return _auto_push_hook
+
+
 # ── Hashline hook factories ───────────────────────────────────────────────────
 
 
@@ -448,6 +511,7 @@ def get_default_hooks(
     edit_mode: str = "str_replace",
     loop_detect_threshold: int = 5,
     verify_on_exit: bool = True,
+    auto_push: str | None = None,
 ) -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
@@ -469,12 +533,18 @@ def get_default_hooks(
     When verify_on_exit is True, also includes:
     - Stop: PreCompletionChecklistMiddleware (force verification before exit)
 
+    When auto_push is set, also includes:
+    - Stop: auto-push hook (git push to remote after agent completion)
+
     Args:
         edit_mode: "str_replace" (default) or "hashline".
         loop_detect_threshold: Max edits to a single file before injecting
             a warning. Default 5. Set to 0 to disable.
         verify_on_exit: If True (default), include the PreCompletionChecklistMiddleware
             Stop hook to force verification before agent exit.
+        auto_push: If set, path to the git project dir — pushes to origin after
+            agent completion. Format: "/path/to/repo" or "/path/to/repo:remote-name".
+            Set to None (default) to disable.
     """
     pre_tool_use_hooks: list[Any] = [
         HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
@@ -514,9 +584,22 @@ def get_default_hooks(
         ],
     }
 
+    stop_hooks: list[Any] = []
+
     if verify_on_exit:
         from claw_forge.agent.middleware.pre_completion import pre_completion_checklist_hook
 
-        hooks_dict["Stop"] = [HookMatcher(hooks=[pre_completion_checklist_hook()])]
+        stop_hooks.append(HookMatcher(hooks=[pre_completion_checklist_hook()]))
+
+    if auto_push is not None:
+        # Format: "/path/to/repo" or "/path/to/repo:remote-name"
+        if ":" in auto_push and not auto_push.startswith("//:"):
+            _push_path, _push_remote = auto_push.rsplit(":", 1)
+        else:
+            _push_path, _push_remote = auto_push, "origin"
+        stop_hooks.append(HookMatcher(hooks=[auto_push_hook(_push_path, _push_remote)]))
+
+    if stop_hooks:
+        hooks_dict["Stop"] = stop_hooks
 
     return hooks_dict

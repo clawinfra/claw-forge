@@ -48,6 +48,41 @@ def commit_checkpoint(
     return {"commit_hash": short_hash, "branch": branch}
 
 
+def push_to_remote(
+    project_dir: Path,
+    *,
+    remote: str = "origin",
+    branch: str | None = None,
+) -> dict[str, Any]:
+    """Push current branch to remote.
+
+    Args:
+        project_dir: Path to the git repository.
+        remote: Remote name (default: "origin").
+        branch: Branch to push. If None, uses current branch.
+
+    Returns:
+        Dict with keys: remote, branch, success, error (if failed).
+    """
+    if branch is None:
+        branch = current_branch(project_dir)
+
+    try:
+        _run_git(["push", remote, branch], project_dir)
+        return {"remote": remote, "branch": branch, "success": True, "error": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"remote": remote, "branch": branch, "success": False, "error": str(exc)}
+
+
+def has_remote(project_dir: Path, remote: str = "origin") -> bool:
+    """Return True if the given remote exists in the repository."""
+    try:
+        result = _run_git(["remote"], project_dir)
+        return remote in result.stdout.strip().splitlines()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def task_history(
     project_dir: Path,
     *,
