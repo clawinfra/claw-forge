@@ -960,3 +960,72 @@ HASHLINE_EDIT_END
         assert EditOpKind.REPLACE == "replace"
         assert EditOpKind.INSERT_AFTER == "insert_after"
         assert EditOpKind.DELETE == "delete"
+
+
+
+
+class TestHashlineCoverageEdgeCases:
+    """Tests to hit uncovered lines in hashline.py for the coverage gate."""
+
+    def test_apply_edits_delete_all_lines_returns_empty(self) -> None:
+        """Deleting every line should return empty string (covers line 199→160 branch)."""
+        content = "only line\n"
+        annotated = annotate(content)
+        h = annotated.split("|")[0]
+        op = EditOp(kind=EditOpKind.DELETE, hash_ref=h, new_content="")
+        result = apply_edits(content, [op])
+        assert result == ""
+
+    def test_write_file_with_edits_is_dir_raises(self, tmp_path: Path) -> None:
+        """write_file_with_edits raises IsADirectoryError when path is a dir (covers line 261)."""
+        op = EditOp(kind=EditOpKind.REPLACE, hash_ref="abc", new_content="x")
+        with pytest.raises(IsADirectoryError):
+            write_file_with_edits(str(tmp_path), [op])
+
+    def test_parse_edit_ops_delete_op(self) -> None:
+        """parse_edit_ops correctly parses a DELETE operation (covers line 437→381)."""
+        content = "line one\nline two\n"
+        annotated = annotate(content)
+        h1 = annotated.split("\n")[0].split("|")[0]
+        text = f"HASHLINE_EDIT file.py\nDELETE {h1}\nEND\nHASHLINE_EDIT_END\n"
+        ops = parse_edit_ops(text)
+        assert len(ops) == 1
+        assert ops[0].kind == EditOpKind.DELETE
+        assert ops[0].hash_ref == h1
+        assert ops[0].new_content == ""
+
+    def test_parse_edit_ops_short_line_skipped(self) -> None:
+        """Lines with < 2 parts inside a block are skipped (covers lines 390-391)."""
+        content = "foo\n"
+        annotated = annotate(content)
+        h = annotated.split("|")[0]
+        # The bare 'REPLACE' (no hash) should be skipped; the valid one should parse
+        text = (
+            f"HASHLINE_EDIT file.py\n"
+            f"REPLACE\n"           # malformed — single token, skipped
+            f"REPLACE {h}\n"
+            f"new foo\n"
+            f"END\n"
+            f"HASHLINE_EDIT_END\n"
+        )
+        ops = parse_edit_ops(text)
+        assert len(ops) == 1
+        assert ops[0].hash_ref == h
+
+    def test_parse_edit_ops_trailing_blank_content_stripped(self) -> None:
+        """Trailing blank lines in replacement content are stripped (covers line 425)."""
+        content = "bar\n"
+        annotated = annotate(content)
+        h = annotated.split("|")[0]
+        text = (
+            f"HASHLINE_EDIT file.py\n"
+            f"REPLACE {h}\n"
+            f"new bar\n"
+            f"\n"
+            f"\n"
+            f"END\n"
+            f"HASHLINE_EDIT_END\n"
+        )
+        ops = parse_edit_ops(text)
+        assert len(ops) == 1
+        assert ops[0].new_content == "new bar"
