@@ -398,8 +398,10 @@ def hashline_edit_hook() -> Any:
 
             file_path = match.group(1)
             p = _Path(file_path)
-            if not p.is_absolute() and context and hasattr(context, "cwd"):
-                p = _Path(context.cwd) / file_path
+            if not p.is_absolute():
+                _cwd: str | None = getattr(context, "cwd", None)
+                if _cwd:
+                    p = _Path(_cwd) / file_path
 
             original = p.read_text(encoding="utf-8") if p.exists() else ""
             apply_edits(original, ops)  # validate; actual write via write_file_with_edits
