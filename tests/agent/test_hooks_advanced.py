@@ -322,3 +322,144 @@ class TestDefaultHooksIncludesNewHooks:
     def test_still_has_pre_compact(self):
         hooks = get_default_hooks()
         assert "PreCompact" in hooks
+
+
+# ── Hashline hook tests ────────────────────────────────────────────────────────
+
+
+class TestHashlineReadHook:
+    """Tests for hashline_read_hook (PostToolUse annotation of file reads)."""
+
+    @pytest.mark.asyncio
+    async def test_annotates_file_content(self):
+        from claw_forge.agent.hooks import hashline_read_hook
+        hook = hashline_read_hook()
+        result = await hook({"output": "hello\nworld\n"}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PostToolUse"
+        # Should contain hash-annotated content
+        assert "|" in output["additionalContext"]
+
+    @pytest.mark.asyncio
+    async def test_passes_through_on_invalid_content(self):
+        from claw_forge.agent.hooks import hashline_read_hook
+        hook = hashline_read_hook()
+        # Empty content should still work
+        result = await hook({"output": ""}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PostToolUse"
+
+    @pytest.mark.asyncio
+    async def test_handles_non_dict_input(self):
+        from claw_forge.agent.hooks import hashline_read_hook
+        hook = hashline_read_hook()
+        result = await hook("raw string input", None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PostToolUse"
+
+
+class TestHashlineEditHook:
+    """Tests for hashline_edit_hook (PreToolUse translation of hashline edits)."""
+
+    @pytest.mark.asyncio
+    async def test_passthrough_without_hashline_marker(self):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        hook = hashline_edit_hook()
+        result = await hook({"input": "normal edit content"}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        assert output["additionalContext"] == ""
+
+    @pytest.mark.asyncio
+    async def test_validates_hashline_edits(self, tmp_path):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        from claw_forge.hashline import annotate
+        # Create a file to edit
+        f = tmp_path / "test.py"
+        f.write_text("hello\nworld\n")
+        annotated = annotate("hello\nworld\n")
+        h = annotated.split("\n")[0].split("|")[0]
+        edit_input = (
+            f"HASHLINE_EDIT {f}\n"
+            f"REPLACE {h}\n"
+            f"goodbye\n"
+            f"END\n"
+            f"HASHLINE_EDIT_END\n"
+        )
+        hook = hashline_edit_hook()
+        result = await hook({"input": edit_input}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        assert "validated" in output["additionalContext"].lower()
+
+    @pytest.mark.asyncio
+    async def test_handles_hashline_error(self):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        hook = hashline_edit_hook()
+        # Malformed block: HASHLINE_EDIT without HASHLINE_EDIT_END
+        edit_input = "HASHLINE_EDIT file.py\nREPLACE abc\nnew content\n"
+        result = await hook({"input": edit_input}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        assert "error" in output["additionalContext"].lower()
+
+    @pytest.mark.asyncio
+    async def test_no_ops_parsed(self):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        hook = hashline_edit_hook()
+        # Valid block markers but no operations inside
+        edit_input = "HASHLINE_EDIT file.py\nHASHLINE_EDIT_END\n"
+        result = await hook({"input": edit_input}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        assert output["additionalContext"] == ""
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_file_uses_empty(self, tmp_path):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        from claw_forge.hashline import compute_hash
+        hook = hashline_edit_hook()
+        fake_path = tmp_path / "nonexistent.py"
+        h = compute_hash("new line")
+        edit_input = (
+            f"HASHLINE_EDIT {fake_path}\n"
+            f"INSERT_AFTER {h}\n"
+            f"new content\n"
+            f"END\n"
+            f"HASHLINE_EDIT_END\n"
+        )
+        result = await hook({"input": edit_input}, None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        # Will fail on apply_edits since hash doesn't exist in empty file
+        assert "error" in output["additionalContext"].lower()
+
+    @pytest.mark.asyncio
+    async def test_handles_non_dict_input(self):
+        from claw_forge.agent.hooks import hashline_edit_hook
+        hook = hashline_edit_hook()
+        result = await hook("plain string", None, {})
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PreToolUse"
+        assert output["additionalContext"] == ""
+
+
+class TestGetHashlineHooks:
+    """Tests for get_hashline_hooks and get_default_hooks with edit_mode."""
+
+    def test_get_hashline_hooks_returns_list(self):
+        from claw_forge.agent.hooks import get_hashline_hooks
+        hooks = get_hashline_hooks()
+        assert isinstance(hooks, list)
+        assert len(hooks) == 2
+
+    def test_get_default_hooks_hashline_mode(self):
+        hooks = get_default_hooks(edit_mode="hashline")
+        assert "PostToolUse" in hooks
+        assert "PreToolUse" in hooks
+
+    def test_get_default_hooks_default_mode(self):
+        hooks = get_default_hooks(edit_mode="str_replace")
+        # In default mode, hashline hooks should not be present
+        # (unless other hooks are defined)
+        assert isinstance(hooks, dict)
