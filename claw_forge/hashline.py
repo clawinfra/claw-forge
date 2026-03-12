@@ -11,11 +11,11 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 
-class EditOpKind(str, Enum):
+class EditOpKind(StrEnum):
     """Types of hashline edit operations."""
 
     REPLACE = "replace"
