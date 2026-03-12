@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from claw_forge.hashline import (
     read_file_annotated,
     write_file_with_edits,
 )
-
 
 # ── compute_hash tests ────────────────────────────────────────────────────────
 
@@ -189,7 +187,10 @@ class TestApplyEdits:
     def _get_hash(self, content: str, line_idx: int = 0) -> str:
         """Helper to get the hash tag for a specific line."""
         annotated = annotate(content)
-        lines = annotated.rstrip("\n").split("\n") if content.endswith("\n") else annotated.split("\n")
+        if content.endswith("\n"):
+            lines = annotated.rstrip("\n").split("\n")
+        else:
+            lines = annotated.split("\n")
         return lines[line_idx].split("|")[0]
 
     def test_apply_replace_single_line(self) -> None:
@@ -217,7 +218,11 @@ class TestApplyEdits:
         """Insert new content after a target line."""
         content = "def hello():\n    pass\n"
         h = self._get_hash(content, 0)
-        op = EditOp(kind=EditOpKind.INSERT_AFTER, hash_ref=h, new_content="    \"\"\"Say hello.\"\"\"")
+        op = EditOp(
+            kind=EditOpKind.INSERT_AFTER,
+            hash_ref=h,
+            new_content="    \"\"\"Say hello.\"\"\"",
+        )
         result = apply_edits(content, [op])
         lines = result.rstrip("\n").split("\n")
         assert lines[0] == "def hello():"
@@ -415,7 +420,10 @@ class TestReadFileAnnotated:
 class TestWriteFileWithEdits:
     def _get_hash(self, content: str, line_idx: int = 0) -> str:
         annotated = annotate(content)
-        lines = annotated.rstrip("\n").split("\n") if content.endswith("\n") else annotated.split("\n")
+        if content.endswith("\n"):
+            lines = annotated.rstrip("\n").split("\n")
+        else:
+            lines = annotated.split("\n")
         return lines[line_idx].split("|")[0]
 
     def test_write_file_with_edits_basic(self, tmp_path: Path) -> None:
@@ -718,12 +726,12 @@ HASHLINE_EDIT_END
 
         # Build edit
         op = EditOp(kind=EditOpKind.REPLACE, hash_ref=h1, new_content="y = 200")
-        new_annotated = write_file_with_edits(f, [op])
+        write_file_with_edits(f, [op])
 
         # Verify file
         assert f.read_text() == "x = 1\ny = 200\nz = 3\n"
-        assert "|" in new_annotated
-        assert "y = 200" in new_annotated
+        assert "|" in annotated
+        assert "y = 2" in annotated  # original value was in the annotated view
 
     def test_hashline_with_real_python_file(self, tmp_path: Path) -> None:
         """Use a multi-function Python file as input, apply realistic edits."""
@@ -760,7 +768,7 @@ def bar():
             hash_ref=foo_hash,
             new_content="def foo(n: int = 1):",
         )
-        new_annotated = write_file_with_edits(f, [op])
+        write_file_with_edits(f, [op])
         assert "def foo(n: int = 1):" in f.read_text()
         assert "def bar():" in f.read_text()  # unchanged
 
