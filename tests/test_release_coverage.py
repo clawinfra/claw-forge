@@ -1108,7 +1108,7 @@ class TestInitVersionFallback:
             import claw_forge
 
             importlib.reload(claw_forge)
-            assert claw_forge.__version__ == "0.4.0"
+            assert claw_forge.__version__ == "0.4.1"
             # Reload again to restore original
             importlib.reload(claw_forge)
 
