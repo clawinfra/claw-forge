@@ -115,13 +115,23 @@ re-read spec → check acceptance criteria → run tests → confirm done.
 - `--no-verify-on-exit` disables it (useful for debugging)
 - Design doc: [`docs/middleware/pre-completion-checklist.md`](middleware/pre-completion-checklist.md)
 
-### Recommended production stack
+### Default behaviour = Config E (minus hashline)
+
+`loop_detect_threshold=5` and `verify_on_exit=True` are **on by default** — you don't need to pass them.
+The only flag to opt into is `--edit-mode hashline` (changes the edit tool format):
 
 ```bash
-claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
+# Full Config E — just one flag needed
+claw-forge run --edit-mode hashline
 ```
 
-This is **Config E** — the only configuration to achieve **100%** on the claw-forge-bench ablation suite.
+To disable middleware for fast iteration / debugging:
+
+```bash
+claw-forge run --no-verify-on-exit --loop-detect-threshold 0
+```
+
+**Config E** is the only configuration to achieve **100%** on the claw-forge-bench ablation suite.
 
 ## Benchmark Results (2026-03-13)
 

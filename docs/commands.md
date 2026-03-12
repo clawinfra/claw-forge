@@ -1500,21 +1500,29 @@ claw-forge run --auto-push /path/to/repo:upstream
 
 ---
 
-### Combining middleware
+### Combining middleware — defaults are already Config E
 
-All middleware layers compose cleanly. The recommended production stack:
-
-```bash
-claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
-```
-
-With auto-push for fully autonomous CI-free workflows:
+`loop_detect_threshold=5` and `verify_on_exit=True` are **on by default**. You get the full middleware stack without any flags:
 
 ```bash
-claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit --auto-push /path/to/repo
+# This is already Config E — loop detection + verify-on-exit are on by default
+claw-forge run --edit-mode hashline
 ```
 
-This is **Config E** — the only configuration to achieve **100%** on the claw-forge-bench ablation (30 tasks, `claude-opus-4-6`).
+The only flag you need to opt into is `--edit-mode hashline` (changes the edit tool format).
+To disable middleware for fast debugging:
+
+```bash
+claw-forge run --no-verify-on-exit --loop-detect-threshold 0
+```
+
+With auto-push for fully autonomous workflows (explicit opt-in — network write):
+
+```bash
+claw-forge run --edit-mode hashline --auto-push /path/to/repo
+```
+
+**Config E** (`hashline` + `loop-detect=5` + `verify-on-exit`) achieves **100%** on claw-forge-bench (30 tasks, `claude-opus-4-6`) — and it's the default minus one flag.
 
 See [`docs/benchmarks/results.md`](benchmarks/results.md) for full ablation results across configs A–E.
 
