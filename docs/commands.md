@@ -1427,6 +1427,42 @@ Running: claw-forge fix --report bug_report.md
 
 claw-forge ships three composable hook-based middleware layers, all activated via `claw-forge run` flags.
 
+**Key insight:** `loop_detect_threshold=5` and `verify_on_exit=True` are **on by default**. The only explicit opt-in is `--edit-mode hashline`. Running `claw-forge run --edit-mode hashline` gives you the full Config E stack.
+
+---
+
+### Hashline Edit Mode (`--edit-mode hashline`)
+
+**What it does:** Replaces exact-text `str_replace` editing with content-addressed line references. Every file the agent reads gets annotated with 3-char SHA256 hashes; the agent references lines by hash rather than reproducing their exact text.
+
+**The problem it solves:** `str_replace` requires the agent to reproduce an exact substring — whitespace, indentation and all. This fails constantly on indented code (Python, YAML, Rust), long sessions where the model's recall degrades, and weaker/faster models that hallucinate whitespace.
+
+**Benchmark impact:** 6.7% → 68.3% on Grok Code Fast. On Opus 4.6, it's what enables Config E to reach 100% (vs 96.7% without it).
+
+**When to use:**
+- Weaker or faster models (Sonnet, Haiku, local models) — removes exact-match failure mode entirely
+- Python/YAML/Rust heavy codebases — where indentation errors are common
+- Long unattended runs (CI, overnight, `--auto-push`) — no edit-rejection loops at 3 AM
+- Any production/evaluation run — it's strictly more reliable
+
+**When to skip:**
+- Debugging agent edit behaviour (hash annotations add log noise)
+- Reviewing diffs as plain patches (hashline blocks aren't unified diff format)
+- Auto-generated or minified files (annotations are noise on long lines)
+
+**Full use-case guide:** [`docs/middleware/hashline.md`](middleware/hashline.md)
+
+```bash
+# Recommended — full Config E (loop-detect + verify-on-exit are on by default)
+claw-forge run --edit-mode hashline
+
+# Stay on str_replace (middleware still runs)
+claw-forge run
+
+# Debug mode — all middleware off
+claw-forge run --no-verify-on-exit --loop-detect-threshold 0
+```
+
 ---
 
 ### LoopDetectionMiddleware (`--loop-detect-threshold`)
