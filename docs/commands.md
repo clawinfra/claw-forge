@@ -207,6 +207,8 @@ claw-forge run --edit-mode hashline
 | `--concurrency`, `-n` | int | `5` | Max agents running simultaneously |
 | `--yolo` | flag | `False` | Skip human approval gates, max concurrency, aggressive retry |
 | `--edit-mode` | string | `str_replace` | Edit tool format: `str_replace` (default) or `hashline` (content-addressed, better for weaker models) |
+| `--loop-detect-threshold` | int | `5` | Max edits to a single file before the LoopDetectionMiddleware injects a "reconsider" prompt. Set to `0` to disable. When `--edit-mode hashline` is active, threshold auto-raises by 3 (e.g. 5 → 8). |
+| `--verify-on-exit/--no-verify-on-exit` | flag | `True` | Inject a pre-completion verification checklist before the agent exits — forces re-reading the spec, running tests, and confirming correctness. Disable for fast iteration / debugging. |
 
 #### What it does internally
 1. Loads `claw-forge.yaml`, expands `${ENV_VAR}` placeholders.
@@ -1418,8 +1420,77 @@ Running: claw-forge fix --report bug_report.md
 
 ---
 
+---
+
+## Middleware Reference
+
+claw-forge ships three composable hook-based middleware layers, all activated via `claw-forge run` flags.
+
+---
+
+### LoopDetectionMiddleware (`--loop-detect-threshold`)
+
+**What it does:** Tracks how many times each file has been edited in the current agent session. When a single file exceeds the threshold, the middleware injects a structured "reconsider" prompt via the `PostToolUse` hook — breaking the agent out of doom loops before they waste tokens.
+
+**When it fires:**
+- After any `Edit` or `MultiEdit` tool use
+- When `edit_count[file] >= loop_detect_threshold`
+
+**Threshold auto-boost:** When `--edit-mode hashline` is active, the effective threshold is raised by 3 (e.g. default 5 → 8), because hashline legitimately produces more edits per file (individual line replacements).
+
+**Disabling:** `--loop-detect-threshold 0` turns it off entirely.
+
+**Design doc:** [`docs/middleware/loop-detection.md`](middleware/loop-detection.md)
+
+```bash
+# Use with a tighter threshold (high-risk project, big files)
+claw-forge run --loop-detect-threshold 3
+
+# Disable loop detection entirely (fast iteration mode)
+claw-forge run --loop-detect-threshold 0
+```
+
+---
+
+### PreCompletionChecklistMiddleware (`--verify-on-exit / --no-verify-on-exit`)
+
+**What it does:** Intercepts the `Stop` event before the agent exits and injects a structured verification checklist. The agent must re-read the task spec, confirm all acceptance criteria are met, run tests, and explicitly state it has verified — before the session closes.
+
+**Effect:** Dramatically reduces "ships passing but incomplete" — agents that claim done without actually checking.
+
+**Disabling:** `--no-verify-on-exit` skips the checklist entirely (useful during debugging).
+
+**Design doc:** [`docs/middleware/pre-completion-checklist.md`](middleware/pre-completion-checklist.md)
+
+```bash
+# Default — checklist runs on every exit
+claw-forge run
+
+# Disable for fast iterative runs where you'll verify manually
+claw-forge run --no-verify-on-exit
+```
+
+---
+
+### Combining middleware
+
+All three middleware layers (hashline edit mode + loop detection + pre-completion checklist) compose cleanly. The recommended production stack:
+
+```bash
+claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
+```
+
+This is **Config E** in Terminal Bench 2.0 terminology — the full middleware stack.
+
+See [`docs/benchmarks/terminal-bench.md`](benchmarks/terminal-bench.md) for ablation results across configs A–E.
+
+---
+
 ## See Also
 
 - [docs/workflows.md](workflows.md) — End-to-end workflow walkthroughs
 - [docs/brownfield.md](brownfield.md) — Brownfield mode deep dive
+- [docs/middleware/loop-detection.md](middleware/loop-detection.md) — LoopDetectionMiddleware design
+- [docs/middleware/pre-completion-checklist.md](middleware/pre-completion-checklist.md) — PreCompletionChecklistMiddleware design
+- [docs/benchmarks/terminal-bench.md](benchmarks/terminal-bench.md) — Terminal Bench 2.0 eval harness
 - [README.md](../README.md) — Project overview and quick start

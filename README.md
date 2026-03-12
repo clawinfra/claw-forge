@@ -516,7 +516,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 |---------|-------------|-----------|
 | `claw-forge init` | Bootstrap project — scaffold `.claude/`, config, `app_spec.example.xml` | `--project`, `--config` |
 | `claw-forge plan` | Parse spec → feature DAG in state DB | `spec` (positional), `--model`, `--concurrency` |
-| `claw-forge run` | Start agent pool, dispatch features in parallel | `--concurrency`, `--model`, `--yolo` |
+| `claw-forge run` | Start agent pool, dispatch features in parallel | `--concurrency`, `--model`, `--yolo`, `--edit-mode`, `--loop-detect-threshold`, `--verify-on-exit` |
 | `claw-forge add` | Add features to existing project (single or brownfield spec) | `--spec`, `--branch/--no-branch` |
 | `claw-forge fix` | TDD bug-fix: write failing test → fix → regression suite | `--report`, `--branch/--no-branch` |
 | `claw-forge status` | Project progress, phase bars, active agents, next action | `--config` |
@@ -886,8 +886,8 @@ Any AI agent running on OpenClaw can use it to run the full claw-forge workflow 
 clawhub install claw-forge-cli
 ```
 
-See [`docs/agent-skill.md`](docs/agent-skill.md) for details on the `--edit-mode hashline` benchmark,
-when to use it, and how the skill integrates with OpenClaw.
+See [`docs/agent-skill.md`](docs/agent-skill.md) for details on `--edit-mode hashline`,
+the middleware stack, Terminal Bench ablation numbers, and how the skill integrates with OpenClaw.
 
 ---
 
