@@ -447,6 +447,7 @@ def get_hashline_hooks() -> list[Any]:
 def get_default_hooks(
     edit_mode: str = "str_replace",
     loop_detect_threshold: int = 5,
+    verify_on_exit: bool = True,
 ) -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
@@ -465,10 +466,15 @@ def get_default_hooks(
     When loop_detect_threshold > 0, also includes:
     - PostToolUse: loop detection middleware (doom-loop warning injection)
 
+    When verify_on_exit is True, also includes:
+    - Stop: PreCompletionChecklistMiddleware (force verification before exit)
+
     Args:
         edit_mode: "str_replace" (default) or "hashline".
         loop_detect_threshold: Max edits to a single file before injecting
             a warning. Default 5. Set to 0 to disable.
+        verify_on_exit: If True (default), include the PreCompletionChecklistMiddleware
+            Stop hook to force verification before agent exit.
     """
     pre_tool_use_hooks: list[Any] = [
         HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
@@ -491,7 +497,7 @@ def get_default_hooks(
         )
         post_tool_use_hooks.append(HookMatcher(hooks=[_loop_hook_fn]))
 
-    return {
+    hooks_dict: dict[str, Any] = {
         "PreToolUse": pre_tool_use_hooks,
         "PreCompact": [
             HookMatcher(hooks=[pre_compact_hook]),
@@ -507,3 +513,10 @@ def get_default_hooks(
             HookMatcher(hooks=[subagent_stop_hook]),
         ],
     }
+
+    if verify_on_exit:
+        from claw_forge.agent.middleware.pre_completion import pre_completion_checklist_hook
+
+        hooks_dict["Stop"] = [HookMatcher(hooks=[pre_completion_checklist_hook()])]
+
+    return hooks_dict

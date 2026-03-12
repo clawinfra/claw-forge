@@ -31,6 +31,7 @@ async def run_agent(
     project_dir: Path | None = None,
     hooks: dict[HookEvent, list[HookMatcher]] | None = None,
     edit_mode: str = "str_replace",
+    verify_on_exit: bool = True,
     # ── New SDK options ──────────────────────────────────────────────────
     thinking: ThinkingConfig | None = None,
     output_format: dict[str, Any] | None = None,
@@ -82,6 +83,8 @@ async def run_agent(
             files and auto-inject matching LSP skill plugins. Defaults to True.
         auto_inject_skills: If True, automatically inject non-LSP skills based on
             agent_type and keywords found in the prompt. Defaults to True.
+        verify_on_exit: If True (default), include PreCompletionChecklistMiddleware in the
+            Stop hooks. Forces verification before agent exit. Pass False to disable.
         edit_mode: Edit mode for file operations. "str_replace" (default) uses exact
             text matching; "hashline" uses content-addressed line tagging for robust
             editing on weaker models.
@@ -100,7 +103,7 @@ async def run_agent(
 
     # Use hashline hooks when in hashline mode
     if hooks is None:
-        hooks = get_default_hooks(edit_mode=edit_mode)  # type: ignore[assignment]
+        hooks = get_default_hooks(edit_mode=edit_mode, verify_on_exit=verify_on_exit)  # type: ignore[assignment]
 
     # Apply provider config overrides via environment variables
     if provider_config:

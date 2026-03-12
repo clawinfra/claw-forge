@@ -367,6 +367,14 @@ def run(
             "[default: 5]"
         ),
     ),
+    verify_on_exit: bool = typer.Option(
+        True, "--verify-on-exit/--no-verify-on-exit",
+        help=(
+            "Inject a pre-completion verification checklist before the agent exits.\n"
+            "Forces re-reading the task spec, running tests, and confirming correctness.\n"
+            "Disable for fast iteration / debugging. [default: enabled]"
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -425,6 +433,10 @@ def run(
     if loop_detect_threshold < 0:
         console.print("[red]--loop-detect-threshold must be ≥ 0[/red]")
         raise typer.Exit(1) from None
+
+    # verify_on_exit: CLI flag takes priority; config is fallback for the True default
+    _config_verify = cfg.get("agent", {}).get("verify_on_exit", True)
+    effective_verify_on_exit: bool = verify_on_exit and bool(_config_verify)
 
     resolved = resolve_model(model, cfg)
     if resolved.alias_resolved:
@@ -794,9 +806,10 @@ def run(
                                     if _oauth_tok:
                                         sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
 
-                                _hooks = _ghooks(
+                                agent_hooks = _ghooks(
                                     edit_mode=edit_mode,
                                     loop_detect_threshold=loop_detect_threshold,
+                                    verify_on_exit=effective_verify_on_exit,
                                 )
 
                                 options = ClaudeAgentOptions(
@@ -804,7 +817,7 @@ def run(
                                     cwd=str(project_path),
                                     env=sdk_env,
                                     permission_mode="bypassPermissions",
-                                    hooks=_hooks,  # type: ignore[arg-type]
+                                    hooks=agent_hooks,  # type: ignore[arg-type]
                                 )
 
                             # OUTSIDE LOCK: connect + run (parallel with other agents)
