@@ -444,7 +444,10 @@ def get_hashline_hooks() -> list[Any]:
 # ── Default hooks factory ─────────────────────────────────────────────────────
 
 
-def get_default_hooks(edit_mode: str = "str_replace") -> dict[str, Any]:
+def get_default_hooks(
+    edit_mode: str = "str_replace",
+    loop_detect_threshold: int = 5,
+) -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
     Includes:
@@ -459,8 +462,13 @@ def get_default_hooks(edit_mode: str = "str_replace") -> dict[str, Any]:
     - PostToolUse/Read: hashline annotation of file content
     - PreToolUse/Edit: hashline edit translation
 
+    When loop_detect_threshold > 0, also includes:
+    - PostToolUse: loop detection middleware (doom-loop warning injection)
+
     Args:
         edit_mode: "str_replace" (default) or "hashline".
+        loop_detect_threshold: Max edits to a single file before injecting
+            a warning. Default 5. Set to 0 to disable.
     """
     pre_tool_use_hooks: list[Any] = [
         HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
@@ -472,6 +480,16 @@ def get_default_hooks(edit_mode: str = "str_replace") -> dict[str, Any]:
     if edit_mode == "hashline":
         pre_tool_use_hooks.append(HookMatcher(matcher="Edit", hooks=[hashline_edit_hook()]))
         post_tool_use_hooks.append(HookMatcher(matcher="Read", hooks=[hashline_read_hook()]))
+
+    # ── Loop detection middleware ──────────────────────────────────────────────
+    if loop_detect_threshold != 0:
+        from claw_forge.agent.middleware.loop_detection import loop_detection_hook
+
+        _loop_hook_fn, _loop_ctx = loop_detection_hook(
+            threshold=loop_detect_threshold,
+            edit_mode=edit_mode,
+        )
+        post_tool_use_hooks.append(HookMatcher(hooks=[_loop_hook_fn]))
 
     return {
         "PreToolUse": pre_tool_use_hooks,
