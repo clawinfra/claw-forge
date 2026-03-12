@@ -7,9 +7,10 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
-[![Tests](https://img.shields.io/badge/tests-1063%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Tests](https://img.shields.io/badge/tests-1584%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![ClawHub](https://img.shields.io/badge/clawhub-claw--forge--cli-blue)](https://clawhub.com/skills/claw-forge-cli)
 
 ---
 
@@ -861,12 +862,29 @@ uv run mypy claw_forge/ --ignore-missing-imports                 # type check
 | Document | Contents |
 |---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, data flow, component details |
+| [`docs/commands.md`](docs/commands.md) | Full CLI command reference with options and examples |
+| [`docs/workflows.md`](docs/workflows.md) | End-to-end workflow walkthroughs |
 | [`docs/sdk-api-guide.md`](docs/sdk-api-guide.md) | 20 Claude Agent SDK APIs with claw-forge examples |
 | [`docs/bmad-integration.md`](docs/bmad-integration.md) | Using claw-forge with BMAD Method — convert epics/stories to spec |
 | [`docs/brownfield.md`](docs/brownfield.md) | Brownfield mode — analyze existing codebases, add features, fix bugs |
+| [`docs/agent-skill.md`](docs/agent-skill.md) | OpenClaw agent skill — install via `clawhub install claw-forge-cli` |
 | [`claw-forge.yaml`](claw-forge.yaml) | Annotated configuration reference |
 | [`website/tutorial.html`](website/tutorial.html) | End-to-end getting started guide |
 | [`website/features.html`](website/features.html) | Full feature list |
+
+---
+
+## OpenClaw Agent Skill
+
+claw-forge is available as an installable **OpenClaw agent skill** on [ClawHub](https://clawhub.com/skills/claw-forge-cli).
+Any AI agent running on OpenClaw can use it to run the full claw-forge workflow autonomously.
+
+```bash
+clawhub install claw-forge-cli
+```
+
+See [`docs/agent-skill.md`](docs/agent-skill.md) for details on the `--edit-mode hashline` benchmark,
+when to use it, and how the skill integrates with OpenClaw.
 
 ---
 
