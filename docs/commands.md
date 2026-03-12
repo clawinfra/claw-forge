@@ -209,6 +209,7 @@ claw-forge run --edit-mode hashline
 | `--edit-mode` | string | `str_replace` | Edit tool format: `str_replace` (default) or `hashline` (content-addressed, better for weaker models) |
 | `--loop-detect-threshold` | int | `5` | Max edits to a single file before the LoopDetectionMiddleware injects a "reconsider" prompt. Set to `0` to disable. When `--edit-mode hashline` is active, threshold auto-raises by 3 (e.g. 5 → 8). |
 | `--verify-on-exit/--no-verify-on-exit` | flag | `True` | Inject a pre-completion verification checklist before the agent exits — forces re-reading the spec, running tests, and confirming correctness. Disable for fast iteration / debugging. |
+| `--auto-push` | string | `None` (disabled) | Automatically `git push` to remote after agent completion. Value: path to git repo (uses `origin` by default), or `path:remote` for a custom remote. Skipped silently if the path is not a git repo or the remote doesn't exist. **Off by default — must be explicitly opted in.** |
 
 #### What it does internally
 1. Loads `claw-forge.yaml`, expands `${ENV_VAR}` placeholders.
@@ -1472,12 +1473,45 @@ claw-forge run --no-verify-on-exit
 
 ---
 
+### AutoPush (`--auto-push`)
+
+**What it does:** After the agent session completes, runs `git push` to push the agent's commits to a remote.
+
+**Default: disabled.** Must be explicitly opted in — never pushes without `--auto-push` being set.
+
+**Guards (all must pass before pushing):**
+1. Path must be a git repository (has `.git/`)
+2. Specified remote must exist (`git remote` check)
+3. Push failure is caught and logged — never crashes the session
+
+```bash
+# Push to origin (default remote)
+claw-forge run --auto-push /path/to/repo
+
+# Push to a custom remote
+claw-forge run --auto-push /path/to/repo:upstream
+
+# Via claw-forge.yaml config (also off by default)
+# [agent]
+# auto_push = "/path/to/repo"
+```
+
+**Design doc:** [`docs/middleware/pre-completion-checklist.md`](middleware/pre-completion-checklist.md)
+
+---
+
 ### Combining middleware
 
-All three middleware layers (hashline edit mode + loop detection + pre-completion checklist) compose cleanly. The recommended production stack:
+All middleware layers compose cleanly. The recommended production stack:
 
 ```bash
 claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit
+```
+
+With auto-push for fully autonomous CI-free workflows:
+
+```bash
+claw-forge run --edit-mode hashline --loop-detect-threshold 5 --verify-on-exit --auto-push /path/to/repo
 ```
 
 This is **Config E** — the only configuration to achieve **100%** on the claw-forge-bench ablation (30 tasks, `claude-opus-4-6`).
