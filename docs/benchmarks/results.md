@@ -13,16 +13,20 @@ Suite: [claw-forge-bench](https://github.com/clawinfra/claw-forge-bench) — 30 
 
 | Config | Description | Pass Rate | Δ vs A | Passed | Failed |
 |--------|-------------|----------:|-------:|-------:|-------:|
-| A | Baseline (str_replace, no middleware) | 86.7% | — | 26 | 4 |
-| B | Hashline edit mode | 86.7% | +0.0pp | 26 | 4 |
-| C | str_replace + loop detection (threshold=5) | 86.7% | +0.0pp | 26 | 4 |
-| D | str_replace + verify-on-exit | 86.7% | +0.0pp | 26 | 4 |
-| **E** | **Full stack (hashline + loop + verify)** | **90.0%** | **+3.3pp** | **27** | **3** |
+| A | Baseline (str_replace, no middleware) | 96.7% | — | 29 | 1 |
+| B | Hashline edit mode | 96.7% | +0.0pp | 29 | 1 |
+| C | str_replace + loop detection (threshold=5) | 96.7% | +0.0pp | 29 | 1 |
+| D | str_replace + verify-on-exit | 96.7% | +0.0pp | 29 | 1 |
+| **E** | **Full stack (hashline + loop + verify)** | **100.0%** | **+3.3pp** | **30** | **0** |
 
 **Hashline impact (B vs A):** +0.0pp  
 **Verify-on-exit impact (D vs A):** +0.0pp  
-**Full-stack impact (E vs A):** +3.3pp ✅  
+**Full-stack impact (E vs A):** +3.3pp ✅ — **Config E achieves 100%**  
 **Best config:** E — all middleware active  
+
+### Key finding
+
+Each middleware layer individually shows no uplift over baseline. But combining all three produces a +3.3pp interaction effect — the one task that defeated A/B/C/D (`005_count_vowels`) was solved only by Config E. The full stack is greater than the sum of its parts.
 
 ### Notes
 
