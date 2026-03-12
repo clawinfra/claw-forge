@@ -190,6 +190,10 @@ claw-forge run --model claude-opus-4-20250514
 
 # Use a different config (e.g. high-priority providers)
 claw-forge run --config claw-forge.premium.yaml
+
+# Use hashline edit mode — dramatically improves weaker models
+# (6.7% → 68.3% benchmark on Grok Code Fast, see docs/agent-skill.md)
+claw-forge run --edit-mode hashline
 ```
 
 #### Options
@@ -202,6 +206,7 @@ claw-forge run --config claw-forge.premium.yaml
 | `--model`, `-m` | string | `claude-sonnet-4-20250514` | Model identifier for coding agents |
 | `--concurrency`, `-n` | int | `5` | Max agents running simultaneously |
 | `--yolo` | flag | `False` | Skip human approval gates, max concurrency, aggressive retry |
+| `--edit-mode` | string | `str_replace` | Edit tool format: `str_replace` (default) or `hashline` (content-addressed, better for weaker models) |
 
 #### What it does internally
 1. Loads `claw-forge.yaml`, expands `${ENV_VAR}` placeholders.
