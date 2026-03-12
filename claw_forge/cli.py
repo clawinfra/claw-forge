@@ -804,7 +804,7 @@ def run(
                                     cwd=str(project_path),
                                     env=sdk_env,
                                     permission_mode="bypassPermissions",
-                                    hooks=_hooks,
+                                    hooks=_hooks,  # type: ignore[arg-type]
                                 )
 
                             # OUTSIDE LOCK: connect + run (parallel with other agents)
