@@ -5,4 +5,4 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("claw-forge")
 except Exception:  # package not installed (e.g. editable dev mode without install)
-    __version__ = "0.0.0.dev0"
+    __version__ = "0.4.0"
