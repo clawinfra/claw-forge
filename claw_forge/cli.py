@@ -348,6 +348,15 @@ def run(
         False, "--dry-run",
         help="Print tasks in dependency order without executing.",
     ),
+    edit_mode: str = typer.Option(
+        "str_replace", "--edit-mode",
+        help=(
+            "Edit tool mode for agent file operations.\n"
+            "  str_replace: current default (exact text matching)\n"
+            "  hashline: content-addressed line tagging (better for weak models)\n"
+            "[default: str_replace]"
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -383,7 +392,21 @@ def run(
         _project_config = Path(project) / config
         if _project_config.exists():
             config = str(_project_config)
+    # Validate edit_mode
+    _valid_edit_modes = ("str_replace", "hashline")
+    if edit_mode not in _valid_edit_modes:
+        console.print(
+            f"[red]Invalid --edit-mode '{edit_mode}'. "
+            f"Choose from: {', '.join(_valid_edit_modes)}[/red]"
+        )
+        raise typer.Exit(1) from None
+
+    # Allow config file to set edit_mode (CLI flag takes priority)
     cfg = _load_config(config)
+    _config_edit_mode = cfg.get("agent", {}).get("edit_mode", "str_replace")
+    if edit_mode == "str_replace" and _config_edit_mode == "hashline":
+        edit_mode = _config_edit_mode
+
     resolved = resolve_model(model, cfg)
     if resolved.alias_resolved:
         console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
@@ -394,6 +417,8 @@ def run(
     console.print(f"Project: {project}")
     console.print(f"Task: {task}")
     console.print(f"Model: {model}")
+    if edit_mode == "hashline":
+        console.print(f"Edit mode: [cyan]{edit_mode}[/cyan]  (content-addressed line tagging)")
     console.print(f"Providers: {len(cfg.get('providers', {}))}")
     if shutil.which("claude"):
         console.print("Executor:  claude CLI (autonomous agent — writes files) ✅")

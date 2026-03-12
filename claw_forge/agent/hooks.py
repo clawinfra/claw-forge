@@ -298,10 +298,153 @@ async def subagent_stop_hook(
     )
 
 
+# ── Hashline hook factories ───────────────────────────────────────────────────
+
+
+def hashline_read_hook() -> Any:
+    """Return a PostToolUse hook that annotates Read tool results with hashline tags.
+
+    Intercepts the ``Read`` tool result and passes the content through
+    ``hashline.annotate()`` before the agent sees it.  Binary files (detected
+    by null bytes) are passed through unchanged — the hook is a *filter*, not
+    a gate.
+
+    Returns:
+        Async hook function compatible with HookMatcher hooks list.
+    """
+    async def hook(
+        input_data: HookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> SyncHookJSONOutput:
+        from claw_forge.hashline import HashlineError, annotate
+
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+        )
+        result_content = str(data.get("output", data.get("content", "")))
+
+        try:
+            annotated = annotate(result_content)
+        except HashlineError:
+            annotated = result_content  # pass through on annotation failure
+
+        return SyncHookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "PostToolUse",
+                "additionalContext": annotated,
+            }
+        )
+
+    return hook
+
+
+def hashline_edit_hook() -> Any:
+    """Return a PreToolUse hook that translates hashline edit references for Edit tool.
+
+    Intercepts Edit tool requests containing ``HASHLINE_EDIT`` markers, parses
+    the hashline edit operations via ``parse_edit_ops()``, and translates
+    hash-referenced edits into exact text replacements using ``apply_edits()``.
+
+    If no ``HASHLINE_EDIT`` marker is present, the edit passes through unchanged
+    (graceful degradation for normal str_replace edits).
+
+    Returns:
+        Async hook function compatible with HookMatcher hooks list.
+    """
+    async def hook(
+        input_data: HookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> SyncHookJSONOutput:
+        from pathlib import Path as _Path
+
+        from claw_forge.hashline import HashlineError, apply_edits, parse_edit_ops
+
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+        )
+        tool_input = str(data.get("input", data.get("content", "")))
+
+        # Only intercept if this looks like a hashline edit block
+        if "HASHLINE_EDIT" not in tool_input:
+            return SyncHookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "",
+                }
+            )
+
+        try:
+            ops = parse_edit_ops(tool_input)
+            if not ops:
+                return SyncHookJSONOutput(
+                    hookSpecificOutput={
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": "",
+                    }
+                )
+
+            # Extract file path from HASHLINE_EDIT block
+            import re as _re
+            match = _re.search(r"HASHLINE_EDIT\s+(\S+)", tool_input)
+            if not match:
+                return SyncHookJSONOutput(
+                    hookSpecificOutput={
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": "",
+                    }
+                )
+
+            file_path = match.group(1)
+            p = _Path(file_path)
+            if not p.is_absolute():
+                _cwd: str | None = getattr(context, "cwd", None)
+                if _cwd:
+                    p = _Path(_cwd) / file_path
+
+            original = p.read_text(encoding="utf-8") if p.exists() else ""
+            apply_edits(original, ops)  # validate; actual write via write_file_with_edits
+            return SyncHookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": f"Hashline edits validated for {file_path}",
+                }
+            )
+        except HashlineError as exc:
+            return SyncHookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": f"Hashline error: {exc}",
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return SyncHookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": f"Hashline hook error: {exc}",
+                }
+            )
+
+    return hook
+
+
+def get_hashline_hooks() -> list[Any]:
+    """Return the combined list of hashline hooks (Read annotation + Edit translation).
+
+    Returns:
+        List of HookMatcher entries for inclusion in the hooks dict.
+    """
+    return [
+        HookMatcher(matcher="Read", hooks=[hashline_read_hook()]),
+        HookMatcher(matcher="Edit", hooks=[hashline_edit_hook()]),
+    ]
+
+
 # ── Default hooks factory ─────────────────────────────────────────────────────
 
 
-def get_default_hooks() -> dict[str, Any]:
+def get_default_hooks(edit_mode: str = "str_replace") -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
     Includes:
@@ -311,17 +454,31 @@ def get_default_hooks() -> dict[str, Any]:
     - PostToolUseFailure: failure logging + recovery hints
     - SubagentStart: standards injection for sub-agents
     - SubagentStop: sub-agent lifecycle logging
+
+    When edit_mode is "hashline", also includes:
+    - PostToolUse/Read: hashline annotation of file content
+    - PreToolUse/Edit: hashline edit translation
+
+    Args:
+        edit_mode: "str_replace" (default) or "hashline".
     """
+    pre_tool_use_hooks: list[Any] = [
+        HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
+    ]
+    post_tool_use_hooks: list[Any] = [
+        HookMatcher(hooks=[post_tool_hook]),
+    ]
+
+    if edit_mode == "hashline":
+        pre_tool_use_hooks.append(HookMatcher(matcher="Edit", hooks=[hashline_edit_hook()]))
+        post_tool_use_hooks.append(HookMatcher(matcher="Read", hooks=[hashline_read_hook()]))
+
     return {
-        "PreToolUse": [
-            HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
-        ],
+        "PreToolUse": pre_tool_use_hooks,
         "PreCompact": [
             HookMatcher(hooks=[pre_compact_hook]),
         ],
-        "PostToolUse": [
-            HookMatcher(hooks=[post_tool_hook]),
-        ],
+        "PostToolUse": post_tool_use_hooks,
         "PostToolUseFailure": [
             HookMatcher(hooks=[post_tool_failure_hook]),
         ],

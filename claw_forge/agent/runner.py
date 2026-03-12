@@ -30,6 +30,7 @@ async def run_agent(
     agent_type: str = "coding",
     project_dir: Path | None = None,
     hooks: dict[HookEvent, list[HookMatcher]] | None = None,
+    edit_mode: str = "str_replace",
     # ── New SDK options ──────────────────────────────────────────────────
     thinking: ThinkingConfig | None = None,
     output_format: dict[str, Any] | None = None,
@@ -81,8 +82,25 @@ async def run_agent(
             files and auto-inject matching LSP skill plugins. Defaults to True.
         auto_inject_skills: If True, automatically inject non-LSP skills based on
             agent_type and keywords found in the prompt. Defaults to True.
+        edit_mode: Edit mode for file operations. "str_replace" (default) uses exact
+            text matching; "hashline" uses content-addressed line tagging for robust
+            editing on weaker models.
     """
     env: dict[str, str] = {}
+
+    # Inject hashline system prompt fragment when edit_mode is "hashline"
+    if edit_mode == "hashline":
+        from claw_forge.hashline import build_system_prompt_fragment
+
+        hashline_fragment = build_system_prompt_fragment()
+        if system_prompt:
+            system_prompt = hashline_fragment + "\n\n" + system_prompt
+        else:
+            system_prompt = hashline_fragment
+
+    # Use hashline hooks when in hashline mode
+    if hooks is None:
+        hooks = get_default_hooks(edit_mode=edit_mode)  # type: ignore[assignment]
 
     # Apply provider config overrides via environment variables
     if provider_config:
@@ -113,10 +131,6 @@ async def run_agent(
             from claw_forge.mcp.feature_mcp import mcp_server_config
             features_config = mcp_server_config(project_dir)
             resolved_mcp.update(features_config)
-
-    # Use default hooks if not provided
-    if hooks is None:
-        hooks = get_default_hooks()  # type: ignore[assignment]  # compatible at runtime  # type: ignore[assignment]
 
     # Resolve LSP plugins
     resolved_lsp_plugins: list[SdkPluginConfig]
@@ -171,11 +185,12 @@ async def collect_result(
     prompt: str,
     *,
     max_turns: int = 300,
+    edit_mode: str = "str_replace",
     **kwargs: Any,
 ) -> str:
     """Run agent and return the final text result."""
     result_text = ""
-    async for message in run_agent(prompt, max_turns=max_turns, **kwargs):
+    async for message in run_agent(prompt, max_turns=max_turns, edit_mode=edit_mode, **kwargs):
         if message.__class__.__name__ == "ResultMessage":
             result_text = message.result or ""  # type: ignore[union-attr]
     return result_text

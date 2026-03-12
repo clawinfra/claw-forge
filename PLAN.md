@@ -1,1115 +1,635 @@
-# PLAN.md — Brownfield Project Support
+# PLAN: Hashline Edit Mode
 
-**Author:** Alex Chen  
-**Date:** 2026-03-02  
-**Status:** Ready for Builder
-
----
-
-## Architecture Overview
-
-```
-                    CLI Layer (cli.py)
-                         │
-         ┌───────────────┼───────────────┐
-         │               │               │
-   analyze cmd      add cmd          fix cmd
-         │               │               │
-         ▼               ▼               ▼
-  BrownfieldAnalyzer   BrownfieldAdd   BrownfieldFix
-  (plugins/analyzer.py) (plugins/brownfield_add.py) (plugins/brownfield_fix.py)
-         │               │               │
-         │               ├───────────────┤
-         │               │               │
-         ▼               ▼               ▼
-  brownfield_manifest   Reads manifest   Reads manifest
-  .json written         + runs agent     + runs agent
-                        via runner.py    via runner.py
-                              │
-                              ▼
-                     collect_result()
-                     (agent/runner.py)
-```
-
-**Data flow for `claw-forge add`:**
-
-```
-User: claw-forge add "Add rate limiting"
-  │
-  ├─ 1. Check brownfield_manifest.json exists
-  │     └─ If missing → run BrownfieldAnalyzer.execute() first
-  │
-  ├─ 2. Read manifest → build brownfield-aware system prompt
-  │
-  ├─ 3. Create git branch feat/<slug>
-  │
-  ├─ 4. Run existing tests → capture baseline
-  │
-  ├─ 5. Run agent via collect_result() with:
-  │     - Brownfield system prompt (conventions, patterns, manifest)
-  │     - CodingPlugin-style tool list
-  │     - cwd = project directory
-  │
-  ├─ 6. Run tests again → must pass (baseline + new)
-  │
-  └─ 7. Commit on feature branch
-```
+**Issue:** clawinfra/claw-forge#2
+**PR title:** `feat: hashline edit mode — 10x improvement for weak models`
+**Closes:** #2
+**Benchmark reference:** 6.7% → 68.3% (Grok Code Fast, can1357 benchmark)
 
 ---
 
-## New Files
+## 1. Architecture Overview + Data Flow
 
-### 1. `claw_forge/plugins/analyzer.py` — BrownfieldAnalyzer
+### Core Concept
 
-```python
-"""Brownfield project analyzer — scans existing codebases."""
+Hashline wraps file read/write operations with content-addressed line tagging. Each line gets a short hash derived from its stripped content. Agents reference lines by hash instead of reproducing exact text, eliminating whitespace/indentation errors that plague `str_replace` on weaker models.
 
-from __future__ import annotations
+### Data Flow
 
-import json
-import re
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
-
-
-# ── Stack Detection ──────────────────────────────────────────────────────────
-
-# Map config files → language/framework/package_manager/test_runner
-STACK_MARKERS: dict[str, dict[str, str]] = {
-    "pyproject.toml": {"language": "python", "package_manager": "uv"},
-    "setup.py": {"language": "python", "package_manager": "pip"},
-    "setup.cfg": {"language": "python", "package_manager": "pip"},
-    "requirements.txt": {"language": "python", "package_manager": "pip"},
-    "package.json": {"language": "javascript", "package_manager": "npm"},
-    "yarn.lock": {"language": "javascript", "package_manager": "yarn"},
-    "pnpm-lock.yaml": {"language": "javascript", "package_manager": "pnpm"},
-    "Cargo.toml": {"language": "rust", "package_manager": "cargo", "test_runner": "cargo test"},
-    "go.mod": {"language": "go", "package_manager": "go", "test_runner": "go test"},
-    "Gemfile": {"language": "ruby", "package_manager": "bundler"},
-    "composer.json": {"language": "php", "package_manager": "composer"},
-}
-
-FRAMEWORK_MARKERS: dict[str, str] = {
-    "fastapi": "fastapi",
-    "flask": "flask",
-    "django": "django",
-    "express": "express",
-    "next": "nextjs",
-    "react": "react",
-    "vue": "vue",
-    "angular": "angular",
-    "actix": "actix-web",
-    "axum": "axum",
-    "gin": "gin",
-    "echo": "echo",
-    "rails": "rails",
-    "laravel": "laravel",
-}
-
-TEST_RUNNER_MARKERS: dict[str, str] = {
-    "pytest": "pytest",
-    "unittest": "unittest",
-    "jest": "jest",
-    "vitest": "vitest",
-    "mocha": "mocha",
-    "rspec": "rspec",
-    "phpunit": "phpunit",
-}
-
-
-class BrownfieldAnalyzer(BasePlugin):
-    """Analyzes an existing codebase and produces brownfield_manifest.json."""
-
-    @property
-    def name(self) -> str:
-        return "brownfield-analyzer"
-
-    @property
-    def description(self) -> str:
-        return "Analyze existing codebase: stack, conventions, tests, hot files"
-
-    def get_system_prompt(self, context: PluginContext) -> str:
-        return ""  # Analyzer doesn't use an agent — it's pure Python analysis
-
-    async def execute(self, context: PluginContext) -> PluginResult:
-        """Run full analysis pipeline and write brownfield_manifest.json.
-
-        Returns PluginResult with:
-          - success: True if analysis completed
-          - output: Human-readable summary string
-          - metadata: The full manifest dict
-          - files_created: ["brownfield_manifest.json"]
-        """
-        ...
-
-    def _detect_stack(self, project: Path) -> dict[str, str]:
-        """Detect language, framework, package_manager, test_runner.
-
-        Scans for marker files (pyproject.toml, package.json, Cargo.toml, etc.)
-        then reads dependency files to detect framework and test runner.
-
-        Args:
-            project: Path to project root.
-
-        Returns:
-            Dict with keys: language, language_version, framework,
-            package_manager, test_runner. Values are empty string if unknown.
-        """
-        ...
-
-    def _detect_framework(self, project: Path, language: str) -> str:
-        """Read dependency files to detect framework.
-
-        For Python: reads pyproject.toml [project.dependencies] or
-        requirements.txt. For JS: reads package.json dependencies.
-        For Rust: reads Cargo.toml [dependencies].
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            Framework name or empty string.
-        """
-        ...
-
-    def _detect_test_runner(self, project: Path, language: str) -> str:
-        """Detect test runner from dev dependencies or config files.
-
-        Checks: pyproject.toml [tool.pytest], jest.config.*, vitest.config.*,
-        Cargo.toml [[test]], etc.
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            Test runner name or empty string.
-        """
-        ...
-
-    def _detect_language_version(self, project: Path, language: str) -> str:
-        """Detect language version from config files.
-
-        Python: pyproject.toml requires-python or .python-version.
-        Node: package.json engines.node or .nvmrc.
-        Rust: rust-toolchain.toml or cargo --version.
-        Go: go.mod go directive.
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            Version string or empty string.
-        """
-        ...
-
-    def _get_hot_files(
-        self, project: Path, limit: int = 20
-    ) -> list[dict[str, Any]]:
-        """Find most-changed files via git log --stat.
-
-        Runs: git -C <project> log --format= --name-only --diff-filter=AMRC
-        Counts occurrences of each file path, returns top N.
-
-        Filters out:
-          - Files that no longer exist on disk
-          - Lock files, node_modules, __pycache__, .git
-          - Binary files (images, compiled)
-
-        Args:
-            project: Path to project root (must be a git repo).
-            limit: Max number of hot files to return.
-
-        Returns:
-            List of {"path": str, "change_count": int, "role": str}.
-            role is inferred from path (e.g. "test suite" for tests/ files,
-            "configuration" for config files, "source" for src/ files).
-        """
-        ...
-
-    def _detect_conventions(self, project: Path, language: str) -> dict[str, str]:
-        """Detect code conventions by sampling source files.
-
-        Reads up to 5 source files and analyzes:
-        - naming: snake_case vs camelCase vs PascalCase (from function/variable names)
-        - error_handling: pattern detection (try/except, Result<>, .catch, etc.)
-        - logging: library detection (logging, structlog, winston, tracing, etc.)
-        - imports: style detection (absolute vs relative, grouped, etc.)
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            Dict with keys: naming, error_handling, logging, imports.
-        """
-        ...
-
-    def _run_test_baseline(
-        self, project: Path, test_runner: str
-    ) -> dict[str, Any]:
-        """Run the test suite and capture baseline results.
-
-        Executes the test command (e.g. pytest --tb=no -q, npm test, cargo test)
-        with a timeout of 300 seconds.
-
-        Parses output to extract:
-        - total_tests: int
-        - passing: int
-        - failing: int
-        - coverage_pct: float (if coverage data available, else -1)
-
-        Also stores test_command used.
-
-        Args:
-            project: Path to project root.
-            test_runner: Name of test runner (pytest, jest, etc.)
-
-        Returns:
-            Dict with keys: framework, total_tests, passing, failing,
-            coverage_pct, test_command.
-        """
-        ...
-
-    def _detect_entry_points(self, project: Path, language: str) -> list[dict[str, str]]:
-        """Find project entry points.
-
-        Checks for:
-        - Python: __main__.py, manage.py, app.py, main.py, pyproject.toml [project.scripts]
-        - JS: package.json "main"/"bin", index.js/ts
-        - Rust: src/main.rs, src/lib.rs
-        - Go: main.go, cmd/
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            List of {"type": str, "path": str, "description": str}.
-            type is one of: "cli", "web", "lib", "config", "test".
-        """
-        ...
-
-    def _detect_architecture(
-        self, project: Path, language: str
-    ) -> dict[str, Any]:
-        """Infer architecture layers and patterns from directory structure.
-
-        Scans top-level and second-level directories for common patterns:
-        - layers: ["api", "service", "model"] based on dir names
-        - patterns: ["MVC", "repository", "dependency injection"] based on heuristics
-        - key_modules: [{path, role}] for important directories
-
-        Args:
-            project: Path to project root.
-            language: Detected language string.
-
-        Returns:
-            Dict with keys: layers (list[str]), patterns (list[str]),
-            key_modules (list[dict[str, str]]).
-        """
-        ...
-
-    def _build_manifest(
-        self,
-        project: Path,
-        stack: dict[str, str],
-        conventions: dict[str, str],
-        test_baseline: dict[str, Any],
-        hot_files: list[dict[str, Any]],
-        entry_points: list[dict[str, str]],
-        architecture: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Assemble the full brownfield_manifest.json dict.
-
-        Args:
-            project: Path to project root.
-            stack: From _detect_stack().
-            conventions: From _detect_conventions().
-            test_baseline: From _run_test_baseline().
-            hot_files: From _get_hot_files().
-            entry_points: From _detect_entry_points().
-            architecture: From _detect_architecture().
-
-        Returns:
-            Complete manifest dict matching the brownfield_manifest.json schema.
-        """
-        ...
-
-    def _infer_role_from_path(self, file_path: str) -> str:
-        """Infer a human-readable role from a file path.
-
-        Examples:
-          "tests/test_auth.py" → "test suite"
-          "src/models/user.py" → "data model"
-          "src/api/routes.py" → "API endpoint"
-          "Dockerfile" → "configuration"
-
-        Args:
-            file_path: Relative path string.
-
-        Returns:
-            Role string.
-        """
-        ...
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         CLI layer                                 │
+│  `claw-forge run --edit-mode hashline`                            │
+│   stores edit_mode in config context                              │
+└─────────────────────────┬────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    Agent Runner (runner.py)                        │
+│  Receives edit_mode from caller                                   │
+│  If edit_mode == "hashline":                                      │
+│    1. Prepends hashline tool instructions to system_prompt        │
+│    2. Agent reads files → hashline.annotate() → tagged output     │
+│    3. Agent emits edit ops referencing hashes                     │
+│    4. hashline.apply_edits() validates + applies                 │
+└─────────────────────────┬────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    hashline.py (NEW)                               │
+│                                                                    │
+│  annotate(content: str) → str                                     │
+│    • Split lines, compute sha256 hash (3 hex chars) per line      │
+│    • Handle collisions: a3f, a3f_2, a3f_3                         │
+│    • Return: "a3f|def hello():\n7b2|  return 'world'\n"           │
+│                                                                    │
+│  apply_edits(original: str, edits: list[EditOp]) → str            │
+│    • Validate all hashes exist in the current file                │
+│    • Apply replace/insert_after/delete operations                 │
+│    • Re-hash after each edit for cascading operations             │
+│    • Raise HashlineError on invalid hash / collision conflict     │
+│                                                                    │
+│  read_file_annotated(path: Path) → str                            │
+│    • Read file from disk, return annotate(content)                │
+│                                                                    │
+│  write_file_with_edits(path: Path, edits: list[EditOp]) → str    │
+│    • Read current file, apply_edits(), write result back          │
+│    • Return the new annotated content for agent's context         │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. `claw_forge/plugins/brownfield_add.py` — BrownfieldAddPlugin
+### Integration Points
+
+The hashline module is a **pure library** with no dependencies on the rest of claw-forge beyond being called by the agent layer. It does NOT become an MCP tool or SDK plugin — it's injected via system prompt instructions that tell the agent how to use the existing `Read`, `Write`, and `Edit` tools with hashline-aware wrappers.
+
+**How it integrates with the existing agent flow:**
+
+1. **CLI** (`cli.py`): The `run` command gains `--edit-mode` option. The value is passed through to the orchestrator → task handler → agent runner.
+
+2. **Agent runner** (`agent/runner.py`): When `edit_mode="hashline"`, the runner prepends hashline instructions to the system prompt. These instructions tell the agent:
+   - When using `Read`, the output will be hashline-annotated
+   - When using `Edit`, provide hash references instead of exact text
+   - The format for replace/insert_after/delete operations
+
+3. **Hooks** (`agent/hooks.py`): A new `PostToolUse` hook intercepts `Read` tool results and passes them through `hashline.annotate()` before the agent sees them. A `PreToolUse` hook for `Edit` intercepts edit requests, parses hashline references, and translates them to exact line operations via `hashline.apply_edits()`.
+
+4. **Config** (`claw-forge.yaml`): An `edit_mode` field under the `agent` section allows persistent configuration.
+
+---
+
+## 2. File Structure with Exact Function Signatures
+
+### New Files
+
+#### `claw_forge/hashline.py`
 
 ```python
-"""Brownfield add plugin — adds a feature to an existing codebase."""
+"""Hashline edit mode — content-addressed line tagging for robust file editing.
 
+Each line is tagged with a 3-character hex hash derived from sha256(line.strip()).
+Agents reference lines by hash instead of reproducing exact text, eliminating
+whitespace/indentation errors on weaker models.
+
+Benchmark: 6.7% → 68.3% success rate on Grok Code Fast (can1357).
+"""
 from __future__ import annotations
 
-import json
-import re
-import subprocess
-from pathlib import Path
-
-from claw_forge.agent import collect_result
-from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
-
-
-class BrownfieldAddPlugin(BasePlugin):
-    """Agent plugin for adding a feature to an existing codebase."""
-
-    @property
-    def name(self) -> str:
-        return "brownfield-add"
-
-    @property
-    def description(self) -> str:
-        return "Add a feature to an existing codebase, respecting conventions"
-
-    def get_system_prompt(self, context: PluginContext) -> str:
-        """Build brownfield-aware system prompt.
-
-        Includes:
-        - Full manifest content (stack, conventions, architecture)
-        - Instructions to match existing patterns
-        - Instructions to run tests before and after
-        - Instructions to never modify unrelated files
-        - Instructions to commit on branch
-
-        The manifest is read from context.metadata["manifest"] (dict).
-
-        Args:
-            context: PluginContext with metadata["manifest"] populated.
-
-        Returns:
-            System prompt string.
-        """
-        ...
-
-    async def execute(self, context: PluginContext) -> PluginResult:
-        """Execute the add-feature flow.
-
-        Steps:
-        1. Read brownfield_manifest.json from project root
-           (or run BrownfieldAnalyzer if missing).
-        2. Create git branch feat/<slug> from current HEAD.
-        3. Run existing tests → abort if baseline fails.
-        4. Build system prompt with manifest context.
-        5. Call collect_result() with brownfield system prompt.
-        6. Run tests again → report pass/fail.
-        7. Git commit on branch.
-
-        context.metadata must contain:
-          - "feature": str — feature description
-          - "model": str (optional) — model override
-
-        Args:
-            context: PluginContext with project_path and metadata.
-
-        Returns:
-            PluginResult with success, output, files_modified, files_created.
-        """
-        ...
-
-    def _slugify(self, text: str) -> str:
-        """Convert feature description to branch-safe slug.
-
-        Lowercase, replace non-alphanumeric with hyphens, truncate to 60 chars,
-        strip leading/trailing hyphens.
-
-        Args:
-            text: Feature description string.
-
-        Returns:
-            Branch-safe slug string.
-        """
-        ...
-
-    def _create_branch(self, project: Path, branch_name: str) -> bool:
-        """Create and checkout a new git branch.
-
-        Runs: git -C <project> checkout -b <branch_name>
-
-        Args:
-            project: Path to project root.
-            branch_name: Full branch name (e.g. "feat/add-rate-limiting").
-
-        Returns:
-            True if branch created successfully, False otherwise.
-        """
-        ...
-
-    def _run_tests(self, project: Path, test_command: str) -> tuple[bool, str]:
-        """Run test suite and return (passed, output).
-
-        Runs the test_command with subprocess, timeout 300s.
-
-        Args:
-            project: Path to project root.
-            test_command: Full test command string (e.g. "uv run pytest tests/ -v").
-
-        Returns:
-            Tuple of (all_passed: bool, output: str).
-        """
-        ...
-
-    def _git_commit(self, project: Path, message: str) -> bool:
-        """Stage all changes and commit.
-
-        Runs: git -C <project> add -A && git -C <project> commit -m <message>
-        Uses author: Alex Chen <alex.chen31337@gmail.com>
-
-        Args:
-            project: Path to project root.
-            message: Commit message.
-
-        Returns:
-            True if commit succeeded, False otherwise.
-        """
-        ...
-
-    def _ensure_manifest(self, project: Path) -> dict:
-        """Load brownfield_manifest.json, running analyze if missing.
-
-        Args:
-            project: Path to project root.
-
-        Returns:
-            Manifest dict.
-
-        Raises:
-            RuntimeError: If analysis fails.
-        """
-        ...
-```
-
-### 3. `claw_forge/plugins/brownfield_fix.py` — BrownfieldFixPlugin
-
-```python
-"""Brownfield fix plugin — fixes bugs with reproduce-first protocol."""
-
-from __future__ import annotations
-
-import json
-import subprocess
-from pathlib import Path
-
-from claw_forge.agent import collect_result
-from claw_forge.plugins.base import BasePlugin, PluginContext, PluginResult
-
-
-class BrownfieldFixPlugin(BasePlugin):
-    """Agent plugin for fixing bugs in existing codebases (Red-Green protocol)."""
-
-    @property
-    def name(self) -> str:
-        return "brownfield-fix"
-
-    @property
-    def description(self) -> str:
-        return "Fix a bug using reproduce-first protocol (Red-Green)"
-
-    def get_system_prompt(self, context: PluginContext) -> str:
-        """Build bug-fix system prompt with Red-Green protocol.
-
-        Includes everything from BrownfieldAddPlugin.get_system_prompt() plus:
-        - Explicit Red-Green protocol instructions:
-          a. Write a failing test that reproduces the bug
-          b. Run it — must FAIL (RED)
-          c. Find root cause with systematic debugging
-          d. Apply minimal surgical fix
-          e. Run the test — must PASS (GREEN)
-          f. Run full test suite — must be all green
-        - Bug description from context.metadata["description"]
-        - Manifest conventions
-
-        Args:
-            context: PluginContext with metadata["manifest"] and
-                metadata["description"].
-
-        Returns:
-            System prompt string.
-        """
-        ...
-
-    async def execute(self, context: PluginContext) -> PluginResult:
-        """Execute the bug-fix flow.
-
-        Steps:
-        1. Read brownfield_manifest.json (or run analyzer if missing).
-        2. Create git branch fix/<slug> from current HEAD.
-        3. Run existing tests → abort if baseline fails.
-        4. Build Red-Green system prompt.
-        5. Call collect_result() with bug-fix prompt.
-        6. Run tests → verify all pass.
-        7. Git commit on branch.
-        8. Generate fix report in metadata.
-
-        context.metadata must contain:
-          - "description": str — bug description
-          - "model": str (optional) — model override
-
-        Args:
-            context: PluginContext with project_path and metadata.
-
-        Returns:
-            PluginResult with metadata["fix_report"] containing:
-              - bug_description: str
-              - branch: str
-              - test_added: str (path to new test)
-              - files_modified: list[str]
-              - root_cause: str (from agent output)
-        """
-        ...
-
-    def _slugify(self, text: str) -> str:
-        """Same as BrownfieldAddPlugin._slugify.
-
-        NOTE for Builder: Extract to a shared utility function
-        in claw_forge/plugins/brownfield_utils.py to avoid duplication.
-        """
-        ...
-
-    def _create_branch(self, project: Path, branch_name: str) -> bool:
-        """Same as BrownfieldAddPlugin._create_branch.
-
-        NOTE for Builder: Extract to shared brownfield_utils.py.
-        """
-        ...
-
-    def _run_tests(self, project: Path, test_command: str) -> tuple[bool, str]:
-        """Same as BrownfieldAddPlugin._run_tests.
-
-        NOTE for Builder: Extract to shared brownfield_utils.py.
-        """
-        ...
-
-    def _git_commit(self, project: Path, message: str) -> bool:
-        """Same as BrownfieldAddPlugin._git_commit.
-
-        NOTE for Builder: Extract to shared brownfield_utils.py.
-        """
-        ...
-
-    def _ensure_manifest(self, project: Path) -> dict:
-        """Same as BrownfieldAddPlugin._ensure_manifest.
-
-        NOTE for Builder: Extract to shared brownfield_utils.py.
-        """
-        ...
-```
-
-### 4. `claw_forge/plugins/brownfield_utils.py` — Shared Utilities
-
-```python
-"""Shared utilities for brownfield plugins."""
-
-from __future__ import annotations
-
-import json
-import re
-import subprocess
+import hashlib
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 
-GIT_AUTHOR = "Alex Chen <alex.chen31337@gmail.com>"
+class EditOpKind(str, Enum):
+    """Types of hashline edit operations."""
+    REPLACE = "replace"
+    INSERT_AFTER = "insert_after"
+    DELETE = "delete"
 
 
-def slugify(text: str, max_length: int = 60) -> str:
-    """Convert text to branch-safe slug.
+@dataclass
+class EditOp:
+    """A single hashline edit operation.
+    
+    Attributes:
+        kind: The operation type (replace, insert_after, delete).
+        hash_ref: The 3-char hash (with optional collision suffix) of the target line.
+        new_content: The new line content for replace/insert_after. Ignored for delete.
+    """
+    kind: EditOpKind
+    hash_ref: str
+    new_content: str = ""
 
-    Lowercase, replace non-alphanumeric with hyphens, collapse consecutive
-    hyphens, truncate to max_length, strip leading/trailing hyphens.
 
+class HashlineError(Exception):
+    """Raised when hashline operations fail (invalid hash, collision, etc.)."""
+    pass
+
+
+def compute_hash(line: str) -> str:
+    """Compute the 3-character hex hash of a stripped line.
+    
     Args:
-        text: Input string.
-        max_length: Maximum slug length.
-
+        line: The line content (will be stripped before hashing).
+        
     Returns:
-        Branch-safe slug.
+        First 3 hex characters of sha256(line.strip()).
     """
     ...
 
 
-def create_git_branch(project: Path, branch_name: str) -> bool:
-    """Create and checkout a new git branch.
-
+def annotate(content: str) -> str:
+    """Annotate each line of content with its hashline tag.
+    
+    Handles hash collisions by appending _2, _3, etc. to duplicate hashes
+    within the same file.
+    
     Args:
-        project: Project root path.
-        branch_name: Branch name (e.g. "feat/my-feature").
-
+        content: The raw file content (multi-line string).
+        
     Returns:
-        True if successful.
+        Annotated content where each line is prefixed with its hash and a pipe:
+        "a3f|original line content\\n"
+        
+    Examples:
+        >>> annotate("def hello():\\n  return 'world'\\n")
+        'xxx|def hello():\\nyyy|  return \\'world\\'\\n'
+    """
+    ...
 
+
+def apply_edits(original: str, edits: list[EditOp]) -> str:
+    """Apply a list of edit operations to annotated content.
+    
+    Edits are applied sequentially. After each edit, hashes are NOT
+    recomputed — the caller must use the hash values from the annotated
+    content they received from annotate() or read_file_annotated().
+    
+    Args:
+        original: The raw (unannotated) file content.
+        edits: Ordered list of edit operations to apply.
+        
+    Returns:
+        The modified file content (unannotated).
+        
     Raises:
-        RuntimeError: If git command fails.
+        HashlineError: If a hash_ref does not match any line in the original.
+        HashlineError: If a hash_ref is ambiguous (collision without suffix).
     """
     ...
 
 
-def run_tests(project: Path, test_command: str, timeout: int = 300) -> tuple[bool, str]:
-    """Run test suite and return (passed, output).
-
+def read_file_annotated(path: Path | str) -> str:
+    """Read a file from disk and return its hashline-annotated content.
+    
     Args:
-        project: Project root path.
-        test_command: Test command string.
-        timeout: Timeout in seconds.
-
+        path: Path to the file to read.
+        
     Returns:
-        (all_passed, output_text).
-    """
-    ...
-
-
-def git_commit(project: Path, message: str) -> bool:
-    """Stage all and commit with standard author.
-
-    Args:
-        project: Project root path.
-        message: Commit message.
-
-    Returns:
-        True if successful.
-    """
-    ...
-
-
-def load_manifest(project: Path) -> dict[str, Any] | None:
-    """Load brownfield_manifest.json if it exists.
-
-    Args:
-        project: Project root path.
-
-    Returns:
-        Manifest dict or None.
-    """
-    ...
-
-
-def ensure_manifest(project: Path) -> dict[str, Any]:
-    """Load manifest, running BrownfieldAnalyzer if missing.
-
-    Args:
-        project: Project root path.
-
-    Returns:
-        Manifest dict.
-
+        The file content with each line prefixed by its hash tag.
+        
     Raises:
-        RuntimeError: If analysis fails.
+        FileNotFoundError: If path does not exist.
+        IsADirectoryError: If path is a directory.
     """
     ...
 
 
-def build_brownfield_prompt_section(manifest: dict[str, Any]) -> str:
-    """Build the brownfield context section for agent system prompts.
-
-    Formats the manifest into a readable prompt section that tells
-    the agent about the project's stack, conventions, and patterns.
-
+def write_file_with_edits(path: Path | str, edits: list[EditOp]) -> str:
+    """Read a file, apply edits, write it back, and return the new annotated content.
+    
+    This is a convenience function combining read + apply_edits + write + annotate.
+    
     Args:
-        manifest: The brownfield manifest dict.
-
+        path: Path to the file to edit.
+        edits: Ordered list of edit operations to apply.
+        
     Returns:
-        Formatted prompt section string.
+        The new annotated content (post-edit) for the agent's context.
+        
+    Raises:
+        FileNotFoundError: If path does not exist.
+        HashlineError: If any edit operation fails validation.
+    """
+    ...
+
+
+def build_system_prompt_fragment() -> str:
+    """Return the system prompt fragment that teaches an agent how to use hashline mode.
+    
+    This text is prepended to the agent's system prompt when edit_mode="hashline".
+    It explains the hash format, how to read annotated output, and how to
+    construct edit operations.
+    
+    Returns:
+        A multi-line string with hashline usage instructions.
+    """
+    ...
+
+
+def parse_edit_ops(text: str) -> list[EditOp]:
+    """Parse edit operations from agent output text.
+    
+    Expects a structured format emitted by the agent:
+    
+        HASHLINE_EDIT file_path
+        REPLACE hash_ref
+        new line content here
+        END
+        INSERT_AFTER hash_ref
+        new line content here  
+        END
+        DELETE hash_ref
+        END
+        HASHLINE_EDIT_END
+    
+    Args:
+        text: Raw agent output text containing edit blocks.
+        
+    Returns:
+        List of parsed EditOp instances.
+        
+    Raises:
+        HashlineError: If the edit block format is malformed.
     """
     ...
 ```
 
----
-
-## brownfield_manifest.json Schema
-
-```json
-{
-  "version": "1.0",
-  "generated_at": "ISO 8601 timestamp",
-  "project_root": "absolute path string",
-  "stack": {
-    "language": "string (python|javascript|typescript|rust|go|ruby|php)",
-    "language_version": "string (e.g. '3.12', '20', '1.75')",
-    "framework": "string (e.g. 'fastapi', 'express', 'actix-web') or ''",
-    "package_manager": "string (uv|pip|npm|yarn|pnpm|cargo|go|bundler|composer)",
-    "test_runner": "string (pytest|jest|vitest|cargo test|go test|rspec|phpunit) or ''"
-  },
-  "conventions": {
-    "naming": "string (snake_case|camelCase|PascalCase|kebab-case|mixed)",
-    "error_handling": "string description of pattern",
-    "logging": "string description of logging approach",
-    "imports": "string description of import style"
-  },
-  "test_baseline": {
-    "framework": "string — test runner name",
-    "total_tests": "integer",
-    "passing": "integer",
-    "failing": "integer",
-    "coverage_pct": "float (-1 if unknown)",
-    "test_command": "string — exact command to run tests"
-  },
-  "hot_files": [
-    {
-      "path": "string — relative path from project root",
-      "change_count": "integer — number of git commits touching this file",
-      "role": "string — inferred role (e.g. 'authentication module')"
-    }
-  ],
-  "entry_points": [
-    {
-      "type": "string (cli|web|lib|config|test)",
-      "path": "string — relative path",
-      "description": "string"
-    }
-  ],
-  "architecture": {
-    "layers": ["string — detected architectural layers"],
-    "patterns": ["string — detected design patterns"],
-    "key_modules": [
-      {
-        "path": "string — directory or file path",
-        "role": "string — module purpose"
-      }
-    ]
-  }
-}
-```
-
----
-
-## CLI Interface Changes
-
-### New commands to add in `claw_forge/cli.py`:
+#### `tests/test_hashline.py`
 
 ```python
-@app.command()
-def analyze(
-    project: str = typer.Option(".", "--project", "-p"),
-    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
-) -> None:
-    """Analyze an existing project and generate brownfield_manifest.json."""
-    ...
-
-
-@app.command()
-def add(
-    feature: str = typer.Argument(..., help="Feature description"),
-    project: str = typer.Option(".", "--project", "-p"),
-    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
-    model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m"
-    ),
-) -> None:
-    """Add a feature to an existing codebase."""
-    ...
-
-
-@app.command()
-def fix(
-    description: str = typer.Argument(..., help="Bug description"),
-    project: str = typer.Option(".", "--project", "-p"),
-    config: str = typer.Option("claw-forge.yaml", "--config", "-c"),
-    model: str = typer.Option(
-        "claude-sonnet-4-20250514", "--model", "-m"
-    ),
-) -> None:
-    """Fix a bug using reproduce-first protocol (Red-Green)."""
-    ...
+"""Tests for claw_forge.hashline — hashline edit mode."""
+from __future__ import annotations
+# Full test cases listed in section 6 below.
 ```
 
-**Implementation pattern** (same as existing `init` command):
-1. Create `PluginContext` with project_path, session_id, task_id
-2. Set metadata (feature/description, model)
-3. Call `asyncio.run(plugin.execute(ctx))`
-4. Print results via `console`
+### Modified Files
+
+#### `claw_forge/cli.py`
+
+- Add `--edit-mode` option to the `run` command (type: `str`, choices: `["str_replace", "hashline"]`, default: `"str_replace"`)
+- Pass `edit_mode` through to the task handler and ultimately to `run_agent()`
+
+#### `claw_forge/agent/runner.py`
+
+- Add `edit_mode: str = "str_replace"` parameter to `run_agent()` and `collect_result()`
+- When `edit_mode == "hashline"`:
+  - Import `build_system_prompt_fragment()` from `claw_forge.hashline`
+  - Prepend the hashline system prompt fragment to any existing `system_prompt`
+
+#### `claw_forge/agent/hooks.py`
+
+- Add a new hook factory `hashline_read_hook()` that returns a `PostToolUse` hook for `Read`:
+  - Intercepts the `Read` tool result
+  - Passes the content through `hashline.annotate()`
+  - Returns the annotated version to the agent
+- Add a new hook factory `hashline_edit_hook()` that returns a `PreToolUse` hook for `Edit`:
+  - Intercepts `Edit` tool requests
+  - If the edit contains hashline references (`HASHLINE_EDIT` markers), parse them via `parse_edit_ops()`
+  - Translate hash-referenced edits into exact text replacements using `apply_edits()`
+  - Pass the translated edit to the SDK
+- Add `get_hashline_hooks()` function that returns the combined list of hashline hooks
+- Modify `get_default_hooks()` to accept an optional `edit_mode` parameter; when `"hashline"`, include hashline hooks
+
+#### `claw_forge/plugins/coding.py`
+
+- Modify `get_system_prompt()` to accept `edit_mode` from context metadata
+- When `edit_mode == "hashline"`, append hashline instructions to the system prompt
 
 ---
 
-## Agent System Prompts
+## 3. Interface Definitions (API, CLI, Config)
 
-### Brownfield Add Prompt (key sections)
-
-```
-You are an expert software engineer working on an EXISTING codebase.
-
-## Project Context (from brownfield_manifest.json)
-Stack: {stack.language} {stack.language_version} / {stack.framework}
-Test runner: {stack.test_runner}
-Test baseline: {test_baseline.passing}/{test_baseline.total_tests} passing
-
-## CRITICAL RULES — Existing Codebase
-1. Read brownfield_manifest.json first — understand the project before changing anything
-2. Run existing tests FIRST: `{test_baseline.test_command}` — they MUST pass
-3. Match existing conventions:
-   - Naming: {conventions.naming}
-   - Error handling: {conventions.error_handling}
-   - Logging: {conventions.logging}
-   - Imports: {conventions.imports}
-4. NEVER modify files unrelated to your task
-5. All existing tests must still pass after your changes
-6. Add new tests for your feature
-7. Commit with: git add -A && git commit -m "feat: <description>"
-
-## Hot Files (most active — likely core business logic)
-{formatted hot_files list}
-
-## Architecture
-Layers: {architecture.layers}
-Patterns: {architecture.patterns}
-Key modules: {formatted key_modules}
-
-## Your Task
-Add this feature: {feature_description}
-```
-
-### Brownfield Fix Prompt (additions)
+### CLI Interface
 
 ```
-## Bug Fix Protocol (Red-Green — MANDATORY)
-You MUST follow this exact sequence:
-
-### Step 1: RED — Write a failing test
-- Write a test that reproduces the bug described below
-- Run it — it MUST FAIL
-- If it passes, your test doesn't reproduce the bug. Try again.
-
-### Step 2: Find Root Cause
-- Use systematic debugging: read code, add logging, trace the execution path
-- Identify the EXACT line(s) causing the bug
-- Document your root cause analysis
-
-### Step 3: GREEN — Surgical Fix
-- Apply the MINIMUM code change that fixes the bug
-- Do NOT refactor, do NOT "improve" unrelated code
-- Run your test — it MUST PASS now
-
-### Step 4: Full Suite
-- Run all tests: `{test_baseline.test_command}`
-- ALL must pass (existing + your new test)
-
-### Step 5: Commit
-- git add -A && git commit -m "fix: <description>"
-
-## Bug Description
-{description}
+claw-forge run [OPTIONS]
+  --edit-mode TEXT    Edit tool mode for agent file operations.
+                      str_replace: current default (exact text matching)
+                      hashline: content-addressed line tagging (better for weak models)
+                      [default: str_replace]
 ```
 
----
+The `--edit-mode` flag is added to the `run` command only. It does not apply to `init`, `plan`, `status`, `fix`, or `add` (those commands don't execute coding agents, or in the case of `fix`, we can add it later).
 
-## Integration Points
+### Config Interface (claw-forge.yaml)
 
-### With `runner.py`
-- BrownfieldAdd and BrownfieldFix both call `collect_result()` from `claw_forge.agent`
-- Same pattern as existing `CodingPlugin.execute()`
-- Pass `cwd=Path(context.project_path)`, `allowed_tools=["Read", "Write", "Edit", "Bash"]`
+```yaml
+agent:
+  default_model: claude-sonnet-4-6
+  max_tokens: 8192
+  max_concurrent_agents: 5
+  edit_mode: str_replace    # NEW: str_replace | hashline
+```
 
-### With `lsp.py`
-- No changes needed. `run_agent()` already auto-detects LSP plugins via `detect_lsp_plugins(cwd)`
-- Brownfield plugins pass `cwd` which triggers LSP detection automatically
+**Priority order:** CLI flag > config file > default ("str_replace").
 
-### With `cli.py`
-- Add 3 new `@app.command()` functions: `analyze`, `add`, `fix`
-- Follow the exact pattern of the existing `init` command
-- Use `asyncio.run(plugin.execute(ctx))` for async execution
+### Python API
 
-### With `base.py`
-- BrownfieldAnalyzer, BrownfieldAddPlugin, BrownfieldFixPlugin all extend `BasePlugin`
-- Return `PluginResult` with standard fields
-- Optionally register via entry_points in pyproject.toml
-
----
-
-## Error Handling Strategy
-
-| Scenario | Handling |
-|---|---|
-| Not a git repo | `PluginResult(success=False, output="Not a git repo: ...")` |
-| No source files found | Return minimal manifest with empty fields |
-| Git log fails | Skip hot_files, continue with other analysis |
-| Test suite fails baseline | Abort add/fix with clear message: "Existing tests fail — fix them first" |
-| Branch already exists | Append timestamp suffix: `feat/my-feature-1709350200` |
-| Agent fails (collect_result empty) | Return `PluginResult(success=False, output="Agent did not produce output")` |
-| Tests fail after agent changes | Return `PluginResult(success=False, output="Tests failed after changes: ...")` |
-| subprocess timeout (300s) | Catch `subprocess.TimeoutExpired`, return failure result |
-| brownfield_manifest.json parse error | Delete corrupted file, re-run analyze |
-
-All subprocess calls use:
 ```python
-subprocess.run(
-    ["git", ...],  # No shell=True
-    cwd=str(project),
-    capture_output=True,
-    text=True,
-    timeout=300,
+# Direct usage of hashline module
+from claw_forge.hashline import (
+    annotate,
+    apply_edits,
+    read_file_annotated,
+    write_file_with_edits,
+    parse_edit_ops,
+    build_system_prompt_fragment,
+    EditOp,
+    EditOpKind,
+    HashlineError,
+    compute_hash,
 )
+
+# Via agent runner
+from claw_forge.agent.runner import run_agent
+async for msg in run_agent(prompt, edit_mode="hashline", ...):
+    ...
 ```
 
 ---
 
-## Test Plan
+## 4. Data Models and Schemas
 
-### `tests/test_analyzer.py`
+### EditOpKind (Enum)
 
-Test the `BrownfieldAnalyzer` in isolation with mocked filesystem and git.
-
-| Test | What it tests | Mocking strategy |
-|---|---|---|
-| `test_detect_stack_python` | Detects Python from pyproject.toml | `tmp_path` with pyproject.toml |
-| `test_detect_stack_javascript` | Detects JS from package.json | `tmp_path` with package.json |
-| `test_detect_stack_rust` | Detects Rust from Cargo.toml | `tmp_path` with Cargo.toml |
-| `test_detect_stack_go` | Detects Go from go.mod | `tmp_path` with go.mod |
-| `test_detect_stack_unknown` | Returns empty for unknown project | Empty `tmp_path` |
-| `test_detect_framework_fastapi` | Detects FastAPI from deps | pyproject.toml with fastapi dep |
-| `test_detect_framework_express` | Detects Express from package.json | package.json with express dep |
-| `test_detect_test_runner_pytest` | Detects pytest | pyproject.toml with [tool.pytest] |
-| `test_detect_test_runner_jest` | Detects jest | package.json with jest dep |
-| `test_hot_files_basic` | Parses git log output | `unittest.mock.patch("subprocess.run")` returning mock git log |
-| `test_hot_files_filters_deleted` | Skips files no longer on disk | Mock git log + tmp_path missing files |
-| `test_hot_files_empty_repo` | Returns empty list for new repo | Mock git log empty |
-| `test_detect_conventions_python` | Detects snake_case, logging | `tmp_path` with sample .py files |
-| `test_detect_conventions_javascript` | Detects camelCase | `tmp_path` with sample .js files |
-| `test_run_test_baseline_pytest` | Parses pytest output | `mock.patch("subprocess.run")` returning pytest output |
-| `test_run_test_baseline_timeout` | Handles test timeout | Mock TimeoutExpired |
-| `test_run_test_baseline_no_tests` | Returns zeros when no tests | Mock empty test output |
-| `test_detect_entry_points_python` | Finds main.py, manage.py | `tmp_path` with those files |
-| `test_detect_architecture_layers` | Detects src/api, src/models | `tmp_path` with directory structure |
-| `test_execute_full_pipeline` | End-to-end: creates manifest | `tmp_path` with full project + mocked git/subprocess |
-| `test_execute_not_git_repo` | Fails gracefully for non-git | `tmp_path` without .git |
-| `test_manifest_schema_valid` | Output matches JSON schema | Validate manifest structure after execute |
-| `test_infer_role_from_path` | Various path → role mappings | Direct function call |
-
-### `tests/test_brownfield_commands.py`
-
-Test CLI commands and plugin execute flows.
-
-| Test | What it tests | Mocking strategy |
-|---|---|---|
-| `test_analyze_command_basic` | CLI runs analyzer, writes manifest | `tmp_path` project + mock subprocess |
-| `test_analyze_command_output` | CLI prints correct summary | Capture `console.print` |
-| `test_add_command_basic` | CLI creates branch, runs agent | Mock `collect_result`, mock subprocess |
-| `test_add_auto_analyzes` | Add runs analyze when no manifest | Mock BrownfieldAnalyzer + collect_result |
-| `test_add_creates_branch` | Correct branch name from feature | Mock subprocess, verify git checkout -b |
-| `test_add_baseline_fails` | Aborts if existing tests fail | Mock test runner returning failure |
-| `test_add_tests_after_fail` | Reports failure if new tests fail | Mock agent succeeds, tests fail after |
-| `test_fix_command_basic` | CLI creates branch, runs fix agent | Mock collect_result + subprocess |
-| `test_fix_creates_correct_branch` | Branch is fix/<slug> | Verify subprocess call |
-| `test_fix_baseline_fails` | Aborts if baseline tests fail | Mock test failure |
-| `test_slugify_basic` | "Hello World" → "hello-world" | Direct function call |
-| `test_slugify_special_chars` | Strips special chars | Direct function call |
-| `test_slugify_truncation` | Truncates to 60 chars | Direct function call |
-| `test_slugify_consecutive_hyphens` | Collapses hyphens | Direct function call |
-| `test_create_branch_success` | Git branch created | Mock subprocess |
-| `test_create_branch_already_exists` | Handles existing branch | Mock subprocess CalledProcessError |
-| `test_run_tests_pass` | Returns (True, output) | Mock subprocess |
-| `test_run_tests_fail` | Returns (False, output) | Mock subprocess returncode=1 |
-| `test_run_tests_timeout` | Returns (False, timeout msg) | Mock TimeoutExpired |
-| `test_git_commit_success` | Stages and commits | Mock subprocess |
-| `test_build_brownfield_prompt` | Prompt includes manifest data | Direct function call |
-| `test_ensure_manifest_exists` | Loads existing manifest | Write manifest to tmp_path |
-| `test_ensure_manifest_missing` | Runs analyzer then loads | Mock BrownfieldAnalyzer |
-
----
-
-## Constraints for Builder
-
-- **Line length ≤ 100** — enforced by ruff
-- **Full type annotations** on every function
-- **No new dependencies** — use only: subprocess, pathlib, json, re, datetime (stdlib)
-- **All existing 557+ tests must pass** — run `uv run pytest tests/ -x -q` before and after
-- **New code ≥ 90% coverage** — use `uv run pytest --cov=claw_forge/plugins/analyzer --cov=claw_forge/plugins/brownfield_add --cov=claw_forge/plugins/brownfield_fix --cov=claw_forge/plugins/brownfield_utils tests/test_analyzer.py tests/test_brownfield_commands.py`
-- **Git author:** Alex Chen / alex.chen31337@gmail.com
-- **No `shell=True`** in any subprocess call
-- **No `print()`** — use `logging` or Rich `console`
-- **`from __future__ import annotations`** at top of every new file
-- **Extract shared code** into `brownfield_utils.py` — don't duplicate slugify/branch/test/commit logic
-
----
-
-## Files to Create
-
-| File | Purpose |
+| Value | Description |
 |---|---|
-| `claw_forge/plugins/analyzer.py` | BrownfieldAnalyzer plugin |
-| `claw_forge/plugins/brownfield_add.py` | BrownfieldAddPlugin |
-| `claw_forge/plugins/brownfield_fix.py` | BrownfieldFixPlugin |
-| `claw_forge/plugins/brownfield_utils.py` | Shared utilities |
-| `tests/test_analyzer.py` | Analyzer unit tests |
-| `tests/test_brownfield_commands.py` | CLI + plugin tests |
-| `docs/brownfield.md` | User guide (DONE — already written) |
+| `replace` | Replace the target line with new content |
+| `insert_after` | Insert new content after the target line |
+| `delete` | Delete the target line |
 
-## Files to Modify
+### EditOp (Dataclass)
 
-| File | Change |
-|---|---|
-| `claw_forge/cli.py` | Add `analyze`, `add`, `fix` commands |
-| `ARCHITECTURE.md` | Add brownfield section |
-| `README.md` | Add brownfield section |
-
----
-
-## Documentation Updates
-
-### ARCHITECTURE.md Addition
-
-Add a new section "### 10. Brownfield Support" after section 9:
-
-```markdown
-### 10. Brownfield Support
-
-Three commands for working with existing codebases:
-
-| Command | Plugin | Purpose |
+| Field | Type | Description |
 |---|---|---|
-| `analyze` | `BrownfieldAnalyzer` | Scan project → `brownfield_manifest.json` |
-| `add` | `BrownfieldAddPlugin` | Add feature on branch, respecting conventions |
-| `fix` | `BrownfieldFixPlugin` | Bug fix with Red-Green protocol |
+| `kind` | `EditOpKind` | Operation type |
+| `hash_ref` | `str` | 3-char hash with optional collision suffix (e.g., `"a3f"`, `"a3f_2"`) |
+| `new_content` | `str` | New line content (empty for delete) |
 
-`BrownfieldAnalyzer` is pure Python analysis (no agent needed). `add` and `fix`
-call `collect_result()` from `claw_forge.agent` with brownfield-aware system prompts
-that include project conventions from the manifest.
+### Hash Format
 
-See [docs/brownfield.md](docs/brownfield.md) for the full user guide.
+- **Hash computation:** `sha256(line.strip().encode("utf-8")).hexdigest()[:3]`
+- **Hash tag format:** `<hash>|<original line content>` (no spaces around pipe)
+- **Collision suffix:** `_2`, `_3`, ..., `_N` appended for duplicate hashes within same file
+- **Empty lines:** Hash is computed on the empty string: `sha256(b"").hexdigest()[:3]` → `"e3b"`. If multiple empty lines exist, they get `"e3b"`, `"e3b_2"`, etc.
+
+### Agent Edit Block Format
+
+The agent will be instructed (via system prompt) to emit edits in this format:
+
+```
+HASHLINE_EDIT <file_path>
+REPLACE <hash_ref>
+<new_content_line_1>
+<new_content_line_2>
+...
+END
+INSERT_AFTER <hash_ref>
+<new_content_line_1>
+<new_content_line_2>
+...
+END
+DELETE <hash_ref>
+END
+HASHLINE_EDIT_END
 ```
 
-### README.md Addition
+**Notes:**
+- `<new_content>` between `REPLACE`/`INSERT_AFTER` and `END` can be multi-line.
+- `DELETE` has no content between the hash line and `END`.
+- Multiple operations in a single `HASHLINE_EDIT` block are applied top-to-bottom.
+- File path is relative to the project root.
 
-Add after the Quick Start section:
+---
 
-```markdown
-## Brownfield Mode (Existing Projects)
+## 5. Error Handling Strategy
 
-Work on existing codebases — claw-forge analyzes your project and respects your patterns.
+### Error Types
 
-\```bash
-# Analyze your project
-claw-forge analyze --project ./myapp
+All errors raised from hashline.py use `HashlineError` (subclass of `Exception`).
 
-# Add a feature (auto-analyzes if needed)
-claw-forge add "Add rate limiting to API endpoints" --project ./myapp
+| Error Condition | Message Format | Recovery |
+|---|---|---|
+| Hash not found | `"Hash '{hash_ref}' not found in file. Available hashes: ..."` | Agent sees error, re-reads file to get current hashes |
+| Ambiguous hash | `"Hash '{hash_ref}' matches multiple lines. Use collision suffix: {hash_ref}_2, {hash_ref}_3"` | Agent uses suffixed version |
+| Malformed edit block | `"Malformed edit block: expected REPLACE/INSERT_AFTER/DELETE, got '{line}'"` | Agent re-formats edit |
+| Empty file | Return empty string from `annotate()` — NOT an error | N/A |
+| File not found | Re-raise `FileNotFoundError` from `read_file_annotated()` | Agent checks path |
+| Binary file | `"Cannot annotate binary file: {path}"` | Agent uses binary-aware tool |
 
-# Fix a bug (Red-Green protocol)
-claw-forge fix "Login 500 on emails with plus signs" --project ./myapp
-\```
+### Hook Error Handling
 
-See [docs/brownfield.md](docs/brownfield.md) for the full guide.
+- **PostToolUse (Read hook):** If `annotate()` raises (e.g., binary file), let the original unmodified content pass through. Log a warning but don't crash the agent.
+- **PreToolUse (Edit hook):** If `parse_edit_ops()` or `apply_edits()` raises, return the error message to the agent as a tool error. The agent can then retry.
+
+### Graceful Degradation
+
+- If `edit_mode="hashline"` is set but the agent produces a normal `str_replace` style edit (no `HASHLINE_EDIT` markers), the edit passes through unchanged. The hashline hook is a **filter**, not a gate.
+- Binary files are never annotated — the Read hook checks for null bytes in the first 8192 bytes and skips annotation.
+
+---
+
+## 6. Test Plan
+
+### Test File: `tests/test_hashline.py`
+
+Target: **≥90% line coverage** on `claw_forge/hashline.py`.
+
+#### `compute_hash` tests
+
+| Test | Description |
+|---|---|
+| `test_compute_hash_basic` | Simple string → 3-char hex output |
+| `test_compute_hash_strips_whitespace` | `"  hello  "` and `"hello"` produce same hash |
+| `test_compute_hash_empty_string` | Empty string produces a valid 3-char hash |
+| `test_compute_hash_returns_3_chars` | Output is always exactly 3 hex characters |
+| `test_compute_hash_deterministic` | Same input always produces same output |
+| `test_compute_hash_different_inputs` | Different inputs produce different hashes (spot check, not guaranteed) |
+
+#### `annotate` tests
+
+| Test | Description |
+|---|---|
+| `test_annotate_single_line` | One line → `"<hash>\|<content>\n"` |
+| `test_annotate_multiline` | Multiple lines each get their own hash |
+| `test_annotate_empty_string` | Empty string → empty string |
+| `test_annotate_empty_lines` | Blank lines get hashes (e3b hash of empty) |
+| `test_annotate_preserves_content` | Content after the `\|` is unchanged (including indentation) |
+| `test_annotate_collision_handling` | Two lines with same stripped content → `hash`, `hash_2` |
+| `test_annotate_triple_collision` | Three identical lines → `hash`, `hash_2`, `hash_3` |
+| `test_annotate_trailing_newline_preserved` | If input ends with `\n`, output does too |
+| `test_annotate_no_trailing_newline` | If input doesn't end with `\n`, output doesn't either |
+| `test_annotate_unicode` | Unicode content (CJK, emoji) is handled correctly |
+| `test_annotate_tabs_and_spaces` | Lines with different whitespace but same stripped content collide |
+
+#### `apply_edits` tests
+
+| Test | Description |
+|---|---|
+| `test_apply_replace_single_line` | Replace one line by hash |
+| `test_apply_replace_with_multiline` | Replace one line with multiple lines |
+| `test_apply_insert_after` | Insert new content after a target line |
+| `test_apply_insert_after_last_line` | Insert after the final line of file |
+| `test_apply_delete` | Delete a line by hash |
+| `test_apply_multiple_edits` | Apply replace + insert_after + delete in one batch |
+| `test_apply_edits_preserves_untouched_lines` | Lines not referenced remain unchanged |
+| `test_apply_edits_invalid_hash_raises` | Non-existent hash → `HashlineError` |
+| `test_apply_edits_empty_edits_list` | Empty edit list → content unchanged |
+| `test_apply_edits_collision_suffix` | Edit targeting `hash_2` hits the second occurrence |
+| `test_apply_edits_delete_all_lines` | Delete every line → empty string |
+| `test_apply_replace_empty_content` | Replace with empty string → effectively delete but leave empty line |
+| `test_apply_edits_order_matters` | Sequential edits applied top-to-bottom |
+
+#### `read_file_annotated` tests
+
+| Test | Description |
+|---|---|
+| `test_read_file_annotated_basic` | Read a real file, verify annotated output |
+| `test_read_file_annotated_nonexistent` | Missing file → `FileNotFoundError` |
+| `test_read_file_annotated_directory` | Directory path → `IsADirectoryError` |
+| `test_read_file_annotated_empty_file` | Empty file → empty string |
+| `test_read_file_annotated_binary_detection` | File with null bytes → `HashlineError("Cannot annotate binary file")` |
+
+#### `write_file_with_edits` tests
+
+| Test | Description |
+|---|---|
+| `test_write_file_with_edits_basic` | Read + edit + write + verify file on disk |
+| `test_write_file_with_edits_returns_annotated` | Return value is the new annotated content |
+| `test_write_file_with_edits_nonexistent` | Missing file → `FileNotFoundError` |
+| `test_write_file_with_edits_invalid_hash` | Bad hash → `HashlineError`, file unchanged |
+| `test_write_file_with_edits_atomicity` | On error, original file is NOT modified |
+
+#### `parse_edit_ops` tests
+
+| Test | Description |
+|---|---|
+| `test_parse_single_replace` | Parse one REPLACE block |
+| `test_parse_single_insert_after` | Parse one INSERT_AFTER block |
+| `test_parse_single_delete` | Parse one DELETE block |
+| `test_parse_multiple_ops` | Parse a block with all three op types |
+| `test_parse_multiline_content` | REPLACE with multi-line new content |
+| `test_parse_empty_text` | No HASHLINE_EDIT markers → empty list |
+| `test_parse_malformed_raises` | Missing END marker → `HashlineError` |
+| `test_parse_unknown_op_raises` | Unknown operation type → `HashlineError` |
+| `test_parse_multiple_edit_blocks` | Multiple HASHLINE_EDIT blocks for different files (returns all ops) |
+
+#### `build_system_prompt_fragment` tests
+
+| Test | Description |
+|---|---|
+| `test_prompt_fragment_not_empty` | Returns non-empty string |
+| `test_prompt_fragment_contains_hash_format` | Mentions the `\|` separator |
+| `test_prompt_fragment_contains_edit_ops` | Mentions REPLACE, INSERT_AFTER, DELETE |
+| `test_prompt_fragment_contains_example` | Contains at least one usage example |
+
+#### Integration tests
+
+| Test | Description |
+|---|---|
+| `test_roundtrip_annotate_edit_verify` | annotate → parse_edit_ops → apply_edits → verify content correct |
+| `test_roundtrip_file_read_write` | read_file_annotated → construct edits → write_file_with_edits → read again → verify |
+| `test_hashline_with_real_python_file` | Use a multi-function Python file as input, apply realistic edits |
+
+#### CLI integration tests (in `tests/test_cli_commands.py` or new test file)
+
+| Test | Description |
+|---|---|
+| `test_run_accepts_edit_mode_flag` | `claw-forge run --edit-mode hashline` doesn't error on parsing |
+| `test_run_default_edit_mode` | Default is `str_replace` |
+| `test_run_invalid_edit_mode` | Invalid value → error message |
+
+---
+
+## 7. Constraints and Assumptions
+
+### Constraints
+
+1. **No new dependencies.** hashline.py uses only `hashlib`, `dataclasses`, `enum`, `pathlib`, and `re` from the stdlib. No pip installs needed.
+
+2. **Backward compatibility.** `--edit-mode str_replace` (the default) must produce identical behaviour to the current codebase. No existing test should break.
+
+3. **The `claw_forge/hashline.py` file goes in the package root** — NOT in `claw_forge/agent/` or `claw_forge/tools/`. It's a utility module usable by any layer.
+
+4. **Hook-based integration.** Hashline mode is implemented via SDK hooks (PostToolUse for Read, PreToolUse for Edit), NOT by modifying the SDK or adding new tools. This keeps the integration clean and reversible.
+
+5. **System prompt injection.** The hashline instructions are prepended to the system prompt, not added as a separate tool description. The agent still uses the standard `Read` and `Edit` tools — the hooks transparently translate.
+
+6. **Coverage ≥ 90%.** `tests/test_hashline.py` must achieve ≥90% line coverage on `claw_forge/hashline.py`. Run with `uv run pytest tests/test_hashline.py --cov=claw_forge.hashline --cov-report=term-missing`.
+
+7. **All existing tests must pass.** Run `uv run pytest tests/ -x -q` before and after changes. Zero regressions.
+
+8. **Python 3.11+ only.** Use modern typing syntax (`str | None`, `list[str]`).
+
+9. **Package structure.** The module lives at `claw_forge/hashline.py` (flat, same level as `cli.py`, `lsp.py`, `output_parser.py`, `scaffold.py`). This follows the existing pattern of utility modules in the package root.
+
+### Assumptions
+
+1. **SHA256 is sufficient.** With 3 hex characters (4096 possible values) and typical file sizes (<1000 lines), collisions are manageable via the `_N` suffix scheme. For files with >500 lines, collision rate is ~6% which is handled automatically.
+
+2. **Agents can follow structured output formats.** The `HASHLINE_EDIT` block format is simple enough for all models that support claw-forge (Claude, Grok, GLM, MiniMax, etc.).
+
+3. **The hook system supports our use case.** We assume `PostToolUse` can modify tool results and `PreToolUse` can modify tool inputs. Based on the SDK hook architecture in `hooks.py`, this is confirmed.
+
+4. **No concurrent file edits.** Hashline assumes single-agent-per-file at any point. The existing claw-forge dispatcher already ensures this via task dependency ordering.
+
+5. **Text files only.** Hashline mode is designed for text files. Binary files (detected by null bytes in first 8KB) are passed through without annotation.
+
+6. **The agent runner passes `edit_mode` to hooks.** This requires threading `edit_mode` through `ClaudeAgentOptions` metadata or passing it as a closure variable to hook factories. The plan uses hook factories that capture `edit_mode`.
+
+### Out of Scope
+
+- Benchmarking infrastructure (can1357's methodology replication) — separate PR
+- Brownfield mode integration (`claw-forge add`, `claw-forge fix`) — separate PR  
+- MCP tool integration (exposing hashline as an MCP tool) — not needed; hooks are cleaner
+- UI changes (showing edit mode in Kanban board) — separate PR
+- `claw-forge.yaml` schema validation for the new `edit_mode` field — use existing pattern
+
+---
+
+## Appendix: System Prompt Fragment (draft)
+
+The `build_system_prompt_fragment()` function returns text similar to:
+
+```
+## Hashline Edit Mode
+
+When you read files, each line is prefixed with a content hash:
+
+```
+a3f|def hello():
+7b2|    return "world"
+0e1|}
+```
+
+The hash (before the `|`) is a short identifier for that line's content. Use these hashes to reference lines when editing.
+
+### Reading Files
+Use the `Read` tool normally. The output will be hashline-annotated automatically.
+
+### Editing Files
+Instead of reproducing exact text, reference lines by hash. Use this format:
+
+```
+HASHLINE_EDIT path/to/file.py
+REPLACE a3f
+def hello(name: str):
+END
+INSERT_AFTER 7b2
+    print(f"Hello {name}")
+END
+DELETE 0e1
+END
+HASHLINE_EDIT_END
+```
+
+**Operations:**
+- `REPLACE <hash>` — replace the line matching <hash> with the content before END (can be multi-line)
+- `INSERT_AFTER <hash>` — insert content after the line matching <hash>
+- `DELETE <hash>` — remove the line matching <hash>
+
+**Collision handling:** If two lines have the same hash, they'll be shown as `a3f`, `a3f_2`, etc. Use the suffixed version to target a specific occurrence.
+
+**Important:** Always use the hashes from the most recent file read. If you edit a file, the hashes may change — re-read the file to get updated hashes.
 ```
