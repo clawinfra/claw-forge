@@ -53,7 +53,11 @@ async def bash_security_hook(
     context: HookContext,
 ) -> SyncHookJSONOutput:
     """Validate bash commands against the allowlist before execution."""
-    raw_cmd: str = str(input_data.get("command", "")) if isinstance(input_data, dict) else str(input_data)
+    raw_cmd: str = (
+        str(input_data.get("command", ""))
+        if isinstance(input_data, dict)
+        else str(input_data)
+    )
     cmd_name = _extract_command_name(str(raw_cmd))
 
     # Hardcoded blocklist — never allowed
