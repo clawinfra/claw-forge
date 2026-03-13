@@ -2,17 +2,27 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import claude_agent_sdk
 from claude_agent_sdk import McpServerConfig, PermissionMode, query
-from claude_agent_sdk.types import HookEvent, HookMatcher, SdkPluginConfig, ThinkingConfig
+from claude_agent_sdk.types import (
+    HookEvent,
+    HookMatcher,
+    SandboxNetworkConfig,
+    SandboxSettings,
+    SdkPluginConfig,
+    ThinkingConfig,
+)
 
 from claw_forge.pool.providers.base import ProviderConfig
 
 from .hooks import get_default_hooks
+from .permissions import make_can_use_tool
 from .tools import get_max_turns, get_tools_for_agent
 
 
@@ -157,6 +167,62 @@ async def run_agent(
                 existing_paths.add(sp["path"])
                 resolved_lsp_plugins.append(sp)
 
+    # Isolate spawned Claude process from user's global plugins.
+    #
+    # Background: claude-agent-sdk spawns a `claude` CLI subprocess under the
+    # hood.  That subprocess loads ~/.claude/settings.json by default, which
+    # includes the user's personal "enabledPlugins" (superpowers, explanatory-
+    # output-style, etc.).  Those plugins can conflict with claw-forge's own
+    # hooks/MCP/skills.  claw-forge already provides everything its agents
+    # need (hooks, MCP servers, skills, permissions via CanUseTool).
+    clean_settings = json.dumps({"enabledPlugins": {}})
+
+    # Filter noisy stderr from Claude CLI.
+    #
+    # Claude Code 2.1.x has a known bug where its internal hook dispatch emits
+    # "Error in hook callback hook_N: ..." messages containing minified JS
+    # source code and ZodError stack traces.  These errors are non-fatal — the
+    # agent continues working correctly — but they pollute dev.sh and binary
+    # output.  We suppress them here and let all other stderr through.
+    _agent_logger = logging.getLogger("claw_forge.agent")
+    _hook_error_lines_remaining = 0
+
+    def _stderr_filter(line: str) -> None:
+        nonlocal _hook_error_lines_remaining
+        # The hook error spans multiple lines (~10-20):
+        #   Error in hook callback hook_N: ...   (start)
+        #   12626 | - Integrate the ...          (middle — minified JS, rules)
+        #   ZodError: [                          (end)
+        #     { "code": "invalid_union" ...      (trailing JSON)
+        # When we see the start marker, suppress the next 30 lines.
+        if "Error in hook callback hook_" in line:
+            _hook_error_lines_remaining = 30
+            _agent_logger.debug("Suppressed Claude CLI hook error: %s", line[:200])
+            return
+        if _hook_error_lines_remaining > 0:
+            _hook_error_lines_remaining -= 1
+            return
+        sys.stderr.write(line)
+        sys.stderr.flush()
+
+    # OS-level sandbox: restricts the Bash subprocess at the kernel level so
+    # it can only access files within the project directory.  This is the hard
+    # boundary — even python3 -c "open('/etc/passwd')" is blocked by the OS.
+    # The can_use_tool callback above provides nicer error messages, but the
+    # sandbox is the real enforcement layer.
+    sandbox_dir = project_dir or cwd
+    sandbox: SandboxSettings | None = None
+    if sandbox_dir is not None:
+        sandbox = SandboxSettings(
+            enabled=True,
+            autoAllowBashIfSandboxed=True,
+            excludedCommands=["git"],          # git needs host access for commits/push
+            allowUnsandboxedCommands=False,     # strict — no bypasses
+            network=SandboxNetworkConfig(
+                allowLocalBinding=True,         # dev servers on localhost
+            ),
+        )
+
     options = claude_agent_sdk.ClaudeAgentOptions(
         model=model,
         max_turns=max_turns,
@@ -166,7 +232,11 @@ async def run_agent(
         mcp_servers=resolved_mcp,
         system_prompt=system_prompt,
         env=env,
+        settings=clean_settings,
         setting_sources=["project"],          # enables CLAUDE.md, skills, commands per project
+        stderr=_stderr_filter,
+        can_use_tool=make_can_use_tool(project_dir=sandbox_dir),
+        sandbox=sandbox,
         max_buffer_size=10 * 1024 * 1024,     # 10MB for screenshots
         betas=["context-1m-2025-08-07"],      # 1M token context window
         hooks=hooks,

@@ -26,6 +26,7 @@ feature state management, provider pool routing, and the Kanban UI.
 16. [StreamEvent — Token-Level Streaming](#16-streamevent--token-level-streaming)
 17. [continue_conversation / resume / fork_session](#17-continue_conversation--resume--fork_session)
 18. [SandboxSettings — OS-Level Isolation](#18-sandboxsettings--os-level-isolation)
+18b. [Plugin Isolation — Clean Agent Processes](#18b-plugin-isolation--clean-agent-processes)
 19. [get_mcp_status() — Live MCP Health](#19-get_mcp_status--live-mcp-health)
 20. [PermissionUpdate — Dynamic Rule Changes](#20-permissionupdate--dynamic-rule-changes)
 
@@ -1019,6 +1020,127 @@ options = ClaudeAgentOptions(
 
 ---
 
+## 18b. Plugin Isolation — Clean Agent Processes
+
+**SDK APIs:** `ClaudeAgentOptions.settings`, `setting_sources`
+
+### The Problem
+
+`claude-agent-sdk` works by spawning a `claude` CLI subprocess under the hood:
+
+```
+claw-forge binary
+  → claude_agent_sdk.query()
+    → spawns `claude` CLI process
+      → loads ~/.claude/settings.json (user's global config)
+      → user's plugins (superpowers, explanatory-output-style, etc.) register hooks
+      → hook conflicts with claw-forge's built-in hooks → errors
+```
+
+The spawned `claude` process loads the user's `~/.claude/settings.json` by default,
+which includes their personal `enabledPlugins`. Those plugins register their own hooks
+and can conflict with claw-forge's built-in hooks, MCP servers, and skills — manifesting
+as cryptic errors like:
+
+```
+Error in hook callback hook_0: 12625 | Rules:
+12626 | - Integrate the improvements naturally into the existing structure
+...
+<minified JavaScript from Claude Code internals>
+...
+ZodError: [
+  {
+```
+
+### This Affects Both dev.sh and the Installed Binary
+
+Both `./scripts/dev.sh` (which uses `uv run` from source) and the installed binary
+(`pip install claw-forge` / `uv tool install claw-forge`) are affected. The underlying
+mechanism is the same: `claude-agent-sdk.query()` spawns a `claude` CLI subprocess,
+and that subprocess always loads `~/.claude/settings.json` — including any
+`enabledPlugins` the user has configured globally.
+
+The error manifests as `hook_N` callback failures (where N is the hook index in
+Claude Code's internal registry) because the user's plugin hooks receive unexpected
+data or conflict with claw-forge's own hooks registered via `ClaudeAgentOptions.hooks`.
+
+### The Fix (Two Layers)
+
+The fix has two layers: plugin isolation (best-effort) and stderr filtering (guaranteed).
+
+**Layer 1 — Plugin isolation (best-effort):**
+
+Pass `settings=json.dumps({"enabledPlugins": {}})` to `ClaudeAgentOptions`. This tells
+the spawned CLI to use an empty plugin set. Note: the `--settings` flag loads
+"additional" settings, so depending on how Claude Code merges them this may or may not
+fully override user plugins.
+
+**Layer 2 — stderr filter (guaranteed):**
+
+Use the SDK's `stderr` callback to suppress the non-fatal hook error noise. The errors
+don't affect agent execution — they're just cosmetic stderr pollution from Claude Code's
+internal hook dispatch.
+
+```python
+# claw_forge/agent/runner.py
+import json, logging, sys
+
+clean_settings = json.dumps({"enabledPlugins": {}})
+
+_agent_logger = logging.getLogger("claw_forge.agent")
+
+def _stderr_filter(line: str) -> None:
+    # Suppress known Claude CLI hook errors (non-fatal, cosmetic noise)
+    if "Error in hook callback hook_" in line or "ZodError:" in line:
+        _agent_logger.debug("Suppressed Claude CLI hook error: %s", line[:200])
+        return
+    sys.stderr.write(line)
+    sys.stderr.flush()
+
+options = claude_agent_sdk.ClaudeAgentOptions(
+    settings=clean_settings,         # best-effort plugin isolation
+    setting_sources=["project"],     # load project CLAUDE.md only
+    stderr=_stderr_filter,           # suppress hook error noise
+    hooks=hooks,                     # claw-forge's own hooks
+    plugins=resolved_lsp_plugins,    # claw-forge's own skill plugins
+    # ...
+)
+```
+
+### Why This Is Correct
+
+claw-forge already provides everything its agents need:
+
+| Concern | claw-forge provides | User plugin equivalent |
+|---------|--------------------|-----------------------|
+| Security hooks | `CanUseTool` + bash allowlist | superpowers security |
+| Tool hooks | `PostToolUse`, `PostToolUseFailure` | plugin hooks |
+| Prompt enrichment | `UserPromptSubmit` hook | explanatory-output-style |
+| MCP servers | In-process SDK MCP | plugin MCP servers |
+| Skills | Auto-injected LSP + agent-type skills | plugin skills |
+| Pre-compact | Context window management hook | plugin pre-compact |
+
+Loading user plugins on top of this is redundant and creates hook ordering conflicts.
+
+### Key Takeaways
+
+1. `setting_sources=["project"]` controls which **CLAUDE.md files** are loaded — it does
+   NOT control which **plugins** are active.
+
+2. `settings` with `{"enabledPlugins": {}}` is a best-effort override — the `--settings`
+   flag loads "additional" settings and the merge behavior may not fully replace the
+   user's global `enabledPlugins`.
+
+3. The `stderr` callback is the reliable fix — it filters out the non-fatal hook errors
+   regardless of whether plugin isolation works. The errors are logged at DEBUG level
+   for troubleshooting but don't pollute the user's terminal.
+
+4. The root cause is a **Claude Code CLI bug** (2.1.x) where the internal hook dispatch
+   emits minified JavaScript source code and ZodError traces to stderr. This is not
+   something claw-forge can fix — only suppress until Anthropic ships a fix.
+
+---
+
 ## 19. get_mcp_status() — Live MCP Health
 
 **SDK APIs:** `client.get_mcp_status()`, `get_server_info()`
@@ -1141,6 +1263,7 @@ async def can_use_tool(tool_name, tool_input, ctx):
 | `StreamEvent` | both | Token-level streaming to terminal UI |
 | `continue_conversation/resume` | both | Pause/resume coding sessions |
 | `SandboxSettings` | both | OS-level bash isolation |
+| `settings` (plugin isolation) | both | Override user plugins for clean agent processes |
 | `get_mcp_status()` | client | Live MCP health for Kanban health dots |
 | `PermissionUpdate` | client | Dynamic per-session permission rules |
 

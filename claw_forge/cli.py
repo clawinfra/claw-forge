@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import shutil
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -798,8 +801,13 @@ def run(
 
                         if sdk_available:
                             from claude_agent_sdk import ClaudeAgentOptions
+                            from claude_agent_sdk.types import (
+                                SandboxNetworkConfig,
+                                SandboxSettings,
+                            )
 
                             from claw_forge.agent.hooks import get_default_hooks as _ghooks
+                            from claw_forge.agent.permissions import make_can_use_tool
                             from claw_forge.agent.session import AgentSession
 
                             # UNDER LOCK: env reads + options construction
@@ -830,12 +838,49 @@ def run(
                                     auto_push=effective_auto_push,
                                 )
 
+                                # ── Stderr filter: suppress noisy Claude CLI hook errors ──
+                                # Claude Code 2.1.x emits multi-line "Error in hook
+                                # callback hook_N" errors with minified JS + ZodError
+                                # stack traces.  Non-fatal but noisy.
+                                _cli_logger = logging.getLogger("claw_forge.cli")
+                                _hook_err_remaining = 0
+
+                                def _stderr_filter(line: str) -> None:
+                                    nonlocal _hook_err_remaining
+                                    if "Error in hook callback hook_" in line:
+                                        _hook_err_remaining = 30
+                                        _cli_logger.debug(
+                                            "Suppressed hook error: %s", line[:200],
+                                        )
+                                        return
+                                    if _hook_err_remaining > 0:
+                                        _hook_err_remaining -= 1
+                                        return
+                                    sys.stderr.write(line)
+                                    sys.stderr.flush()
+
+                                # ── Sandbox: OS-level + can_use_tool ──
+                                _sandbox = SandboxSettings(
+                                    enabled=True,
+                                    autoAllowBashIfSandboxed=True,
+                                    excludedCommands=["git"],
+                                    allowUnsandboxedCommands=False,
+                                    network=SandboxNetworkConfig(
+                                        allowLocalBinding=True,
+                                    ),
+                                )
+
                                 options = ClaudeAgentOptions(
                                     model=model,
                                     cwd=str(project_path),
                                     env=sdk_env,
                                     permission_mode="bypassPermissions",
                                     hooks=agent_hooks,  # type: ignore[arg-type]
+                                    settings=json.dumps({"enabledPlugins": {}}),
+                                    setting_sources=["project"],
+                                    stderr=_stderr_filter,
+                                    can_use_tool=make_can_use_tool(project_dir=project_path),
+                                    sandbox=_sandbox,
                                 )
 
                             # OUTSIDE LOCK: connect + run (parallel with other agents)
