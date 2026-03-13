@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import fnmatch
+import logging
 from pathlib import Path
 
 from claude_agent_sdk.types import HookContext, HookInput, SyncHookJSONOutput
+
+_log = logging.getLogger("claw_forge.security")
 
 # Commands NEVER allowed regardless of config
 HARDCODED_BLOCKLIST = {
@@ -55,10 +58,14 @@ async def bash_security_hook(
 
     # Hardcoded blocklist — never allowed
     if _is_blocked(cmd_name):
-        print(f"[Security] BLOCKED (hardcoded): {cmd_name}")
+        reason = (
+            f"[Security] BLOCKED '{cmd_name}' (hardcoded)"
+            f" — command: {raw_cmd[:200]}"
+        )
+        _log.warning(reason)
         return SyncHookJSONOutput(hookSpecificOutput={  # type: ignore[typeddict-item]
             "decision": "block",
-            "reason": f"Command '{cmd_name}' is permanently blocked for security reasons.",
+            "reason": reason,
         })
 
     # Project-specific allowlist (from context if provided)
@@ -67,11 +74,15 @@ async def bash_security_hook(
     full_allowlist = DEFAULT_ALLOWLIST + project_allowlist
 
     if not _is_allowed(cmd_name, full_allowlist):
-        print(f"[Security] BLOCKED (not in allowlist): {cmd_name}")
+        reason = (
+            f"[Security] BLOCKED '{cmd_name}'"
+            f" (not in allowlist) — command: {raw_cmd[:200]}"
+        )
+        _log.warning(reason)
         return SyncHookJSONOutput(hookSpecificOutput={  # type: ignore[typeddict-item]
             "decision": "block",
-            "reason": f"Command '{cmd_name}' is not in the allowed commands list.",
+            "reason": reason,
         })
 
-    print(f"[Security] Allowed: {cmd_name}")
+    _log.debug("[Security] Allowed: %s", cmd_name)
     return SyncHookJSONOutput(hookSpecificOutput={"decision": "approve"})  # type: ignore[typeddict-item]

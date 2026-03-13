@@ -13,6 +13,7 @@ transparently.
 """
 from __future__ import annotations
 
+import logging
 import re
 import shlex
 from pathlib import Path
@@ -23,6 +24,8 @@ from claude_agent_sdk.types import (
     PermissionResultDeny,
     ToolPermissionContext,
 )
+
+_log = logging.getLogger("claw_forge.permissions")
 
 # Commands that are always blocked regardless of context
 ALWAYS_BLOCK: frozenset[str] = frozenset({
@@ -193,27 +196,45 @@ async def smart_can_use_tool(
         cmd = tool_input.get("command", "")
         for blocked in ALWAYS_BLOCK:
             if blocked in cmd:
+                msg = (
+                    f"[Sandbox] DENIED Bash — blocked command"
+                    f" '{blocked}' in: {cmd[:200]}"
+                )
+                _log.warning(msg)
                 return PermissionResultDeny(
-                    behavior="deny",
-                    message=f"Blocked: {blocked}",
+                    behavior="deny", message=msg,
                 )
         if project_dir is not None:
             denial = _check_bash_paths(cmd, project_dir)
             if denial:
-                return PermissionResultDeny(behavior="deny", message=denial)
+                msg = (
+                    f"[Sandbox] DENIED Bash — {denial}"
+                    f" — command: {cmd[:200]}"
+                )
+                _log.warning(msg)
+                return PermissionResultDeny(
+                    behavior="deny", message=msg,
+                )
 
     # ── File tools: sandbox to project_dir ────────────────────────────────
     if tool_name in FILE_TOOLS and project_dir is not None:
         # Read/Write/Edit use "file_path"; Glob/Grep use "path"
-        file_path = tool_input.get("file_path") or tool_input.get("path", "")
+        file_path = (
+            tool_input.get("file_path")
+            or tool_input.get("path", "")
+        )
         if file_path:
             try:
-                Path(file_path).resolve().relative_to(project_dir.resolve())
+                resolved = project_dir.resolve()
+                Path(file_path).resolve().relative_to(resolved)
             except ValueError:
-                action = "Write" if tool_name in WRITE_TOOLS else "Read"
+                msg = (
+                    f"[Sandbox] DENIED {tool_name}({file_path})"
+                    f" — outside project dir {project_dir}"
+                )
+                _log.warning(msg)
                 return PermissionResultDeny(
-                    behavior="deny",
-                    message=f"{action} outside project dir: {file_path}",
+                    behavior="deny", message=msg,
                 )
 
     return PermissionResultAllow(behavior="allow")
@@ -258,26 +279,45 @@ def make_can_use_tool(
             cmd = tool_input.get("command", "")
             for pattern in blocked:
                 if pattern in cmd:
+                    msg = (
+                        f"[Sandbox] DENIED Bash — blocked"
+                        f" command '{pattern}' in: {cmd[:200]}"
+                    )
+                    _log.warning(msg)
                     return PermissionResultDeny(
-                        behavior="deny",
-                        message=f"Blocked: {pattern}",
+                        behavior="deny", message=msg,
                     )
             if project_dir is not None:
                 denial = _check_bash_paths(cmd, project_dir)
                 if denial:
-                    return PermissionResultDeny(behavior="deny", message=denial)
+                    msg = (
+                        f"[Sandbox] DENIED Bash — {denial}"
+                        f" — command: {cmd[:200]}"
+                    )
+                    _log.warning(msg)
+                    return PermissionResultDeny(
+                        behavior="deny", message=msg,
+                    )
 
         # File tools: sandbox to project_dir
         if tool_name in FILE_TOOLS and project_dir is not None:
-            file_path = tool_input.get("file_path") or tool_input.get("path", "")
+            file_path = (
+                tool_input.get("file_path")
+                or tool_input.get("path", "")
+            )
             if file_path:
                 try:
-                    Path(file_path).resolve().relative_to(project_dir.resolve())
+                    resolved = project_dir.resolve()
+                    Path(file_path).resolve().relative_to(resolved)
                 except ValueError:
-                    action = "Write" if tool_name in WRITE_TOOLS else "Read"
+                    msg = (
+                        f"[Sandbox] DENIED {tool_name}"
+                        f"({file_path})"
+                        f" — outside project dir {project_dir}"
+                    )
+                    _log.warning(msg)
                     return PermissionResultDeny(
-                        behavior="deny",
-                        message=f"{action} outside project dir: {file_path}",
+                        behavior="deny", message=msg,
                     )
 
         return PermissionResultAllow(behavior="allow")

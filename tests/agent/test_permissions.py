@@ -24,7 +24,7 @@ class TestSmartCanUseTool:
         result = await smart_can_use_tool("Bash", {"command": "sudo apt install"}, {})
         assert isinstance(result, PermissionResultDeny)
         # "su" substring may match first, but both are in ALWAYS_BLOCK
-        assert result.message.startswith("Blocked:")
+        assert "[Sandbox] DENIED Bash" in result.message
 
     @pytest.mark.asyncio
     async def test_blocks_dd(self):
@@ -196,7 +196,7 @@ class TestMakeCanUseTool:
         callback = make_can_use_tool(project_dir=tmp_path)
         result = await callback("Read", {"file_path": "/etc/passwd"}, {})
         assert isinstance(result, PermissionResultDeny)
-        assert "Read outside project dir" in result.message
+        assert "DENIED Read(/etc/passwd)" in result.message
 
     @pytest.mark.asyncio
     async def test_read_inside_project_dir_allows(self, tmp_path):
@@ -429,4 +429,4 @@ class TestBashSandboxIntegration:
         callback = make_can_use_tool(project_dir=tmp_path)
         result = await callback("Bash", {"command": "sudo cat file.txt"}, {})
         assert isinstance(result, PermissionResultDeny)
-        assert "Blocked" in result.message
+        assert "[Sandbox] DENIED Bash" in result.message
