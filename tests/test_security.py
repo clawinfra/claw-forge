@@ -87,13 +87,13 @@ class TestBashSecurityHook:
     async def test_blocks_sudo(self):
         result = await bash_security_hook({"command": "sudo rm -rf /"}, None, {})
         assert result["hookSpecificOutput"]["decision"] == "block"
-        assert "permanently blocked" in result["hookSpecificOutput"]["reason"]
+        assert "[Security] BLOCKED" in result["hookSpecificOutput"]["reason"]
 
     @pytest.mark.asyncio
     async def test_blocks_unknown_command(self):
         result = await bash_security_hook({"command": "evil-tool --destroy"}, None, {})
         assert result["hookSpecificOutput"]["decision"] == "block"
-        assert "not in the allowed commands list" in result["hookSpecificOutput"]["reason"]
+        assert "(not in allowlist)" in result["hookSpecificOutput"]["reason"]
 
     @pytest.mark.asyncio
     async def test_project_allowlist_extends_defaults(self):
