@@ -12,7 +12,7 @@ from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, ta
 
 @pytest.fixture()
 def git_repo(tmp_path: Path) -> Path:
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, check=True, capture_output=True,
