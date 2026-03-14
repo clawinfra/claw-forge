@@ -16,6 +16,7 @@ class TaskNode:
     status: str = "pending"
     category: str = ""
     steps: list[str] = field(default_factory=list)
+    description: str = ""
 
 
 class CycleDetectedError(Exception):

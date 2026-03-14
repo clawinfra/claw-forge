@@ -72,20 +72,29 @@ class TestGitOpsIntegration:
         # Coding phase
         (git_repo / "pay.py").write_text("pay = True\n")
         asyncio.run(ops.checkpoint(
-            message="feat(pay): add payments",
+            message="Implement payment processing",
             task_id="task-1", plugin="coding",
             phase="coding", session_id="s1",
         ))
         # Testing phase
         (git_repo / "test_pay.py").write_text("assert True\n")
         asyncio.run(ops.checkpoint(
-            message="test(pay): add tests",
+            message="Add payment tests",
             task_id="task-1", plugin="testing",
             phase="testing", session_id="s1",
         ))
-        # Merge
-        result = asyncio.run(ops.merge("feat/payments"))
+        # Merge with semantic context
+        result = asyncio.run(ops.merge(
+            "feat/payments",
+            title="Implement payment processing",
+            steps=["Add Stripe integration", "Write unit tests"],
+            task_id="task-1",
+            session_id="s1",
+        ))
         assert result["merged"] is True
         # History shows the squash commit on main
         history = asyncio.run(ops.history())
         assert len(history) >= 1
+        # Verify semantic message content
+        latest = history[0]
+        assert latest["message"] == "Implement payment processing"

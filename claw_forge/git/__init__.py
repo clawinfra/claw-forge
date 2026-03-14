@@ -18,12 +18,13 @@ from claw_forge.git.branching import (
     delete_branch,
     switch_branch,
 )
-from claw_forge.git.commits import commit_checkpoint, task_history
+from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
 from claw_forge.git.merge import squash_merge
 from claw_forge.git.repo import ensure_gitignore, init_or_detect
 
 __all__ = [
     "GitOps",
+    "branch_commit_subjects",
     "branch_exists",
     "commit_checkpoint",
     "create_feature_branch",
@@ -88,13 +89,27 @@ class GitOps:
             )
 
     async def merge(
-        self, branch: str, target: str = "main"
+        self,
+        branch: str,
+        target: str = "main",
+        *,
+        title: str | None = None,
+        steps: list[str] | None = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any] | None:
         if not self.enabled:
             return None
         async with self._lock:
             return await asyncio.to_thread(
-                squash_merge, self.project_dir, branch, target
+                squash_merge,
+                self.project_dir,
+                branch,
+                target,
+                title=title,
+                steps=steps,
+                task_id=task_id,
+                session_id=session_id,
             )
 
     async def history(

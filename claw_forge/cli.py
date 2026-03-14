@@ -614,6 +614,7 @@ def run(
                     status="pending",  # reset failed/orphaned tasks to pending for retry
                     category=t.category or "",
                     steps=t.steps or [],
+                    description=t.description or "",
                 )
                 task_nodes.append(node)
 
@@ -1055,8 +1056,12 @@ def run(
 
                         # Git: checkpoint + optional merge on success
                         if git_enabled and success and git_commit_on_boundary:
+                            _desc = (
+                                task_node.description
+                                or f"{task_node.plugin_name}({_slug}): completed"
+                            )
                             await git_ops.checkpoint(
-                                message=f"{task_node.plugin_name}({_slug}): completed",
+                                message=_desc,
                                 task_id=task_node.id,
                                 plugin=task_node.plugin_name,
                                 phase=task_node.plugin_name,
@@ -1064,7 +1069,13 @@ def run(
                             )
                             if git_merge_strategy == "auto":
                                 _branch_name = f"{git_branch_prefix}/{_slug}"
-                                await git_ops.merge(_branch_name)
+                                await git_ops.merge(
+                                    _branch_name,
+                                    title=task_node.description or None,
+                                    steps=task_node.steps or None,
+                                    task_id=task_node.id,
+                                    session_id=db_session.id,
+                                )
 
                         # Notify UI via state service HTTP (best-effort)
                         await _patch_task(
@@ -1145,6 +1156,7 @@ def run(
                         status="pending",
                         category=t.category or "",
                         steps=t.steps or [],
+                        description=t.description or "",
                     )
                     for t in remaining
                 ]

@@ -83,6 +83,26 @@ def has_remote(project_dir: Path, remote: str = "origin") -> bool:
         return False
 
 
+def branch_commit_subjects(
+    project_dir: Path,
+    branch: str,
+    target: str = "main",
+) -> list[str]:
+    """Return subject lines of commits on *branch* not yet in *target*."""
+    try:
+        result = _run_git(
+            ["log", "--format=%s", f"{target}..{branch}"],
+            project_dir,
+        )
+        return [
+            s.strip()
+            for s in result.stdout.strip().splitlines()
+            if s.strip()
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def task_history(
     project_dir: Path,
     *,

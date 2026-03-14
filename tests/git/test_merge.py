@@ -84,3 +84,58 @@ class TestSquashMerge:
     def test_squash_merge_nonexistent_branch(self, git_repo: Path) -> None:
         result = squash_merge(git_repo, "feat/nonexistent")
         assert result["merged"] is False
+
+    def test_squash_merge_with_semantic_message(self, git_repo: Path) -> None:
+        create_feature_branch(git_repo, "t4", "user-auth")
+        (git_repo / "auth.py").write_text("login = True\n")
+        commit_checkpoint(
+            git_repo, message="Implement login endpoint",
+            task_id="t4", plugin="coding", phase="coding", session_id="s1",
+        )
+        (git_repo / "test_auth.py").write_text("assert True\n")
+        commit_checkpoint(
+            git_repo, message="Add auth integration tests",
+            task_id="t4", plugin="testing", phase="testing", session_id="s1",
+        )
+
+        result = squash_merge(
+            git_repo, "feat/user-auth",
+            title="Implement user authentication",
+            steps=["Create login endpoint", "Write integration tests"],
+            task_id="t4",
+            session_id="s1",
+        )
+        assert result["merged"] is True
+
+        # Verify the commit message on main
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        body = log.stdout
+        assert "Implement user authentication" in body
+        assert "Completed Steps:" in body
+        assert "- [x] Create login endpoint" in body
+        assert "- [x] Write integration tests" in body
+        assert "Completed Phases:" in body
+        assert "- Implement login endpoint" in body
+        assert "- Add auth integration tests" in body
+        assert "Task-ID: t4" in body
+        assert "Session: s1" in body
+
+    def test_squash_merge_without_context_uses_default(
+        self, git_repo: Path,
+    ) -> None:
+        create_feature_branch(git_repo, "t5", "legacy")
+        (git_repo / "legacy.py").write_text("old = True\n")
+        commit_checkpoint(
+            git_repo, message="feat(legacy): add old module",
+            task_id="t5", plugin="coding", phase="coding", session_id="s1",
+        )
+        squash_merge(git_repo, "feat/legacy")
+
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        assert log.stdout.strip() == "merge: feat/legacy (squash)"

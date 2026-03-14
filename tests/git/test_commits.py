@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from claw_forge.git.commits import commit_checkpoint, task_history
+from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
 
 
 @pytest.fixture()
@@ -141,3 +141,33 @@ class TestTaskHistory:
         assert "timestamp" in commit
         assert "trailers" in commit
         assert commit["trailers"]["plugin"] == "coding"
+
+
+class TestBranchCommitSubjects:
+    def test_returns_subjects_from_branch(self, git_repo: Path) -> None:
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/test"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        (git_repo / "a.py").write_text("a = 1\n")
+        commit_checkpoint(
+            git_repo, message="feat: first change",
+            task_id="t1", plugin="coding", phase="coding", session_id="s1",
+        )
+        (git_repo / "b.py").write_text("b = 2\n")
+        commit_checkpoint(
+            git_repo, message="test: add tests",
+            task_id="t1", plugin="testing", phase="testing", session_id="s1",
+        )
+        subjects = branch_commit_subjects(git_repo, "feat/test", "main")
+        assert len(subjects) == 2
+        assert "feat: first change" in subjects
+        assert "test: add tests" in subjects
+
+    def test_returns_empty_for_no_diff(self, git_repo: Path) -> None:
+        subjects = branch_commit_subjects(git_repo, "main", "main")
+        assert subjects == []
+
+    def test_returns_empty_for_nonexistent_branch(self, git_repo: Path) -> None:
+        subjects = branch_commit_subjects(git_repo, "nonexistent", "main")
+        assert subjects == []
