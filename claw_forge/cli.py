@@ -412,6 +412,22 @@ def run(
     from claw_forge.orchestrator.dispatcher import Dispatcher
     from claw_forge.state.scheduler import TaskNode
 
+    def _task_dicts_to_nodes(dicts: list[dict[str, Any]]) -> list[TaskNode]:
+        """Convert task dicts from the state service API into TaskNode objects."""
+        return [
+            TaskNode(
+                id=t["id"],
+                plugin_name=t["plugin_name"],
+                priority=t.get("priority", 0),
+                depends_on=t.get("depends_on") or [],
+                status="pending",
+                category=t.get("category") or "",
+                steps=t.get("steps") or [],
+                description=t.get("description") or "",
+            )
+            for t in dicts
+        ]
+
     # Resolve config path: prefer project-relative if config is a bare filename
     _config_path = Path(config)
     if not _config_path.is_absolute() and not _config_path.exists():
@@ -554,566 +570,543 @@ def run(
             )
             return
 
-        task_nodes: list[TaskNode] = []
-        for t in raw_tasks:
-            node = TaskNode(
-                id=t["id"],
-                plugin_name=t["plugin_name"],
-                priority=t.get("priority", 0),
-                depends_on=t.get("depends_on") or [],
-                status="pending",
-                category=t.get("category") or "",
-                steps=t.get("steps") or [],
-                description=t.get("description") or "",
+        task_nodes = _task_dicts_to_nodes(raw_tasks)
+
+        # Dry-run: print tasks and exit
+        if dry_run:
+            from claw_forge.state.scheduler import Scheduler
+
+            scheduler = Scheduler()
+            for tn in task_nodes:
+                scheduler.add_task(tn)
+            waves = scheduler.get_execution_order()
+
+            console.print(f"\n[bold]Execution plan ({len(waves)} waves):[/bold]\n")
+            for wave_idx, wave in enumerate(waves, 1):
+                console.print(f"  Wave {wave_idx}:")
+                for task_id in wave:
+                    matched = next(
+                        (t for t in task_nodes if t.id == task_id), None,
+                    )
+                    if matched:
+                        desc = matched.description or matched.plugin_name
+                        console.print(f"    • {task_id[:8]}…  {desc}")
+            console.print(
+                f"\n[dim]To run: claw-forge run --project {project_path}[/dim]\n"
+                f"[dim]Board:  claw-forge ui  --project {project_path}[/dim]"
             )
-            task_nodes.append(node)
+            return
 
-            # Dry-run: print tasks and exit
-            if dry_run:
-                from claw_forge.state.scheduler import Scheduler
+        # Build provider pool for direct API fallback
+        from claw_forge.pool.manager import ProviderPoolManager
 
-                scheduler = Scheduler()
-                for tn in task_nodes:
-                    scheduler.add_task(tn)
-                waves = scheduler.get_execution_order()
+        configs = load_configs_from_yaml(cfg)
+        pool = ProviderPoolManager(configs) if configs else None
 
-                console.print(f"\n[bold]Execution plan ({len(waves)} waves):[/bold]\n")
-                for wave_idx, wave in enumerate(waves, 1):
-                    console.print(f"  Wave {wave_idx}:")
-                    for task_id in wave:
-                        matched = next(
-                            (t for t in task_nodes if t.id == task_id), None,
-                        )
-                        if matched:
-                            desc = matched.description or matched.plugin_name
-                            console.print(f"    • {task_id[:8]}…  {desc}")
-                console.print(
-                    f"\n[dim]To run: claw-forge run --project {project_path}[/dim]\n"
-                    f"[dim]Board:  claw-forge ui  --project {project_path}[/dim]"
+        # Lock to serialise env-sensitive options construction.
+        # Matches the _env_client_lock pattern from autonomous-coding:
+        # env reads + ClaudeAgentOptions creation happen under lock;
+        # AgentSession connect + agent execution run fully in parallel.
+        # The dispatcher's Semaphore(max_concurrency) gates overall
+        # concurrency; this lock only prevents env-read races.
+        _env_lock = asyncio.Lock()
+
+        # Build task handler — communicates with the state service via HTTP
+        # so that WebSocket events are broadcast to the Kanban UI.
+        async def _patch_task(
+            client: httpx.AsyncClient, task_id: str, **fields: Any,
+        ) -> None:
+            """PATCH task status via HTTP (triggers WS broadcast)."""
+            with suppress(httpx.HTTPError):
+                await client.patch(
+                    f"{_state_base}/tasks/{task_id}",
+                    json=fields, timeout=5,
                 )
+
+        def _short_name(desc: str) -> str:
+            """Extract a short label from a task description.
+
+            Strips common prefixes like "Task X:" or "Feature N:" and
+            truncates to 40 chars so the activity log stays scannable.
+            """
+            import re
+
+            # Remove "Task <word>: " or "Feature <word>: " prefix
+            cleaned = re.sub(
+                r"^(?:task|feature)\s+\S+:\s*",
+                "",
+                desc,
+                flags=re.IGNORECASE,
+            )
+            if len(cleaned) > 40:
+                return cleaned[:37] + "…"
+            return cleaned
+
+        def _first_line(text: str, max_len: int = 120) -> str:
+            """Return the first non-empty line, truncated."""
+            line = text.strip().split("\n", 1)[0].strip()
+            if len(line) > max_len:
+                return line[:max_len - 1] + "…"
+            return line
+
+        # Map tool names to the input key that best describes what they do
+        _TOOL_KEY: dict[str, str] = {
+            "Write": "file_path", "Edit": "file_path",
+            "Read": "file_path", "Bash": "command",
+            "Glob": "pattern", "Grep": "pattern",
+        }
+
+        def _fmt_tool(name: str, raw: object) -> str:
+            """Format tool input into a short human-readable string."""
+            if isinstance(raw, dict):
+                key = _TOOL_KEY.get(name)
+                if key and key in raw:
+                    val = str(raw[key])
+                    if name == "Bash":
+                        val = val[:80]
+                    return val
+            return str(raw)[:80]
+
+        # Dedup: track all logged (role, content) per task to avoid
+        # duplicates from SDK yielding streaming + complete messages.
+        _seen_logs: dict[str, set[tuple[str, str]]] = {}
+
+        async def _log_agent(
+            client: httpx.AsyncClient,
+            task_id: str,
+            task_name: str,
+            role: str,
+            content: str,
+            level: str = "info",
+            model: str = "",
+        ) -> None:
+            """POST agent log entry via HTTP (triggers WS broadcast)."""
+            short = _first_line(content)
+            # Skip any duplicate (same role + content already seen for this task)
+            key = (role, short)
+            seen = _seen_logs.setdefault(task_id, set())
+            if key in seen:
                 return
-
-            # Build provider pool for direct API fallback
-            from claw_forge.pool.manager import ProviderPoolManager
-
-            configs = load_configs_from_yaml(cfg)
-            pool = ProviderPoolManager(configs) if configs else None
-
-            # Lock to serialise env-sensitive options construction.
-            # Matches the _env_client_lock pattern from autonomous-coding:
-            # env reads + ClaudeAgentOptions creation happen under lock;
-            # AgentSession connect + agent execution run fully in parallel.
-            # The dispatcher's Semaphore(max_concurrency) gates overall
-            # concurrency; this lock only prevents env-read races.
-            _env_lock = asyncio.Lock()
-
-            # Build task handler — communicates with the state service via HTTP
-            # so that WebSocket events are broadcast to the Kanban UI.
-            async def _patch_task(
-                client: httpx.AsyncClient, task_id: str, **fields: Any,
-            ) -> None:
-                """PATCH task status via HTTP (triggers WS broadcast)."""
-                with suppress(httpx.HTTPError):
-                    await client.patch(
-                        f"{_state_base}/tasks/{task_id}",
-                        json=fields, timeout=5,
-                    )
-
-            def _short_name(desc: str) -> str:
-                """Extract a short label from a task description.
-
-                Strips common prefixes like "Task X:" or "Feature N:" and
-                truncates to 40 chars so the activity log stays scannable.
-                """
-                import re
-
-                # Remove "Task <word>: " or "Feature <word>: " prefix
-                cleaned = re.sub(
-                    r"^(?:task|feature)\s+\S+:\s*",
-                    "",
-                    desc,
-                    flags=re.IGNORECASE,
+            seen.add(key)
+            with suppress(httpx.HTTPError):
+                await client.post(
+                    f"{_state_base}/tasks/{task_id}/agent-log",
+                    json={
+                        "role": role,
+                        "content": short,
+                        "task_name": _short_name(task_name),
+                        "level": level,
+                        "model": model or None,
+                    },
+                    timeout=5,
                 )
-                if len(cleaned) > 40:
-                    return cleaned[:37] + "…"
-                return cleaned
 
-            def _first_line(text: str, max_len: int = 120) -> str:
-                """Return the first non-empty line, truncated."""
-                line = text.strip().split("\n", 1)[0].strip()
-                if len(line) > max_len:
-                    return line[:max_len - 1] + "…"
-                return line
-
-            # Map tool names to the input key that best describes what they do
-            _TOOL_KEY: dict[str, str] = {
-                "Write": "file_path", "Edit": "file_path",
-                "Read": "file_path", "Bash": "command",
-                "Glob": "pattern", "Grep": "pattern",
-            }
-
-            def _fmt_tool(name: str, raw: object) -> str:
-                """Format tool input into a short human-readable string."""
-                if isinstance(raw, dict):
-                    key = _TOOL_KEY.get(name)
-                    if key and key in raw:
-                        val = str(raw[key])
-                        if name == "Bash":
-                            val = val[:80]
-                        return val
-                return str(raw)[:80]
-
-            # Dedup: track all logged (role, content) per task to avoid
-            # duplicates from SDK yielding streaming + complete messages.
-            _seen_logs: dict[str, set[tuple[str, str]]] = {}
-
-            async def _log_agent(
-                client: httpx.AsyncClient,
-                task_id: str,
-                task_name: str,
-                role: str,
-                content: str,
-                level: str = "info",
-                model: str = "",
-            ) -> None:
-                """POST agent log entry via HTTP (triggers WS broadcast)."""
-                short = _first_line(content)
-                # Skip any duplicate (same role + content already seen for this task)
-                key = (role, short)
-                seen = _seen_logs.setdefault(task_id, set())
-                if key in seen:
-                    return
-                seen.add(key)
-                with suppress(httpx.HTTPError):
-                    await client.post(
-                        f"{_state_base}/tasks/{task_id}/agent-log",
-                        json={
-                            "role": role,
-                            "content": short,
-                            "task_name": _short_name(task_name),
-                            "level": level,
-                            "model": model or None,
-                        },
-                        timeout=5,
+        async def task_handler(task_node: TaskNode) -> dict[str, Any]:
+            async with httpx.AsyncClient() as http:
+                # Fetch task details + mark as running via HTTP
+                task_resp = await http.get(
+                    f"{_state_base}/tasks/{task_node.id}", timeout=10,
+                )
+                task_resp.raise_for_status()
+                task_data = task_resp.json()
+                task_name = (
+                    task_data.get("description") or task_data["plugin_name"]
+                )
+                prompt = (
+                    task_data.get("description")
+                    or f"Execute task: {task_data['plugin_name']}"
+                )
+                steps = task_data.get("steps") or []
+                if steps:
+                    numbered = "\n".join(
+                        f"{i + 1}. {s}" for i, s in enumerate(steps)
                     )
+                    prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
 
-            async def task_handler(task_node: TaskNode) -> dict[str, Any]:
-                async with httpx.AsyncClient() as http:
-                    # Fetch task details + mark as running via HTTP
-                    task_resp = await http.get(
-                        f"{_state_base}/tasks/{task_node.id}", timeout=10,
-                    )
-                    task_resp.raise_for_status()
-                    task_data = task_resp.json()
-                    task_name = (
-                        task_data.get("description") or task_data["plugin_name"]
-                    )
-                    prompt = (
-                        task_data.get("description")
-                        or f"Execute task: {task_data['plugin_name']}"
-                    )
-                    steps = task_data.get("steps") or []
-                    if steps:
-                        numbered = "\n".join(
-                            f"{i + 1}. {s}" for i, s in enumerate(steps)
-                        )
-                        prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
+                # Mark running via HTTP (triggers WS broadcast + sets started_at)
+                await _patch_task(http, task_node.id, status="running")
 
-                    # Mark running via HTTP (triggers WS broadcast + sets started_at)
-                    await _patch_task(http, task_node.id, status="running")
+                # Create a feature branch for this task (best-effort — git
+                # errors must not crash the dispatcher or leave tasks stuck).
+                import logging as _logging
+                import re as _re
 
-                    # Create a feature branch for this task (best-effort — git
-                    # errors must not crash the dispatcher or leave tasks stuck).
-                    import logging as _logging
-                    import re as _re
-
-                    _slug = _re.sub(
-                        r"[^a-z0-9]+", "-",
-                        (task_node.plugin_name + "-" + task_node.id[:8]).lower(),
-                    ).strip("-")
-                    if git_enabled:
-                        try:
-                            await git_ops.create_branch(
-                                task_node.id, _slug, prefix=git_branch_prefix,
-                            )
-                        except Exception as _git_branch_err:
-                            _logging.getLogger(__name__).warning(
-                                "Git branch creation failed for task %s (continuing): %s",
-                                task_node.id, _git_branch_err,
-                            )
-
-                    output = ""
-                    success = False
-                    _cancelled = False
-
+                _slug = _re.sub(
+                    r"[^a-z0-9]+", "-",
+                    (task_node.plugin_name + "-" + task_node.id[:8]).lower(),
+                ).strip("-")
+                if git_enabled:
                     try:
-                        # ── Option 1: claude_agent_sdk + claude CLI (full autonomous agent) ──
-                        # claude_agent_sdk is a declared dependency so it's always installed.
-                        # It requires the `claude` CLI in PATH to actually run agents.
-                        sdk_available = (
-                            shutil.which("claude") is not None
+                        await git_ops.create_branch(
+                            task_node.id, _slug, prefix=git_branch_prefix,
+                        )
+                    except Exception as _git_branch_err:
+                        _logging.getLogger(__name__).warning(
+                            "Git branch creation failed for task %s (continuing): %s",
+                            task_node.id, _git_branch_err,
                         )
 
-                        if sdk_available:
-                            from claude_agent_sdk import ClaudeAgentOptions
-                            from claude_agent_sdk.types import (
-                                SandboxNetworkConfig,
-                                SandboxSettings,
-                            )
+                output = ""
+                success = False
+                _cancelled = False
 
-                            from claw_forge.agent.hooks import get_default_hooks as _ghooks
-                            from claw_forge.agent.permissions import make_can_use_tool
-                            from claw_forge.agent.session import AgentSession
+                try:
+                    # ── Option 1: claude_agent_sdk + claude CLI (full autonomous agent) ──
+                    # claude_agent_sdk is a declared dependency so it's always installed.
+                    # It requires the `claude` CLI in PATH to actually run agents.
+                    sdk_available = (
+                        shutil.which("claude") is not None
+                    )
 
-                            # UNDER LOCK: env reads + options construction
-                            # (matches autonomous-coding _env_client_lock pattern)
-                            async with _env_lock:
-                                sdk_env: dict[str, str] = {}
-                                _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-                                if not _api_key and pool is not None:
+                    if sdk_available:
+                        from claude_agent_sdk import ClaudeAgentOptions
+                        from claude_agent_sdk.types import (
+                            SandboxNetworkConfig,
+                            SandboxSettings,
+                        )
+
+                        from claw_forge.agent.hooks import get_default_hooks as _ghooks
+                        from claw_forge.agent.permissions import make_can_use_tool
+                        from claw_forge.agent.session import AgentSession
+
+                        # UNDER LOCK: env reads + options construction
+                        # (matches autonomous-coding _env_client_lock pattern)
+                        async with _env_lock:
+                            sdk_env: dict[str, str] = {}
+                            _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                            if not _api_key and pool is not None:
+                                _provs = pool.providers
+                                if _provs and hasattr(_provs[0], "config"):
+                                    _api_key = _provs[0].config.api_key or ""
+                            if _api_key:
+                                sdk_env["ANTHROPIC_API_KEY"] = _api_key
+                            elif not _api_key:
+                                _oauth_tok = os.environ.get("ANTHROPIC_SETUP_TOKEN", "")
+                                if not _oauth_tok and pool is not None:
                                     _provs = pool.providers
                                     if _provs and hasattr(_provs[0], "config"):
-                                        _api_key = _provs[0].config.api_key or ""
-                                if _api_key:
-                                    sdk_env["ANTHROPIC_API_KEY"] = _api_key
-                                elif not _api_key:
-                                    _oauth_tok = os.environ.get("ANTHROPIC_SETUP_TOKEN", "")
-                                    if not _oauth_tok and pool is not None:
-                                        _provs = pool.providers
-                                        if _provs and hasattr(_provs[0], "config"):
-                                            _cfg = _provs[0].config
-                                            _oauth_tok = getattr(_cfg, "oauth_token", "") or ""
-                                    if _oauth_tok:
-                                        sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
+                                        _cfg = _provs[0].config
+                                        _oauth_tok = getattr(_cfg, "oauth_token", "") or ""
+                                if _oauth_tok:
+                                    sdk_env["ANTHROPIC_SETUP_TOKEN"] = _oauth_tok
 
-                                agent_hooks = _ghooks(
-                                    edit_mode=edit_mode,
-                                    loop_detect_threshold=loop_detect_threshold,
-                                    verify_on_exit=effective_verify_on_exit,
-                                    auto_push=effective_auto_push,
-                                )
+                            agent_hooks = _ghooks(
+                                edit_mode=edit_mode,
+                                loop_detect_threshold=loop_detect_threshold,
+                                verify_on_exit=effective_verify_on_exit,
+                                auto_push=effective_auto_push,
+                            )
 
-                                # ── Stderr filter: suppress noisy Claude CLI hook errors ──
-                                # Claude Code 2.1.x emits multi-line "Error in hook
-                                # callback hook_N" errors with minified JS + ZodError
-                                # stack traces.  Non-fatal but noisy.
-                                _cli_logger = logging.getLogger("claw_forge.cli")
-                                _hook_err_remaining = 0
+                            # ── Stderr filter: suppress noisy Claude CLI hook errors ──
+                            # Claude Code 2.1.x emits multi-line "Error in hook
+                            # callback hook_N" errors with minified JS + ZodError
+                            # stack traces.  Non-fatal but noisy.
+                            _cli_logger = logging.getLogger("claw_forge.cli")
+                            _hook_err_remaining = 0
 
-                                def _stderr_filter(line: str) -> None:
-                                    nonlocal _hook_err_remaining
-                                    if "Error in hook callback hook_" in line:
-                                        _hook_err_remaining = 30
-                                        _cli_logger.debug(
-                                            "Suppressed hook error: %s", line[:200],
-                                        )
-                                        return
-                                    if _hook_err_remaining > 0:
-                                        _hook_err_remaining -= 1
-                                        return
-                                    sys.stderr.write(line)
-                                    sys.stderr.flush()
-
-                                # ── Sandbox: OS-level + can_use_tool ──
-                                _sandbox = SandboxSettings(
-                                    enabled=True,
-                                    autoAllowBashIfSandboxed=True,
-                                    excludedCommands=["git"],
-                                    allowUnsandboxedCommands=False,
-                                    network=SandboxNetworkConfig(
-                                        allowLocalBinding=True,
-                                    ),
-                                )
-
-                                options = ClaudeAgentOptions(
-                                    model=model,
-                                    cwd=str(project_path),
-                                    env=sdk_env,
-                                    permission_mode="bypassPermissions",
-                                    hooks=agent_hooks,  # type: ignore[arg-type]
-                                    settings=json.dumps({"enabledPlugins": {}}),
-                                    setting_sources=["project"],
-                                    stderr=_stderr_filter,
-                                    can_use_tool=make_can_use_tool(project_dir=project_path),
-                                    sandbox=_sandbox,
-                                )
-
-                            # OUTSIDE LOCK: connect + run (parallel with other agents)
-                            full_output: list[str] = []
-                            try:
-                                async with AgentSession(options) as agent_session:
-                                    async for msg in agent_session.run(prompt):  # noqa: E501
-                                        _cls = type(msg).__name__
-                                        if _cls == "ResultMessage":
-                                            _result = getattr(msg, "result", None)
-                                            if _result:
-                                                full_output.append(str(_result))
-                                                await _log_agent(
-                                                    http, task_node.id, task_name,
-                                                    "result", str(_result)[:500],
-                                                    model=model,
-                                                )
-                                            continue
-                                        if _cls != "AssistantMessage":
-                                            continue
-                                        content = getattr(msg, "content", None)
-                                        if not isinstance(content, list):
-                                            continue
-                                        for block in content:
-                                            _bcls = type(block).__name__
-                                            if _bcls == "TextBlock":
-                                                full_output.append(block.text)
-                                                await _log_agent(
-                                                    http, task_node.id, task_name,
-                                                    "assistant", block.text[:500],
-                                                    model=model,
-                                                )
-                                            elif _bcls == "ToolUseBlock":
-                                                _tn = getattr(block, "name", "?")
-                                                _raw = getattr(block, "input", {})
-                                                _ti = _fmt_tool(_tn, _raw)
-                                                await _log_agent(
-                                                    http, task_node.id, task_name,
-                                                    "tool_use", f"{_tn} → {_ti}",
-                                                    model=model,
-                                                )
-                                            elif _bcls == "ToolResultBlock":
-                                                _is_err = getattr(block, "is_error", False)
-                                                _tc = str(getattr(block, "content", ""))[:300]
-                                                await _log_agent(
-                                                    http, task_node.id, task_name,
-                                                    "tool_result", _tc,
-                                                    level="error" if _is_err else "info",
-                                                    model=model,
-                                                )
-                                        _err = getattr(msg, "error", None)
-                                        if _err:
-                                            raise RuntimeError(
-                                                f"Agent error: {_err} — "
-                                                "check `claude login` or verify API key in .env"
-                                            )
-                                output = "\n".join(full_output)
-                                if not output.strip():
-                                    raise RuntimeError(
-                                        "Agent produced no output — "
-                                        "check `claude login` or verify API key in .env"
+                            def _stderr_filter(line: str) -> None:
+                                nonlocal _hook_err_remaining
+                                if "Error in hook callback hook_" in line:
+                                    _hook_err_remaining = 30
+                                    _cli_logger.debug(
+                                        "Suppressed hook error: %s", line[:200],
                                     )
-                                success = True
-                            except Exception as sdk_exc:
-                                output = str(sdk_exc)
-                                success = False
-                                await _log_agent(
-                                    http, task_node.id, task_name,
-                                    "error", str(sdk_exc)[:500],
-                                    level="error",
-                                    model=model,
-                                )
+                                    return
+                                if _hook_err_remaining > 0:
+                                    _hook_err_remaining -= 1
+                                    return
+                                sys.stderr.write(line)
+                                sys.stderr.flush()
 
-                        # ── Option 2: direct API call via provider pool ───────────────
-                        # Used when claude CLI is not installed (API-only mode).
-                        # BUG-11 fix: parse code blocks from LLM output and write
-                        # them to the project directory.
-                        elif pool is not None:
-                            system_prompt = (
-                                "You are an expert software engineer. "
-                                "Implement the requested feature precisely and completely. "
-                                "Return code in fenced blocks with the filename as the "
-                                "info string, e.g.:\n"
-                                "```path/to/file.py\n<code>\n```\n\n"
-                                f"Project directory: {project_path}"
-                            )
-                            await _log_agent(
-                                http, task_node.id, task_name,
-                                "assistant", "Sending request to provider pool…",
-                                model=model,
-                            )
-                            task_complexity = _PLUGIN_COMPLEXITY.get(
-                                task_node.plugin_name or "", "medium"
-                            )
-                            response = await pool.execute(
-                                model=model,
-                                messages=[{"role": "user", "content": prompt}],
-                                system=system_prompt,
-                                max_tokens=8192,
-                                complexity=task_complexity,
-                            )
-                            output = response.content or ""
-                            await _log_agent(
-                                http, task_node.id, task_name,
-                                "result", output[:500],
-                                model=model,
+                            # ── Sandbox: OS-level + can_use_tool ──
+                            _sandbox = SandboxSettings(
+                                enabled=True,
+                                autoAllowBashIfSandboxed=True,
+                                excludedCommands=["git"],
+                                allowUnsandboxedCommands=False,
+                                network=SandboxNetworkConfig(
+                                    allowLocalBinding=True,
+                                ),
                             )
 
-                            # Write any code blocks to disk (BUG-11)
-                            from claw_forge.output_parser import write_code_blocks
-
-                            written_files = write_code_blocks(
-                                output, project_path
+                            options = ClaudeAgentOptions(
+                                model=model,
+                                cwd=str(project_path),
+                                env=sdk_env,
+                                permission_mode="bypassPermissions",
+                                hooks=agent_hooks,  # type: ignore[arg-type]
+                                settings=json.dumps({"enabledPlugins": {}}),
+                                setting_sources=["project"],
+                                stderr=_stderr_filter,
+                                can_use_tool=make_can_use_tool(project_dir=project_path),
+                                sandbox=_sandbox,
                             )
-                            if written_files:
-                                output += (
-                                    f"\n\n--- Files written ({len(written_files)}) ---\n"
-                                    + "\n".join(f"  • {f}" for f in written_files)
+
+                        # OUTSIDE LOCK: connect + run (parallel with other agents)
+                        full_output: list[str] = []
+                        try:
+                            async with AgentSession(options) as agent_session:
+                                async for msg in agent_session.run(prompt):  # noqa: E501
+                                    _cls = type(msg).__name__
+                                    if _cls == "ResultMessage":
+                                        _result = getattr(msg, "result", None)
+                                        if _result:
+                                            full_output.append(str(_result))
+                                            await _log_agent(
+                                                http, task_node.id, task_name,
+                                                "result", str(_result)[:500],
+                                                model=model,
+                                            )
+                                        continue
+                                    if _cls != "AssistantMessage":
+                                        continue
+                                    content = getattr(msg, "content", None)
+                                    if not isinstance(content, list):
+                                        continue
+                                    for block in content:
+                                        _bcls = type(block).__name__
+                                        if _bcls == "TextBlock":
+                                            full_output.append(block.text)
+                                            await _log_agent(
+                                                http, task_node.id, task_name,
+                                                "assistant", block.text[:500],
+                                                model=model,
+                                            )
+                                        elif _bcls == "ToolUseBlock":
+                                            _tn = getattr(block, "name", "?")
+                                            _raw = getattr(block, "input", {})
+                                            _ti = _fmt_tool(_tn, _raw)
+                                            await _log_agent(
+                                                http, task_node.id, task_name,
+                                                "tool_use", f"{_tn} → {_ti}",
+                                                model=model,
+                                            )
+                                        elif _bcls == "ToolResultBlock":
+                                            _is_err = getattr(block, "is_error", False)
+                                            _tc = str(getattr(block, "content", ""))[:300]
+                                            await _log_agent(
+                                                http, task_node.id, task_name,
+                                                "tool_result", _tc,
+                                                level="error" if _is_err else "info",
+                                                model=model,
+                                            )
+                                    _err = getattr(msg, "error", None)
+                                    if _err:
+                                        raise RuntimeError(
+                                            f"Agent error: {_err} — "
+                                            "check `claude login` or verify API key in .env"
+                                        )
+                            output = "\n".join(full_output)
+                            if not output.strip():
+                                raise RuntimeError(
+                                    "Agent produced no output — "
+                                    "check `claude login` or verify API key in .env"
                                 )
                             success = True
-
-                        # ── No executor available ─────────────────────────────────────
-                        else:
-                            output = (
-                                "No agent executor available.\n"
-                                "  • For full autonomous coding: install the claude CLI "
-                                "(https://claude.ai/download) and ensure it is in PATH\n"
-                                "  • For API-only mode: add a provider with a valid API key "
-                                "to claw-forge.yaml"
-                            )
+                        except Exception as sdk_exc:
+                            output = str(sdk_exc)
                             success = False
+                            await _log_agent(
+                                http, task_node.id, task_name,
+                                "error", str(sdk_exc)[:500],
+                                level="error",
+                                model=model,
+                            )
 
-                    except asyncio.CancelledError:
-                        _cancelled = True
-                        raise
-
-                    except Exception as exc:
-                        output = str(exc)
-                        success = False
-
-                    finally:
-                        if _cancelled:
-                            # Reset racing tasks to pending via HTTP
-                            with suppress(Exception):
-                                await _patch_task(
-                                    http, task_node.id, status="pending",
-                                )
-                            return {"success": False, "output": "cancelled"}  # noqa: B012
-
-                        # Persist final status via HTTP
-                        await _patch_task(
-                            http, task_node.id,
-                            status="completed" if success else "failed",
-                            **({"result": {"output": output}} if success else {}),
-                            **({"error_message": output} if not success else {}),
+                    # ── Option 2: direct API call via provider pool ───────────────
+                    # Used when claude CLI is not installed (API-only mode).
+                    # BUG-11 fix: parse code blocks from LLM output and write
+                    # them to the project directory.
+                    elif pool is not None:
+                        system_prompt = (
+                            "You are an expert software engineer. "
+                            "Implement the requested feature precisely and completely. "
+                            "Return code in fenced blocks with the filename as the "
+                            "info string, e.g.:\n"
+                            "```path/to/file.py\n<code>\n```\n\n"
+                            f"Project directory: {project_path}"
+                        )
+                        await _log_agent(
+                            http, task_node.id, task_name,
+                            "assistant", "Sending request to provider pool…",
+                            model=model,
+                        )
+                        task_complexity = _PLUGIN_COMPLEXITY.get(
+                            task_node.plugin_name or "", "medium"
+                        )
+                        response = await pool.execute(
+                            model=model,
+                            messages=[{"role": "user", "content": prompt}],
+                            system=system_prompt,
+                            max_tokens=8192,
+                            complexity=task_complexity,
+                        )
+                        output = response.content or ""
+                        await _log_agent(
+                            http, task_node.id, task_name,
+                            "result", output[:500],
+                            model=model,
                         )
 
-                        # Git: checkpoint + optional merge on success
-                        if git_enabled and success and git_commit_on_boundary:
-                            _desc = (
-                                task_node.description
-                                or f"{task_node.plugin_name}({_slug}): completed"
+                        # Write any code blocks to disk (BUG-11)
+                        from claw_forge.output_parser import write_code_blocks
+
+                        written_files = write_code_blocks(
+                            output, project_path
+                        )
+                        if written_files:
+                            output += (
+                                f"\n\n--- Files written ({len(written_files)}) ---\n"
+                                + "\n".join(f"  • {f}" for f in written_files)
                             )
-                            await git_ops.checkpoint(
-                                message=_desc,
+                        success = True
+
+                    # ── No executor available ─────────────────────────────────────
+                    else:
+                        output = (
+                            "No agent executor available.\n"
+                            "  • For full autonomous coding: install the claude CLI "
+                            "(https://claude.ai/download) and ensure it is in PATH\n"
+                            "  • For API-only mode: add a provider with a valid API key "
+                            "to claw-forge.yaml"
+                        )
+                        success = False
+
+                except asyncio.CancelledError:
+                    _cancelled = True
+                    raise
+
+                except Exception as exc:
+                    output = str(exc)
+                    success = False
+
+                finally:
+                    if _cancelled:
+                        # Reset racing tasks to pending via HTTP
+                        with suppress(Exception):
+                            await _patch_task(
+                                http, task_node.id, status="pending",
+                            )
+                        return {"success": False, "output": "cancelled"}  # noqa: B012
+
+                    # Persist final status via HTTP
+                    await _patch_task(
+                        http, task_node.id,
+                        status="completed" if success else "failed",
+                        **({"result": {"output": output}} if success else {}),
+                        **({"error_message": output} if not success else {}),
+                    )
+
+                    # Git: checkpoint + optional merge on success
+                    if git_enabled and success and git_commit_on_boundary:
+                        _desc = (
+                            task_node.description
+                            or f"{task_node.plugin_name}({_slug}): completed"
+                        )
+                        await git_ops.checkpoint(
+                            message=_desc,
+                            task_id=task_node.id,
+                            plugin=task_node.plugin_name,
+                            phase=task_node.plugin_name,
+                            session_id=session_id,
+                        )
+                        if git_merge_strategy == "auto":
+                            _branch_name = f"{git_branch_prefix}/{_slug}"
+                            await git_ops.merge(
+                                _branch_name,
+                                title=task_node.description or None,
+                                steps=task_node.steps or None,
                                 task_id=task_node.id,
-                                plugin=task_node.plugin_name,
-                                phase=task_node.plugin_name,
                                 session_id=session_id,
                             )
-                            if git_merge_strategy == "auto":
-                                _branch_name = f"{git_branch_prefix}/{_slug}"
-                                await git_ops.merge(
-                                    _branch_name,
-                                    title=task_node.description or None,
-                                    steps=task_node.steps or None,
-                                    task_id=task_node.id,
-                                    session_id=session_id,
-                                )
 
-                return {"success": success, "output": output}
+            return {"success": success, "output": output}
 
-            # Run dispatcher with pause/resume re-dispatch loop.
-            # When Stop All pauses the dispatcher, we wait for Resume All,
-            # then re-fetch remaining tasks from the DB and re-dispatch.
-            total_completed: dict[str, dict[str, Any]] = {}
-            total_failed: dict[str, str] = {}
+        # Run dispatcher with pause/resume re-dispatch loop.
+        # When Stop All pauses the dispatcher, we wait for Resume All,
+        # then re-fetch remaining tasks from the DB and re-dispatch.
+        total_completed: dict[str, dict[str, Any]] = {}
+        total_failed: dict[str, str] = {}
 
-            current_nodes = task_nodes
-            while current_nodes:
-                dispatcher = Dispatcher(
-                    handler=task_handler,
-                    max_concurrency=concurrency,
-                    yolo=yolo,
-                    state_url=_state_base,
+        current_nodes = task_nodes
+        while current_nodes:
+            dispatcher = Dispatcher(
+                handler=task_handler,
+                max_concurrency=concurrency,
+                yolo=yolo,
+                state_url=_state_base,
+            )
+            for node in current_nodes:
+                dispatcher.add_task(node)
+
+            dispatch_result = await dispatcher.run()
+            total_completed.update(dispatch_result.completed)
+            total_failed.update(dispatch_result.failed)
+
+            if not dispatcher.is_paused:
+                break  # Normal completion — all waves done
+
+            # ── Paused: wait for Resume All ────────────────────────────
+            console.print(
+                "\n[bold yellow]⏸  Paused — waiting for Resume All…[/bold yellow]"
+            )
+            async with httpx.AsyncClient() as poll_client:
+                while True:
+                    await asyncio.sleep(1)
+                    try:
+                        resp = await poll_client.get(
+                            f"{_state_base}/project/paused"
+                            f"?session_id={session_id}",
+                            timeout=3.0,
+                        )
+                        if not resp.json().get("paused", True):
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
+            console.print(
+                "[bold green]▶  Resumed — re-dispatching tasks…[/bold green]"
+            )
+
+            # Re-fetch pending/failed tasks via HTTP for the next cycle
+            # (resume-all already reset paused→pending in the state service)
+            _seen_logs.clear()
+            async with httpx.AsyncClient() as resume_client:
+                tasks_resp = await resume_client.get(
+                    f"{_state_base}/sessions/{session_id}/tasks",
+                    timeout=10,
                 )
-                for node in current_nodes:
-                    dispatcher.add_task(node)
+                tasks_resp.raise_for_status()
+                all_tasks = tasks_resp.json()
 
-                dispatch_result = await dispatcher.run()
-                total_completed.update(dispatch_result.completed)
-                total_failed.update(dispatch_result.failed)
+            current_nodes = _task_dicts_to_nodes(
+                [t for t in all_tasks if t["status"] in ("pending", "failed")]
+            )
 
-                if not dispatcher.is_paused:
-                    break  # Normal completion — all waves done
-
-                # ── Paused: wait for Resume All ────────────────────────────
+        # Print summary
+        completed = len(total_completed)
+        failed = len(total_failed)
+        console.print("\n[bold]Run complete:[/bold]")
+        console.print(f"  ✅ Completed: {completed}")
+        if failed > 0:
+            console.print(f"  ❌ Failed: {failed}")
+            # Show a concise per-task failure reason (first line only)
+            for task_id, err in list(total_failed.items())[:5]:
+                short = err.splitlines()[0][:120] if err else "unknown error"
+                console.print(f"     [dim]{task_id[:8]}…[/dim] {short}")
+            if len(total_failed) > 5:
+                console.print(f"     [dim]… and {len(total_failed) - 5} more[/dim]")
+            # Give an actionable hint when the error is provider exhaustion
+            sample_err = next(iter(total_failed.values()), "")
+            if "All providers exhausted" in sample_err or "No agent executor" in sample_err:
                 console.print(
-                    "\n[bold yellow]⏸  Paused — waiting for Resume All…[/bold yellow]"
+                    "\n[yellow]💡 No working providers found.[/yellow]\n"
+                    "  • Run [bold]claw-forge pool-status[/bold] to see active providers\n"
+                    "  • Add a valid API key to claw-forge.yaml (e.g. ANTHROPIC_API_KEY_1)\n"
+                    "  • Or install the claude CLI for OAuth-based execution: "
+                    "https://claude.ai/download"
                 )
-                async with httpx.AsyncClient() as poll_client:
-                    while True:
-                        await asyncio.sleep(1)
-                        try:
-                            resp = await poll_client.get(
-                                f"{_state_base}/project/paused"
-                                f"?session_id={session_id}",
-                                timeout=3.0,
-                            )
-                            if not resp.json().get("paused", True):
-                                break
-                        except Exception:  # noqa: BLE001
-                            pass
-                console.print(
-                    "[bold green]▶  Resumed — re-dispatching tasks…[/bold green]"
-                )
-
-                # Re-fetch pending/failed tasks via HTTP for the next cycle
-                # (resume-all already reset paused→pending in the state service)
-                _seen_logs.clear()
-                async with httpx.AsyncClient() as resume_client:
-                    tasks_resp = await resume_client.get(
-                        f"{_state_base}/sessions/{session_id}/tasks",
-                        timeout=10,
-                    )
-                    tasks_resp.raise_for_status()
-                    all_tasks = tasks_resp.json()
-
-                current_nodes = [
-                    TaskNode(
-                        id=t["id"],
-                        plugin_name=t["plugin_name"],
-                        priority=t.get("priority", 0),
-                        depends_on=t.get("depends_on") or [],
-                        status="pending",
-                        category=t.get("category") or "",
-                        steps=t.get("steps") or [],
-                        description=t.get("description") or "",
-                    )
-                    for t in all_tasks
-                    if t["status"] in ("pending", "failed")
-                ]
-
-            # Print summary
-            completed = len(total_completed)
-            failed = len(total_failed)
-            console.print("\n[bold]Run complete:[/bold]")
-            console.print(f"  ✅ Completed: {completed}")
-            if failed > 0:
-                console.print(f"  ❌ Failed: {failed}")
-                # Show a concise per-task failure reason (first line only)
-                for task_id, err in list(total_failed.items())[:5]:
-                    short = err.splitlines()[0][:120] if err else "unknown error"
-                    console.print(f"     [dim]{task_id[:8]}…[/dim] {short}")
-                if len(total_failed) > 5:
-                    console.print(f"     [dim]… and {len(total_failed) - 5} more[/dim]")
-                # Give an actionable hint when the error is provider exhaustion
-                sample_err = next(iter(total_failed.values()), "")
-                if "All providers exhausted" in sample_err or "No agent executor" in sample_err:
-                    console.print(
-                        "\n[yellow]💡 No working providers found.[/yellow]\n"
-                        "  • Run [bold]claw-forge pool-status[/bold] to see active providers\n"
-                        "  • Add a valid API key to claw-forge.yaml (e.g. ANTHROPIC_API_KEY_1)\n"
-                        "  • Or install the claude CLI for OAuth-based execution: "
-                        "https://claude.ai/download"
-                    )
-            else:
-                console.print("  🎉 All tasks succeeded!")
+        else:
+            console.print("  🎉 All tasks succeeded!")
 
     # Pop CLAUDECODE once for the entire run — prevents the claude CLI
     # from refusing to start (it detects nesting via this env var).

@@ -28,6 +28,20 @@ from claw_forge.commands.registry import COMMAND_IDS, COMMAND_SHELLS, COMMANDS
 from claw_forge.pool.manager import ProviderPoolManager
 from claw_forge.state.models import Base, Event, Session, Task
 
+
+def _task_summary(task: Task) -> dict[str, Any]:
+    """Serialise core Task fields shared by multiple endpoints."""
+    return {
+        "id": task.id,
+        "plugin_name": task.plugin_name,
+        "description": task.description,
+        "category": task.category,
+        "status": task.status,
+        "priority": task.priority,
+        "depends_on": task.depends_on,
+        "steps": task.steps or [],
+    }
+
 logger = logging.getLogger(__name__)
 
 
@@ -465,19 +479,7 @@ class AgentStateService:
                 return {
                     "session_id": session.id,
                     "orphans_reset": orphans_reset,
-                    "tasks": [
-                        {
-                            "id": t.id,
-                            "plugin_name": t.plugin_name,
-                            "description": t.description,
-                            "category": t.category,
-                            "status": t.status,
-                            "priority": t.priority,
-                            "depends_on": t.depends_on,
-                            "steps": t.steps or [],
-                        }
-                        for t in tasks
-                    ],
+                    "tasks": [_task_summary(t) for t in tasks],
                 }
 
         @app.get("/sessions/{session_id}")
@@ -574,31 +576,19 @@ class AgentStateService:
                 task = await db.get(Task, task_id)
                 if not task:
                     raise HTTPException(404, "Task not found")
-                return {
-                    "id": task.id,
-                    "session_id": task.session_id,
-                    "plugin_name": task.plugin_name,
-                    "description": task.description,
-                    "category": task.category,
-                    "status": task.status,
-                    "priority": task.priority,
-                    "depends_on": task.depends_on,
-                    "steps": task.steps or [],
-                    "result_json": task.result_json,
-                    "error_message": task.error_message,
-                    "input_tokens": task.input_tokens,
-                    "output_tokens": task.output_tokens,
-                    "cost_usd": task.cost_usd,
-                    "created_at": (
-                        str(task.created_at) if task.created_at else None
-                    ),
-                    "started_at": (
-                        str(task.started_at) if task.started_at else None
-                    ),
-                    "completed_at": (
-                        str(task.completed_at) if task.completed_at else None
-                    ),
-                }
+                detail = _task_summary(task)
+                detail.update(
+                    session_id=task.session_id,
+                    result_json=task.result_json,
+                    error_message=task.error_message,
+                    input_tokens=task.input_tokens,
+                    output_tokens=task.output_tokens,
+                    cost_usd=task.cost_usd,
+                    created_at=str(task.created_at) if task.created_at else None,
+                    started_at=str(task.started_at) if task.started_at else None,
+                    completed_at=str(task.completed_at) if task.completed_at else None,
+                )
+                return detail
 
         @app.post("/tasks/{task_id}/agent-log")
         async def post_agent_log(task_id: str, req: AgentLogRequest) -> dict[str, str]:

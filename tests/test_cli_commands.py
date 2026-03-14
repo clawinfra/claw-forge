@@ -913,62 +913,35 @@ class TestSdkAgentExecution:
     _SESSION_ID = "test-session-001"
 
     @staticmethod
-    def _mock_httpx_client(task_id: str, session_id: str) -> Any:
+    def _mock_httpx_client(task_id: str, session_id: str) -> type:
         """Return a mock httpx.AsyncClient that fakes state-service responses."""
+        from tests.helpers import make_fake_httpx_client
 
-        init_resp = {
-            "session_id": session_id,
-            "orphans_reset": 0,
-            "tasks": [
-                {
-                    "id": task_id,
-                    "plugin_name": "coding",
-                    "description": "Implement a feature",
-                    "category": "",
-                    "status": "pending",
-                    "priority": 1,
-                    "depends_on": [],
-                    "steps": [],
-                },
-            ],
-        }
-        task_resp = {
-            "id": task_id,
-            "plugin_name": "coding",
-            "description": "Implement a feature",
-            "status": "pending",
-            "steps": [],
-        }
-
-        class FakeResponse:
-            status_code = 200
-
-            def __init__(self, data: dict[str, Any]) -> None:
-                self._data = data
-
-            def raise_for_status(self) -> None:
-                pass
-
-            def json(self) -> dict[str, Any]:
-                return self._data
-
-        class FakeClient:
-            async def __aenter__(self) -> FakeClient:
-                return self
-
-            async def __aexit__(self, *a: Any) -> None:
-                pass
-
-            async def post(self, url: str, **kw: Any) -> FakeResponse:
-                return FakeResponse(init_resp)
-
-            async def get(self, url: str, **kw: Any) -> FakeResponse:
-                return FakeResponse(task_resp)
-
-            async def patch(self, url: str, **kw: Any) -> FakeResponse:
-                return FakeResponse({"ok": True})
-
-        return FakeClient
+        return make_fake_httpx_client(
+            init_response={
+                "session_id": session_id,
+                "orphans_reset": 0,
+                "tasks": [
+                    {
+                        "id": task_id,
+                        "plugin_name": "coding",
+                        "description": "Implement a feature",
+                        "category": "",
+                        "status": "pending",
+                        "priority": 1,
+                        "depends_on": [],
+                        "steps": [],
+                    },
+                ],
+            },
+            task_response={
+                "id": task_id,
+                "plugin_name": "coding",
+                "description": "Implement a feature",
+                "status": "pending",
+                "steps": [],
+            },
+        )
 
     def test_claudecode_popped_and_restored_on_success(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
