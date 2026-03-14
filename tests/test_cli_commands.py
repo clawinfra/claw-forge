@@ -909,44 +909,66 @@ class TestSdkAgentExecution:
     claude CLI subprocess spawn and properly restored in the finally block.
     """
 
-    def _seed_db(self, db_path: Path, project_path: Path) -> None:
-        """Synchronously seed SQLite with one pending task via asyncio.run."""
-        import asyncio
-        import uuid
+    _TASK_ID = "test-task-001"
+    _SESSION_ID = "test-session-001"
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    @staticmethod
+    def _mock_httpx_client(task_id: str, session_id: str) -> Any:
+        """Return a mock httpx.AsyncClient that fakes state-service responses."""
 
-        from claw_forge.state.models import Base, Task
-        from claw_forge.state.models import Session as DbSess
+        init_resp = {
+            "session_id": session_id,
+            "orphans_reset": 0,
+            "tasks": [
+                {
+                    "id": task_id,
+                    "plugin_name": "coding",
+                    "description": "Implement a feature",
+                    "category": "",
+                    "status": "pending",
+                    "priority": 1,
+                    "depends_on": [],
+                    "steps": [],
+                },
+            ],
+        }
+        task_resp = {
+            "id": task_id,
+            "plugin_name": "coding",
+            "description": "Implement a feature",
+            "status": "pending",
+            "steps": [],
+        }
 
-        db_url = f"sqlite+aiosqlite:///{db_path}"
+        class FakeResponse:
+            status_code = 200
 
-        async def _seed() -> None:
-            engine = create_async_engine(db_url, echo=False)
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            session_id = str(uuid.uuid4())
-            task_id = str(uuid.uuid4())
-            async with async_sessionmaker(engine, expire_on_commit=False)() as sess:
-                sess.add(DbSess(
-                    id=session_id,
-                    project_path=str(project_path),
-                    status="running",
-                ))
-                await sess.flush()
-                sess.add(Task(
-                    id=task_id,
-                    session_id=session_id,
-                    plugin_name="coding",
-                    status="pending",
-                    priority=1,
-                    description="Implement a feature",
-                    depends_on=[],
-                ))
-                await sess.commit()
-            await engine.dispose()
+            def __init__(self, data: dict[str, Any]) -> None:
+                self._data = data
 
-        asyncio.run(_seed())
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> dict[str, Any]:
+                return self._data
+
+        class FakeClient:
+            async def __aenter__(self) -> FakeClient:
+                return self
+
+            async def __aexit__(self, *a: Any) -> None:
+                pass
+
+            async def post(self, url: str, **kw: Any) -> FakeResponse:
+                return FakeResponse(init_resp)
+
+            async def get(self, url: str, **kw: Any) -> FakeResponse:
+                return FakeResponse(task_resp)
+
+            async def patch(self, url: str, **kw: Any) -> FakeResponse:
+                return FakeResponse({"ok": True})
+
+        return FakeClient
 
     def test_claudecode_popped_and_restored_on_success(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -956,9 +978,6 @@ class TestSdkAgentExecution:
 
         project_path = tmp_path / "proj"
         project_path.mkdir()
-        claw_forge_dir = project_path / ".claw-forge"
-        claw_forge_dir.mkdir()
-        self._seed_db(claw_forge_dir / "state.db", project_path)
 
         config_path = tmp_path / "cf.yaml"
         config_path.write_text("providers: {}\n")
@@ -988,6 +1007,10 @@ class TestSdkAgentExecution:
             patch("claw_forge.cli._ensure_state_service", return_value=8420),
             patch("claw_forge.cli.shutil.which", return_value="/usr/bin/claude"),
             patch("claw_forge.agent.session.AgentSession", FakeAgentSession),
+            patch(
+                "claw_forge.cli.httpx.AsyncClient",
+                self._mock_httpx_client(self._TASK_ID, self._SESSION_ID),
+            ),
         ):
             result = runner.invoke(
                 app,
@@ -1008,9 +1031,6 @@ class TestSdkAgentExecution:
 
         project_path = tmp_path / "proj2"
         project_path.mkdir()
-        claw_forge_dir = project_path / ".claw-forge"
-        claw_forge_dir.mkdir()
-        self._seed_db(claw_forge_dir / "state.db", project_path)
 
         config_path = tmp_path / "cf2.yaml"
         config_path.write_text("providers: {}\n")
@@ -1034,6 +1054,10 @@ class TestSdkAgentExecution:
             patch("claw_forge.cli._ensure_state_service", return_value=8420),
             patch("claw_forge.cli.shutil.which", return_value="/usr/bin/claude"),
             patch("claw_forge.agent.session.AgentSession", FailingAgentSession),
+            patch(
+                "claw_forge.cli.httpx.AsyncClient",
+                self._mock_httpx_client(self._TASK_ID, self._SESSION_ID),
+            ),
         ):
             result = runner.invoke(
                 app,

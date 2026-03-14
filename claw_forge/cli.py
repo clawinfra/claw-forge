@@ -10,7 +10,6 @@ import shutil
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -410,11 +409,7 @@ def run(
     """
     import asyncio
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
     from claw_forge.orchestrator.dispatcher import Dispatcher
-    from claw_forge.state.models import Base, Task
-    from claw_forge.state.models import Session as DbSession
     from claw_forge.state.scheduler import TaskNode
 
     # Resolve config path: prefer project-relative if config is a bare filename
@@ -510,13 +505,11 @@ def run(
 
     claw_forge_dir = project_path / ".claw-forge"
     claw_forge_dir.mkdir(parents=True, exist_ok=True)
-    db_path = claw_forge_dir / "state.db"
-    db_url = f"sqlite+aiosqlite:///{db_path}"
-    console.print(f"[dim]DB: {db_path}[/dim]")
 
     # Auto-start state service (project-aware: restarts if serving a different project)
     _state_port = cfg.get("state", {}).get("port", 8420)
     _state_port = _ensure_state_service(project_path, _state_port)
+    _state_base = f"http://127.0.0.1:{_state_port}"
     console.print(f"[dim]State service on port {_state_port}[/dim]")
 
     # Set up git tracking
@@ -529,111 +522,70 @@ def run(
     git_commit_on_boundary = git_cfg.get("commit_on_plugin_boundary", True)
     git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
 
-    # Set up async engine
-    engine = create_async_engine(db_url, echo=False)
-    async_session_maker = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-
     async def main() -> None:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        await _migrate_schema(engine)
-
-        async with async_session_maker() as session:
-            # Find or create a session for this project
-            from sqlalchemy import select
-
-            stmt = (
-                select(DbSession)
-                .where(DbSession.project_path == str(project_path))
-                .where(
-                    (DbSession.status == "running") | (DbSession.status == "pending")
+        # Bootstrap session + tasks via state service HTTP API
+        try:
+            async with httpx.AsyncClient() as init_client:
+                resp = await init_client.post(
+                    f"{_state_base}/sessions/init",
+                    json={"project_path": str(project_path)},
+                    timeout=10,
                 )
-                .order_by(DbSession.created_at.desc())
-                .limit(1)
+                resp.raise_for_status()
+                init_data = resp.json()
+        except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+            console.print(
+                f"[red]Cannot reach state service at {_state_base}: {exc}[/red]"
             )
-            result = await session.execute(stmt)
-            db_session = result.scalar_one_or_none()
+            return
 
-            if db_session is None:
-                # No existing session — create one
-                import uuid
+        session_id: str = init_data["session_id"]
 
-                db_session = DbSession(
-                    id=str(uuid.uuid4()),
-                    project_path=str(project_path),
-                    status="pending",
-                )
-                session.add(db_session)
-                await session.commit()
-                await session.refresh(db_session)
-
-            # Fetch pending, failed, or orphaned running tasks (retry)
-            # "running" tasks are orphaned from a previous interrupted run — treat as pending
-            stmt_tasks = (
-                select(Task)
-                .where(Task.session_id == db_session.id)
-                .where(
-                    (Task.status == "pending")
-                    | (Task.status == "failed")
-                    | (Task.status == "running")
-                )
+        if init_data.get("orphans_reset", 0):
+            console.print(
+                f"[yellow]Reset {init_data['orphans_reset']} orphaned task(s) "
+                "from previous interrupted run[/yellow]"
             )
-            result_tasks = await session.execute(stmt_tasks)
-            tasks = result_tasks.scalars().all()
 
-            if not tasks:
-                console.print(
-                    "[yellow]No pending tasks found — run 'claw-forge plan <spec>' first[/yellow]"
-                )
-                return
+        raw_tasks: list[dict[str, Any]] = init_data["tasks"]
+        if not raw_tasks:
+            console.print(
+                "[yellow]No pending tasks found — run 'claw-forge plan <spec>' first[/yellow]"
+            )
+            return
 
-            # Reset any orphaned "running" tasks back to "pending" in the DB
-            # so the UI shows the correct state before agents re-execute them
-            orphaned = [t for t in tasks if t.status == "running"]
-            if orphaned:
-                console.print(
-                    f"[yellow]Resetting {len(orphaned)} orphaned task(s) "
-                    "from previous interrupted run[/yellow]"
-                )
-                for t in orphaned:
-                    t.status = "pending"
-                    t.started_at = None
-                await session.commit()
-
-            # Build TaskNode objects from DB tasks
-            task_nodes: list[TaskNode] = []
-            for t in tasks:
-                depends_on: list[str] = t.depends_on or []
-                node = TaskNode(
-                    id=t.id,
-                    plugin_name=t.plugin_name,
-                    priority=t.priority,
-                    depends_on=depends_on,
-                    status="pending",  # reset failed/orphaned tasks to pending for retry
-                    category=t.category or "",
-                    steps=t.steps or [],
-                    description=t.description or "",
-                )
-                task_nodes.append(node)
+        task_nodes: list[TaskNode] = []
+        for t in raw_tasks:
+            node = TaskNode(
+                id=t["id"],
+                plugin_name=t["plugin_name"],
+                priority=t.get("priority", 0),
+                depends_on=t.get("depends_on") or [],
+                status="pending",
+                category=t.get("category") or "",
+                steps=t.get("steps") or [],
+                description=t.get("description") or "",
+            )
+            task_nodes.append(node)
 
             # Dry-run: print tasks and exit
             if dry_run:
                 from claw_forge.state.scheduler import Scheduler
 
                 scheduler = Scheduler()
-                for node in task_nodes:
-                    scheduler.add_task(node)
+                for tn in task_nodes:
+                    scheduler.add_task(tn)
                 waves = scheduler.get_execution_order()
 
                 console.print(f"\n[bold]Execution plan ({len(waves)} waves):[/bold]\n")
                 for wave_idx, wave in enumerate(waves, 1):
                     console.print(f"  Wave {wave_idx}:")
                     for task_id in wave:
-                        task = next((t for t in tasks if t.id == task_id), None)
-                        if task:
-                            desc = task.description or task.plugin_name
+                        matched = next(
+                            (t for t in task_nodes if t.id == task_id), None,
+                        )
+                        if matched:
+                            desc = matched.description or matched.plugin_name
                             console.print(f"    • {task_id[:8]}…  {desc}")
                 console.print(
                     f"\n[dim]To run: claw-forge run --project {project_path}[/dim]\n"
@@ -657,8 +609,6 @@ def run(
 
             # Build task handler — communicates with the state service via HTTP
             # so that WebSocket events are broadcast to the Kanban UI.
-            _state_base = f"http://127.0.0.1:{_state_port}"
-
             async def _patch_task(
                 client: httpx.AsyncClient, task_id: str, **fields: Any,
             ) -> None:
@@ -749,23 +699,27 @@ def run(
 
             async def task_handler(task_node: TaskNode) -> dict[str, Any]:
                 async with httpx.AsyncClient() as http:
-                    # Mark task as running in DB + notify UI via HTTP
-                    async with async_session_maker() as task_session:
-                        stmt_update = select(Task).where(Task.id == task_node.id)
-                        result = await task_session.execute(stmt_update)
-                        db_task = result.scalar_one()
-                        task_name = db_task.description or db_task.plugin_name
-                        prompt = db_task.description or f"Execute task: {db_task.plugin_name}"
-                        if db_task.steps:
-                            numbered = "\n".join(
-                                f"{i + 1}. {s}" for i, s in enumerate(db_task.steps)
-                            )
-                            prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
-                        db_task.status = "running"
-                        db_task.started_at = datetime.now(UTC)
-                        await task_session.commit()
+                    # Fetch task details + mark as running via HTTP
+                    task_resp = await http.get(
+                        f"{_state_base}/tasks/{task_node.id}", timeout=10,
+                    )
+                    task_resp.raise_for_status()
+                    task_data = task_resp.json()
+                    task_name = (
+                        task_data.get("description") or task_data["plugin_name"]
+                    )
+                    prompt = (
+                        task_data.get("description")
+                        or f"Execute task: {task_data['plugin_name']}"
+                    )
+                    steps = task_data.get("steps") or []
+                    if steps:
+                        numbered = "\n".join(
+                            f"{i + 1}. {s}" for i, s in enumerate(steps)
+                        )
+                        prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
 
-                    # Notify UI via state service HTTP (best-effort)
+                    # Mark running via HTTP (triggers WS broadcast + sets started_at)
                     await _patch_task(http, task_node.id, status="running")
 
                     # Create a feature branch for this task (best-effort — git
@@ -974,7 +928,7 @@ def run(
                                 model=model,
                             )
                             task_complexity = _PLUGIN_COMPLEXITY.get(
-                                db_task.plugin_name or "", "medium"
+                                task_node.plugin_name or "", "medium"
                             )
                             response = await pool.execute(
                                 model=model,
@@ -1024,35 +978,20 @@ def run(
 
                     finally:
                         if _cancelled:
-                            # Stop-all only pauses tasks that were "running" in the DB.
-                            # Tasks that raced from pending → running (acquired the
-                            # semaphore after stop-all committed) are still "running".
-                            # Reset those to "pending" so they don't appear as active.
-                            try:
-                                async with async_session_maker() as cancel_session:
-                                    stmt_c = select(Task).where(Task.id == task_node.id)
-                                    res_c = await cancel_session.execute(stmt_c)
-                                    c_task = res_c.scalar_one()
-                                    if c_task.status == "running":
-                                        c_task.status = "pending"
-                                        c_task.started_at = None
-                                        await cancel_session.commit()
-                                        await _patch_task(
-                                            http, task_node.id, status="pending",
-                                        )
-                            except Exception:
-                                pass  # best-effort cleanup
+                            # Reset racing tasks to pending via HTTP
+                            with suppress(Exception):
+                                await _patch_task(
+                                    http, task_node.id, status="pending",
+                                )
                             return {"success": False, "output": "cancelled"}  # noqa: B012
-                        # Persist final status directly to DB
-                        async with async_session_maker() as fin_session:
-                            stmt_fin = select(Task).where(Task.id == task_node.id)
-                            res_fin = await fin_session.execute(stmt_fin)
-                            fin_task = res_fin.scalar_one()
-                            fin_task.status = "completed" if success else "failed"
-                            fin_task.completed_at = datetime.now(UTC)
-                            fin_task.error_message = None if success else output
-                            fin_task.result_json = {"output": output} if success else None
-                            await fin_session.commit()
+
+                        # Persist final status via HTTP
+                        await _patch_task(
+                            http, task_node.id,
+                            status="completed" if success else "failed",
+                            **({"result": {"output": output}} if success else {}),
+                            **({"error_message": output} if not success else {}),
+                        )
 
                         # Git: checkpoint + optional merge on success
                         if git_enabled and success and git_commit_on_boundary:
@@ -1065,7 +1004,7 @@ def run(
                                 task_id=task_node.id,
                                 plugin=task_node.plugin_name,
                                 phase=task_node.plugin_name,
-                                session_id=db_session.id,
+                                session_id=session_id,
                             )
                             if git_merge_strategy == "auto":
                                 _branch_name = f"{git_branch_prefix}/{_slug}"
@@ -1074,15 +1013,8 @@ def run(
                                     title=task_node.description or None,
                                     steps=task_node.steps or None,
                                     task_id=task_node.id,
-                                    session_id=db_session.id,
+                                    session_id=session_id,
                                 )
-
-                        # Notify UI via state service HTTP (best-effort)
-                        await _patch_task(
-                            http, task_node.id,
-                            status="completed" if success else "failed",
-                            **({"error_message": output} if not success else {}),
-                        )
 
                 return {"success": success, "output": output}
 
@@ -1120,7 +1052,7 @@ def run(
                         try:
                             resp = await poll_client.get(
                                 f"{_state_base}/project/paused"
-                                f"?session_id={db_session.id}",
+                                f"?session_id={session_id}",
                                 timeout=3.0,
                             )
                             if not resp.json().get("paused", True):
@@ -1131,34 +1063,30 @@ def run(
                     "[bold green]▶  Resumed — re-dispatching tasks…[/bold green]"
                 )
 
-                # Re-fetch pending/paused tasks from DB for the next cycle
+                # Re-fetch pending/failed tasks via HTTP for the next cycle
+                # (resume-all already reset paused→pending in the state service)
                 _seen_logs.clear()
-                async with async_session_maker() as resume_session:
-                    stmt_resume = select(Task).where(
-                        Task.session_id == db_session.id,
-                        Task.status.in_(["pending", "paused"]),
+                async with httpx.AsyncClient() as resume_client:
+                    tasks_resp = await resume_client.get(
+                        f"{_state_base}/sessions/{session_id}/tasks",
+                        timeout=10,
                     )
-                    res_resume = await resume_session.execute(stmt_resume)
-                    remaining = res_resume.scalars().all()
-                    # Reset "paused" tasks to "pending" for re-dispatch
-                    for t in remaining:
-                        if t.status == "paused":
-                            t.status = "pending"
-                            t.started_at = None
-                    await resume_session.commit()
+                    tasks_resp.raise_for_status()
+                    all_tasks = tasks_resp.json()
 
                 current_nodes = [
                     TaskNode(
-                        id=t.id,
-                        plugin_name=t.plugin_name,
-                        priority=t.priority,
-                        depends_on=t.depends_on or [],
+                        id=t["id"],
+                        plugin_name=t["plugin_name"],
+                        priority=t.get("priority", 0),
+                        depends_on=t.get("depends_on") or [],
                         status="pending",
-                        category=t.category or "",
-                        steps=t.steps or [],
-                        description=t.description or "",
+                        category=t.get("category") or "",
+                        steps=t.get("steps") or [],
+                        description=t.get("description") or "",
                     )
-                    for t in remaining
+                    for t in all_tasks
+                    if t["status"] in ("pending", "failed")
                 ]
 
             # Print summary
@@ -1926,11 +1854,20 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
 
     def _start_on(p: int) -> bool:
         """Launch state service on *p*. Return True if /info responds correctly."""
+        import shutil as _shutil
+        import sys as _sys
+
         project_path.joinpath(".claw-forge").mkdir(parents=True, exist_ok=True)
+        # Use the claw-forge binary from the same venv as the running process
+        # to avoid picking up a stale system-wide installation.
+        venv_bin = Path(_sys.executable).parent / "claw-forge"
+        claw_forge_cmd = str(venv_bin) if venv_bin.exists() else (
+            _shutil.which("claw-forge") or "claw-forge"
+        )
         with open(log_path, "w") as log_f:  # noqa: WPS515
             _sp.Popen(  # noqa: S603
                 [
-                    "claw-forge", "state",
+                    claw_forge_cmd, "state",
                     "--project", str(project_path),
                     "--port", str(p),
                 ],

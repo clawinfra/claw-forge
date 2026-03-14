@@ -7,7 +7,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -170,6 +170,10 @@ class CreateTaskRequest(BaseModel):
     depends_on: list[str] = []
     category: str | None = None
     steps: list[str] = []
+
+
+class SessionInitRequest(BaseModel):
+    project_path: str
 
 
 class UpdateTaskRequest(BaseModel):
@@ -421,6 +425,61 @@ class AgentStateService:
                     for s in sessions
                 ]
 
+        @app.post("/sessions/init")
+        async def init_session(req: SessionInitRequest) -> dict[str, Any]:
+            """Find or create a session, reset orphans, return actionable tasks."""
+            async with self._session_factory() as db:
+                result = await db.execute(
+                    select(Session)
+                    .where(Session.project_path == req.project_path)
+                    .where(Session.status.in_(["running", "pending"]))
+                    .order_by(Session.created_at.desc())
+                    .limit(1)
+                )
+                session = result.scalar_one_or_none()
+
+                if session is None:
+                    session = Session(project_path=req.project_path)
+                    db.add(session)
+                    await db.commit()
+                    await db.refresh(session)
+
+                # Fetch actionable tasks (pending, failed, running/orphaned)
+                result = await db.execute(
+                    select(Task)
+                    .where(Task.session_id == session.id)
+                    .where(Task.status.in_(["pending", "failed", "running"]))
+                )
+                tasks: Sequence[Task] = result.scalars().all()  # type: ignore[assignment]
+
+                # Reset orphaned running tasks
+                orphans_reset = 0
+                for t in tasks:
+                    if t.status == "running":
+                        t.status = "pending"
+                        t.started_at = None
+                        orphans_reset += 1
+                if orphans_reset:
+                    await db.commit()
+
+                return {
+                    "session_id": session.id,
+                    "orphans_reset": orphans_reset,
+                    "tasks": [
+                        {
+                            "id": t.id,
+                            "plugin_name": t.plugin_name,
+                            "description": t.description,
+                            "category": t.category,
+                            "status": t.status,
+                            "priority": t.priority,
+                            "depends_on": t.depends_on,
+                            "steps": t.steps or [],
+                        }
+                        for t in tasks
+                    ],
+                }
+
         @app.get("/sessions/{session_id}")
         async def get_session(session_id: str) -> dict[str, Any]:
             async with self._session_factory() as db:
@@ -473,6 +532,8 @@ class AgentStateService:
                     task.status = req.status
                     if req.status == "running" and not task.started_at:
                         task.started_at = datetime.now(UTC)
+                    elif req.status == "pending":
+                        task.started_at = None
                     elif req.status in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
                         if req.status == "completed" and self._reviewer is not None:
@@ -506,6 +567,38 @@ class AgentStateService:
                     },
                 )
                 return {"id": task.id, "status": task.status}
+
+        @app.get("/tasks/{task_id}")
+        async def get_task(task_id: str) -> dict[str, Any]:
+            async with self._session_factory() as db:
+                task = await db.get(Task, task_id)
+                if not task:
+                    raise HTTPException(404, "Task not found")
+                return {
+                    "id": task.id,
+                    "session_id": task.session_id,
+                    "plugin_name": task.plugin_name,
+                    "description": task.description,
+                    "category": task.category,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "depends_on": task.depends_on,
+                    "steps": task.steps or [],
+                    "result_json": task.result_json,
+                    "error_message": task.error_message,
+                    "input_tokens": task.input_tokens,
+                    "output_tokens": task.output_tokens,
+                    "cost_usd": task.cost_usd,
+                    "created_at": (
+                        str(task.created_at) if task.created_at else None
+                    ),
+                    "started_at": (
+                        str(task.started_at) if task.started_at else None
+                    ),
+                    "completed_at": (
+                        str(task.completed_at) if task.completed_at else None
+                    ),
+                }
 
         @app.post("/tasks/{task_id}/agent-log")
         async def post_agent_log(task_id: str, req: AgentLogRequest) -> dict[str, str]:
