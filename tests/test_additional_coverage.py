@@ -1129,6 +1129,31 @@ async def test_service_update_task_not_found() -> None:
         await svc.dispose()
 
 
+@pytest.mark.asyncio
+async def test_service_sqlite_wal_mode(tmp_path: Path) -> None:
+    """State service enables WAL journal mode on connect."""
+    from claw_forge.state.service import AgentStateService
+
+    db_path = tmp_path / "test.db"
+    svc = AgentStateService(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        await svc.init_db()
+        async with svc._session_factory() as db:
+            result = await db.execute(
+                __import__("sqlalchemy").text("PRAGMA journal_mode")
+            )
+            mode = result.scalar()
+            assert mode == "wal", f"Expected WAL mode, got {mode!r}"
+
+            result = await db.execute(
+                __import__("sqlalchemy").text("PRAGMA busy_timeout")
+            )
+            timeout = result.scalar()
+            assert timeout == 5000
+    finally:
+        await svc.dispose()
+
+
 # ---------------------------------------------------------------------------
 # scaffold.py — uncovered paths
 # ---------------------------------------------------------------------------

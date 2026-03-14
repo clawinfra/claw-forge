@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
@@ -232,6 +232,15 @@ class AgentStateService:
         pool_manager: ProviderPoolManager | None = None,
     ) -> None:
         self._engine = create_async_engine(database_url, echo=False)
+
+        @event.listens_for(self._engine.sync_engine, "connect")
+        def _set_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.close()
+
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
         self._ws_clients: list[WebSocket] = []

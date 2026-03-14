@@ -10,6 +10,8 @@ _GITIGNORE_ENTRIES = [
     ".claw-forge/state.log",
     ".claw-forge/state.db",
     ".claw-forge/state.db-journal",
+    ".claw-forge/state.db-wal",
+    ".claw-forge/state.db-shm",
 ]
 
 
