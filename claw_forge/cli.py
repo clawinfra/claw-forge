@@ -2383,6 +2383,20 @@ def dev(
 
     # ── Wait for either process to exit or Ctrl+C ──────────────────────────
     def _shutdown(*_args: object) -> None:
+        # Ask the state service to shut down gracefully first so it can
+        # checkpoint the SQLite WAL before uvicorn's --reload supervisor
+        # kills its worker process.
+        try:
+            import urllib.request as _req
+            _req.urlopen(  # noqa: S310
+                _req.Request(
+                    f"http://127.0.0.1:{state_port}/shutdown", method="POST"
+                ),
+                timeout=3,
+            )
+            time.sleep(1)
+        except Exception:  # noqa: BLE001
+            pass
         procs = [p for p in (run_proc, ui_proc, state_proc) if p is not None]
         for proc in procs:
             if proc.poll() is None:
