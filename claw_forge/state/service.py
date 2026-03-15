@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
@@ -255,7 +255,7 @@ class AgentStateService:
         def _set_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA synchronous=FULL")
             cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
@@ -380,6 +380,13 @@ class AgentStateService:
             if self._reviewer is not None:
                 await self._reviewer.stop()
                 self._reviewer = None
+            # Checkpoint the WAL before closing so the DB file is self-contained
+            # even if uvicorn's --reload supervisor kills workers mid-write.
+            try:
+                async with self._engine.begin() as _conn:
+                    await _conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            except Exception:  # noqa: BLE001
+                pass
             await self._engine.dispose()
 
         app = FastAPI(title="claw-forge State Service", version="0.1.0", lifespan=lifespan)

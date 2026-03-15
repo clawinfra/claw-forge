@@ -83,6 +83,12 @@ _PIDS=()
 cleanup() {
   echo ""
   echo "Stopping all servers…"
+  # Ask the state service to shut down gracefully first so it can checkpoint
+  # the SQLite WAL file. Without this, uvicorn's --reload supervisor may
+  # SIGKILL worker processes before the lifespan teardown runs, leaving the
+  # WAL in an inconsistent state and corrupting the database.
+  curl -sf -X POST "http://127.0.0.1:${STATE_PORT}/shutdown" >/dev/null 2>&1 || true
+  sleep 1
   for pid in "${_PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true
   done
