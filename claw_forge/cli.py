@@ -729,12 +729,15 @@ def run(
                 # Create a feature branch for this task (best-effort — git
                 # errors must not crash the dispatcher or leave tasks stuck).
                 import logging as _logging
-                import re as _re
 
-                _slug = _re.sub(
-                    r"[^a-z0-9]+", "-",
-                    (task_node.plugin_name + "-" + task_node.id[:8]).lower(),
-                ).strip("-")
+                from claw_forge.git.slug import make_branch_name as _make_branch_name
+
+                _slug = _make_branch_name(
+                    task_node.description,
+                    task_node.category,
+                    task_node.plugin_name,
+                    prefix=git_branch_prefix,
+                ).removeprefix(f"{git_branch_prefix}/")
                 if git_enabled:
                     try:
                         await git_ops.create_branch(
@@ -1652,8 +1655,9 @@ def add(
         console.print(f"[bold]Adding feature:[/bold] {feature}")
         console.print(f"[bold]Project:[/bold] {project}")
         if branch:
-            slug = feature.lower().replace(" ", "-")[:40]
-            console.print(f"[dim]Suggested git branch: feature/{slug}[/dim]")
+            from claw_forge.git.slug import make_slug as _make_slug
+            slug = _make_slug(feature)
+            console.print(f"[dim]Suggested git branch: feat/{slug}[/dim]")
         console.print("[yellow]Feature addition not yet integrated — scaffold only[/yellow]")
 
 
@@ -2507,7 +2511,6 @@ def fix(
         # Fix with a specific model
         claw-forge fix 'search returns empty results' --model claude-opus-4-6
     """
-    import re
     import subprocess
 
     from claw_forge.bugfix.report import BugReport
@@ -2539,8 +2542,8 @@ def fix(
     console.print(f"[bold]🐛 Bug:[/bold] {bug.title}")
 
     if branch:
-        slug = re.sub(r"[^a-z0-9]+", "-", bug.title.lower()).strip("-")[:50]
-        branch_name = f"fix/{slug}"
+        from claw_forge.git.slug import make_branch_name as _make_branch_name_fix
+        branch_name = _make_branch_name_fix(bug.title, None, "fix", prefix="fix")
         try:
             subprocess.run(  # noqa: S603, S607
                 ["git", "checkout", "-b", branch_name],

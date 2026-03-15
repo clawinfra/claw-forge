@@ -21,6 +21,7 @@ from claw_forge.git.branching import (
 from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
 from claw_forge.git.merge import squash_merge
 from claw_forge.git.repo import ensure_gitignore, init_or_detect
+from claw_forge.git.slug import make_branch_name, make_slug
 
 __all__ = [
     "GitOps",
@@ -32,6 +33,8 @@ __all__ = [
     "delete_branch",
     "ensure_gitignore",
     "init_or_detect",
+    "make_branch_name",
+    "make_slug",
     "squash_merge",
     "switch_branch",
     "task_history",
