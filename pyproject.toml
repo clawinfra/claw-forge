@@ -111,6 +111,15 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+[tool.uv]
+# Ensure the lockfile resolves wheels/sdists that work on both macOS (local
+# dev) and Linux x86_64 (CI / GitHub Actions).  Without this, packages like
+# claude-agent-sdk that ship only macOS ARM wheels will break CI.
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
 [dependency-groups]
 dev = [
     "types-pyyaml>=6.0.12.20250915",

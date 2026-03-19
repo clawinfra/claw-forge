@@ -7,7 +7,6 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
-uv.lock
 node_modules/
 ui/dist/
 .env
