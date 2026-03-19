@@ -2342,6 +2342,10 @@ def dev(
     # ── Launch state service with --reload ──────────────────────────────────
     state_env = os.environ.copy()
     state_env["CLAW_FORGE_DB_URL"] = db_url
+    # start_new_session=True puts each child in its own process group so the
+    # terminal's Ctrl-C SIGINT doesn't reach them directly.  _shutdown() is
+    # the sole signal path — it posts /shutdown for a graceful WAL checkpoint,
+    # then terminates each process individually.
     state_proc = subprocess.Popen(  # noqa: S603, S607
         [
             "claw-forge", "state",
@@ -2350,6 +2354,7 @@ def dev(
             "--reload",
         ],
         env=state_env,
+        start_new_session=True,
     )
 
     # ── Launch Vite dev server ──────────────────────────────────────────────
@@ -2360,6 +2365,7 @@ def dev(
         ["npm", "run", "dev", "--", "--port", str(ui_port), "--host"],
         cwd=ui_dir,
         env=ui_env,
+        start_new_session=True,
     )
 
     # ── Optionally launch the agent orchestrator ─────────────────────────────
@@ -2372,6 +2378,7 @@ def dev(
         run_proc = subprocess.Popen(  # noqa: S603, S607
             ["claw-forge", "run", "--project", str(project_path)],
             env=run_env,
+            start_new_session=True,
         )
 
     # ── Open browser after a short delay ────────────────────────────────────
@@ -2384,8 +2391,7 @@ def dev(
     # ── Wait for either process to exit or Ctrl+C ──────────────────────────
     def _shutdown(*_args: object) -> None:
         # Ask the state service to shut down gracefully first so it can
-        # checkpoint the SQLite WAL before uvicorn's --reload supervisor
-        # kills its worker process.
+        # run the PASSIVE WAL checkpoint in lifespan teardown.
         try:
             import urllib.request as _req
             _req.urlopen(  # noqa: S310
@@ -2394,13 +2400,21 @@ def dev(
                 ),
                 timeout=3,
             )
-            time.sleep(1)
+            # Give the lifespan teardown time to complete the WAL checkpoint
+            # and dispose the engine before we kill the process group.
+            time.sleep(2)
         except Exception:  # noqa: BLE001
             pass
         procs = [p for p in (run_proc, ui_proc, state_proc) if p is not None]
         for proc in procs:
             if proc.poll() is None:
-                proc.terminate()
+                # Children run in their own session (start_new_session=True).
+                # Kill the whole process group to reach both supervisor and
+                # worker subprocesses.
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except OSError:
+                    proc.terminate()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)

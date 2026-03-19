@@ -20,6 +20,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import event, select, text
+from sqlalchemy.exc import DatabaseError as SADatabaseError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
@@ -281,11 +282,21 @@ class AgentStateService:
         self._paused_task_ids: set[str] = set()
         # Derive project root from DB path for config discovery
         # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
-        try:
-            _db_file = str(self._engine.url).split("///")[-1]
-            self._project_path: Path | None = Path(_db_file).resolve().parent.parent
-        except Exception:  # noqa: BLE001
-            self._project_path = None
+        _db = self._db_path()
+        self._project_path: Path | None = (
+            _db.resolve().parent.parent if _db is not None else None
+        )
+
+    def _db_path(self) -> Path | None:
+        """Extract the filesystem path from the engine's SQLite URL."""
+        url_str = str(self._engine.url)
+        if "sqlite" not in url_str:
+            return None
+        # URL form: sqlite+aiosqlite:////abs/path or sqlite+aiosqlite:///rel
+        raw = url_str.split("///")[-1]
+        if not raw:
+            return None
+        return Path(raw)
 
     def _find_config_path(self) -> Path | None:
         """Search project dir, then CWD, then up to 3 parent dirs for claw-forge.yaml."""
@@ -321,9 +332,97 @@ class AgentStateService:
         tmp.rename(config_path)
 
     async def init_db(self) -> None:
+        try:
+            await self._init_db_inner()
+        except SADatabaseError as exc:
+            if "malformed" not in str(exc) and "corrupt" not in str(exc).lower():
+                raise
+            db_path = self._db_path()
+            if db_path is None:
+                raise
+            await self._recover_corrupt_db(db_path)
+
+    async def _recover_corrupt_db(self, db_path: Path) -> None:
+        """Attempt tiered recovery of a corrupt SQLite database.
+
+        Level 1: Remove only the WAL/SHM sidecar files.  The main DB file
+                 contains all checkpointed data — only uncommitted WAL
+                 frames are lost.  This preserves completed task state.
+        Level 2: Use ``sqlite3 .recover`` to salvage rows from the corrupt
+                 DB into a fresh copy, then swap it in.
+        Level 3: If both fail, raise so the operator can decide.
+        """
+        import shutil
+        import subprocess
+
+        # ── Level 1: drop WAL/SHM, keep main DB ─────────────────────────
+        logger.warning(
+            "Database corruption detected — attempting WAL-only recovery "
+            "for %s",
+            db_path,
+        )
+        for suffix in ("-wal", "-shm"):
+            Path(str(db_path) + suffix).unlink(missing_ok=True)
+        await self._engine.dispose()
+        try:
+            await self._init_db_inner()
+            logger.info("Recovery succeeded (dropped WAL/SHM sidecar files)")
+            return
+        except SADatabaseError:
+            logger.warning("WAL-only recovery failed — trying sqlite3 .recover")
+
+        # ── Level 2: sqlite3 .recover ────────────────────────────────────
+        recovered = db_path.with_suffix(".db.recovered")
+        try:
+            result = subprocess.run(  # noqa: S603, S607
+                ["sqlite3", str(db_path), ".recover"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # Pipe recovered SQL into a fresh database
+                result2 = subprocess.run(  # noqa: S603, S607
+                    ["sqlite3", str(recovered)],
+                    input=result.stdout,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result2.returncode == 0 and recovered.exists():
+                    backup = db_path.with_suffix(".db.corrupt")
+                    shutil.move(str(db_path), str(backup))
+                    shutil.move(str(recovered), str(db_path))
+                    # Clean up any leftover sidecar files from the corrupt copy
+                    for suffix in ("-wal", "-shm"):
+                        Path(str(db_path) + suffix).unlink(missing_ok=True)
+                    await self._engine.dispose()
+                    await self._init_db_inner()
+                    logger.info(
+                        "Recovery succeeded via sqlite3 .recover "
+                        "(corrupt backup at %s)",
+                        backup,
+                    )
+                    return
+        except (OSError, subprocess.TimeoutExpired) as recover_err:
+            logger.warning("sqlite3 .recover failed: %s", recover_err)
+        finally:
+            recovered.unlink(missing_ok=True)
+
+        # ── Level 3: give up — let the operator decide ───────────────────
+        raise SADatabaseError(
+            statement="init_db recovery",
+            params=None,
+            orig=Exception(
+                f"Database {db_path} is corrupt and automatic "
+                f"recovery failed. To start fresh: "
+                f"rm -f '{db_path}' '{db_path}-wal' '{db_path}-shm'"
+            ),
+        )
+
+    async def _init_db_inner(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        from sqlalchemy import text
         async with self._engine.begin() as conn:
             # Schema migration: add columns introduced after initial table creation.
             # SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we catch errors.
@@ -380,14 +479,21 @@ class AgentStateService:
             if self._reviewer is not None:
                 await self._reviewer.stop()
                 self._reviewer = None
-            # Checkpoint the WAL before closing so the DB file is self-contained
-            # even if uvicorn's --reload supervisor kills workers mid-write.
+            # Checkpoint the WAL before closing so the DB file is self-contained.
+            # Use PASSIVE (not TRUNCATE) — PASSIVE only copies frames that don't
+            # require a lock and never modifies the WAL file itself, so even if
+            # the process is killed mid-checkpoint the WAL remains intact and
+            # recoverable on the next open.  TRUNCATE rewrites the main DB then
+            # truncates the WAL; a kill between those two steps corrupts the DB.
             try:
                 async with self._engine.begin() as _conn:
-                    await _conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
-            except Exception:  # noqa: BLE001
+                    await _conn.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
+            except BaseException:  # noqa: BLE001
+                # CancelledError is a BaseException — must catch it here so
+                # engine.dispose() below is guaranteed to run.
                 pass
-            await self._engine.dispose()
+            finally:
+                await self._engine.dispose()
 
         app = FastAPI(title="claw-forge State Service", version="0.1.0", lifespan=lifespan)
         self._register_routes(app)
