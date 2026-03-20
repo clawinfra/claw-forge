@@ -252,6 +252,16 @@ class AgentStateService:
     ) -> None:
         self._engine = create_async_engine(database_url, echo=False)
 
+        # Extract the raw file path so the atexit handler can checkpoint
+        # without an async engine or a running event loop.
+        self._db_file_path: str | None = None
+        try:
+            raw = str(self._engine.url).split("///")[-1]
+            if raw and not raw.startswith(":"):
+                self._db_file_path = raw
+        except Exception:  # noqa: BLE001
+            pass
+
         @event.listens_for(self._engine.sync_engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
             cursor = dbapi_conn.cursor()
@@ -259,6 +269,27 @@ class AgentStateService:
             cursor.execute("PRAGMA synchronous=FULL")
             cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
+
+        # Last-resort WAL checkpoint: runs on normal interpreter exit
+        # (KeyboardInterrupt, SIGTERM) even if the async lifespan teardown
+        # is skipped by uvicorn's --reload supervisor.  Uses synchronous
+        # sqlite3 so it needs no event loop.
+        import atexit
+        import sqlite3
+
+        db_file = self._db_file_path
+
+        def _sync_wal_checkpoint() -> None:
+            if not db_file:
+                return
+            try:
+                conn = sqlite3.connect(db_file)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        atexit.register(_sync_wal_checkpoint)
 
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
@@ -424,6 +455,18 @@ class AgentStateService:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with self._engine.begin() as conn:
+            # Verify database integrity early so corruption is caught here
+            # (where tiered recovery can handle it) rather than at runtime
+            # when a query happens to hit a damaged page or index.
+            # quick_check is O(N) in pages but skips expensive cross-checks.
+            result = await conn.execute(text("PRAGMA quick_check"))
+            status = result.scalar()
+            if status != "ok":
+                raise SADatabaseError(
+                    statement="PRAGMA quick_check",
+                    params=None,
+                    orig=Exception(f"quick_check failed: {status}"),
+                )
             # Schema migration: add columns introduced after initial table creation.
             # SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we catch errors.
             for ddl in [
