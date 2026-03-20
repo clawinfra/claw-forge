@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -18,6 +20,40 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
+
+_logger = logging.getLogger(__name__)
+
+
+class SafeJSON(TypeDecorator[Any]):
+    """JSON column that survives truncated / corrupt payloads.
+
+    On read, if ``json.loads`` raises ``JSONDecodeError`` the column
+    returns *fallback* (default ``None``) instead of crashing the
+    entire request.  Writes are passed through unchanged.
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, *args: Any, fallback: Any = None, **kwargs: Any) -> None:
+        self._fallback = fallback
+        super().__init__(*args, **kwargs)
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:  # noqa: ANN401
+        if value is None:
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                _logger.warning(
+                    "Corrupt JSON in DB column (returning fallback): %.80s…",
+                    value,
+                )
+                return self._fallback
+        # Already deserialized (some drivers do this automatically)
+        return value
 
 
 class Base(DeclarativeBase):
@@ -40,7 +76,9 @@ class Session(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-    manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    manifest_json: Mapped[dict[str, Any] | None] = mapped_column(
+        SafeJSON(fallback=None), nullable=True,
+    )
 
     tasks = relationship("Task", back_populates="session", cascade="all, delete-orphan")
 
@@ -67,10 +105,16 @@ class Task(Base):
         default="pending",
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)
-    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)  # list of task IDs
+    depends_on: Mapped[list[str]] = mapped_column(
+        SafeJSON(fallback=[]), default=list,
+    )
     category: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    steps: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
-    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    steps: Mapped[list[str]] = mapped_column(
+        SafeJSON(fallback=[]), default=list, nullable=False,
+    )
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(
+        SafeJSON(fallback=None), nullable=True,
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     human_question: Mapped[str | None] = mapped_column(Text, nullable=True)
     human_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -91,5 +135,5 @@ class Event(Base):
     session_id: Mapped[str] = mapped_column(String(36), ForeignKey("sessions.id"), nullable=False)
     task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(SafeJSON(fallback=None), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
