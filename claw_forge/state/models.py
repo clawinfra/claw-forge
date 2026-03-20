@@ -31,6 +31,11 @@ class SafeJSON(TypeDecorator[Any]):
     On read, if ``json.loads`` raises ``JSONDecodeError`` the column
     returns *fallback* (default ``None``) instead of crashing the
     entire request.  Writes are passed through unchanged.
+
+    Overrides ``result_processor`` rather than ``process_result_value``
+    because SQLAlchemy's base ``JSON`` type deserializes in its own
+    result processor — if that throws, the TypeDecorator wrapper never
+    gets called.
     """
 
     impl = JSON
@@ -40,20 +45,37 @@ class SafeJSON(TypeDecorator[Any]):
         self._fallback = fallback
         super().__init__(*args, **kwargs)
 
-    def process_result_value(self, value: Any, dialect: Any) -> Any:  # noqa: ANN401
-        if value is None:
+    def result_processor(self, dialect: Any, coltype: Any) -> Any:  # noqa: ANN401
+        base_processor = self.impl_instance.result_processor(dialect, coltype)
+        fallback = self._fallback
+
+        def _safe_processor(value: Any) -> Any:  # noqa: ANN401
+            if value is None:
+                return value
+            if base_processor is not None:
+                try:
+                    return base_processor(value)
+                except (json.JSONDecodeError, ValueError):
+                    _logger.warning(
+                        "Corrupt JSON in DB column (returning fallback): "
+                        "%.80s…",
+                        value,
+                    )
+                    return fallback
+            # No base processor — try manual parse for string values
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    _logger.warning(
+                        "Corrupt JSON in DB column (returning fallback): "
+                        "%.80s…",
+                        value,
+                    )
+                    return fallback
             return value
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except (json.JSONDecodeError, ValueError):
-                _logger.warning(
-                    "Corrupt JSON in DB column (returning fallback): %.80s…",
-                    value,
-                )
-                return self._fallback
-        # Already deserialized (some drivers do this automatically)
-        return value
+
+        return _safe_processor
 
 
 class Base(DeclarativeBase):
