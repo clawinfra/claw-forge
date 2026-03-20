@@ -256,9 +256,12 @@ class AgentStateService:
         # without an async engine or a running event loop.
         self._db_file_path: str | None = None
         try:
-            raw = str(self._engine.url).split("///")[-1]
-            if raw and not raw.startswith(":"):
-                self._db_file_path = raw
+            url_str = str(self._engine.url)
+            if "///" in url_str:
+                raw = url_str.split("///", 1)[-1]
+                # Must be a real absolute path, not :memory: or empty
+                if raw and raw.startswith("/") and not raw.startswith(":"):
+                    self._db_file_path = raw
         except Exception:  # noqa: BLE001
             pass
 
