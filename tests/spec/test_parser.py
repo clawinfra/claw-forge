@@ -429,24 +429,24 @@ class TestDependencyAssignment:
 
     def test_no_phases_no_deps(self) -> None:
         features = [FeatureItem(category="Auth", name="login", description="login")]
-        _assign_dependencies(features, [])
-        assert features[0].depends_on_indices == []
+        result = _assign_dependencies(features, [])
+        assert result[0] == []
 
     def test_single_phase_no_deps(self) -> None:
         features = [FeatureItem(category="Auth", name="login", description="login")]
-        _assign_dependencies(features, ["Auth Setup"])
-        assert features[0].depends_on_indices == []
+        result = _assign_dependencies(features, ["Auth Setup"])
+        assert result[0] == []
 
     def test_two_phases_creates_deps(self) -> None:
         features = [
             FeatureItem(category="Auth", name="login", description="login"),
             FeatureItem(category="Dashboard", name="view", description="view dashboard"),
         ]
-        _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
+        result = _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
         # Auth feature is in phase 0 (matches "Auth")
-        assert features[0].depends_on_indices == []
+        assert result[0] == []
         # Dashboard feature is in phase 1 (matches "Dashboard"), depends on phase 0
-        assert features[1].depends_on_indices == [0]
+        assert result[1] == [0]
 
     def test_unmatched_features_go_to_middle_phase(self) -> None:
         features = [
@@ -454,10 +454,21 @@ class TestDependencyAssignment:
             FeatureItem(category="Misc", name="misc", description="misc feature"),
             FeatureItem(category="Dashboard", name="view", description="view dashboard"),
         ]
-        _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
+        result = _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
         # Misc doesn't match any phase, goes to middle (index 0 for 2 phases: 2//2=1)
         # Since it goes to phase 1 (middle of 2 = index 1), it depends on phase 0
-        assert features[1].depends_on_indices == [0]
+        assert result[1] == [0]
+
+    def test_no_mutation(self) -> None:
+        """Verify that _assign_dependencies does not mutate the input features."""
+        features = [
+            FeatureItem(category="Auth", name="login", description="login"),
+            FeatureItem(category="Dashboard", name="view", description="view dashboard"),
+        ]
+        _assign_dependencies(features, ["Auth Setup", "Dashboard Build"])
+        # Features should remain unchanged (no mutation)
+        assert features[0].depends_on_indices == []
+        assert features[1].depends_on_indices == []
 
 
 # ── Test edge cases ──────────────────────────────────────────────────────────

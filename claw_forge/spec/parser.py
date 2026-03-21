@@ -262,7 +262,9 @@ class ProjectSpec:
 
         # Build category -> phase index map from step titles
         # Features in step N depend on features in steps 1..N-1 (same category group)
-        _assign_dependencies(features, phases)
+        dep_indices = _assign_dependencies(features, phases)
+        for i, deps in enumerate(dep_indices):
+            features[i].depends_on_indices = deps
 
         # Parse success criteria
         sc_el = root.find("success_criteria")
@@ -492,38 +494,40 @@ def _dict_to_feature(d: dict[str, Any]) -> FeatureItem:
     return f
 
 
-def _assign_dependencies(features: list[FeatureItem], phases: list[str]) -> None:
-    """Assign depends_on_indices based on phase ordering.
+def _assign_dependencies(
+    features: list[FeatureItem], phases: list[str],
+) -> list[list[int]]:
+    """Compute dependency indices for each feature based on phase ordering.
 
-    Features in a later phase depend on ALL features from the previous phase.
-    This mirrors AutoForge's initializer agent behavior.
+    Returns a list parallel to *features* where each element is the
+    list of ``depends_on_indices`` for that feature.  The caller applies
+    the results — this function is pure (no mutation).
     """
+    result: list[list[int]] = [list(f.depends_on_indices) for f in features]
     if not phases:
-        return
-    # Map category keywords to phase index
-    # This is a heuristic — the initializer agent can refine it
+        return result
+
     phase_feature_indices: list[list[int]] = [[] for _ in phases]
 
-    # Assign each feature to a phase based on category name matching phase titles
     for i, feature in enumerate(features):
         assigned = False
         for p_idx, phase_title in enumerate(phases):
             phase_keywords = set(phase_title.lower().split())
             cat_keywords = set(feature.category.lower().split())
-            if phase_keywords & cat_keywords:  # any overlap
+            if phase_keywords & cat_keywords:
                 phase_feature_indices[p_idx].append(i)
                 assigned = True
                 break
         if not assigned:
-            # Default to middle phase
             mid = len(phases) // 2
             phase_feature_indices[mid].append(i)
 
-    # For each phase, all features depend on all features in the previous phase
     for p_idx in range(1, len(phases)):
         prev_phase_indices = phase_feature_indices[p_idx - 1]
         for feat_idx in phase_feature_indices[p_idx]:
-            features[feat_idx].depends_on_indices = list(prev_phase_indices)
+            result[feat_idx] = list(prev_phase_indices)
+
+    return result
 
 
 def _parse_key_value_el(el: ET.Element) -> dict[str, Any]:
