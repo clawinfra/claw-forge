@@ -48,6 +48,12 @@ def detect_lsp_plugins(project_path: str | Path) -> list[SdkPluginConfig]:
     return lsp_plugins_for_extensions(extensions)
 
 
+async def detect_lsp_plugins_async(project_path: str | Path) -> list[SdkPluginConfig]:
+    """Async wrapper — runs blocking rglob scan in a thread."""
+    import asyncio
+    return await asyncio.to_thread(detect_lsp_plugins, project_path)
+
+
 def lsp_plugins_for_extensions(extensions: set[str]) -> list[SdkPluginConfig]:
     """Given a set of file extensions, return matching SdkPluginConfig list."""
     seen_skills: set[str] = set()

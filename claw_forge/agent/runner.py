@@ -150,8 +150,8 @@ async def run_agent(
     if lsp_plugins is not None:
         resolved_lsp_plugins = lsp_plugins
     elif auto_detect_lsp and cwd is not None:
-        from claw_forge.lsp import detect_lsp_plugins
-        resolved_lsp_plugins = detect_lsp_plugins(cwd)
+        from claw_forge.lsp import detect_lsp_plugins_async
+        resolved_lsp_plugins = await detect_lsp_plugins_async(cwd)
     else:
         resolved_lsp_plugins = []
 
