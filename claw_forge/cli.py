@@ -539,6 +539,9 @@ def run(
     git_commit_on_boundary = git_cfg.get("commit_on_plugin_boundary", True)
     git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
 
+    agent_cfg = cfg.get("agent", {})
+    max_subagents = agent_cfg.get("max_subagents_per_task", 5)
+
     async def main() -> None:
         # Bootstrap session + tasks via state service HTTP API
         try:
@@ -802,6 +805,8 @@ def run(
                                 loop_detect_threshold=loop_detect_threshold,
                                 verify_on_exit=effective_verify_on_exit,
                                 auto_push=effective_auto_push,
+                                max_subagents=max_subagents,
+                                state_url=f"http://localhost:{_state_port}",
                             )
 
                             # ── Stderr filter: suppress noisy Claude CLI hook errors ──
