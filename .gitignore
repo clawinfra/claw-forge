@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 coverage.xml
 .pytest_cache/
 .mypy_cache/
