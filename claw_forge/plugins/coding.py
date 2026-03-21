@@ -100,6 +100,12 @@ class CodingPlugin(BasePlugin):
             "If stuck, POST http://localhost:8420/features/$FEATURE_ID/human-input\n\n"
             "### Atomic Commits\n"
             "Commit before reporting: `git add -A && git commit -m 'feat: <title>'`\n\n"
+            "### Parallel Sub-Agents\n"
+            "When your task involves 5+ independent file modifications or independent subtasks, "
+            "use the Agent tool to parallelize:\n"
+            "- Spawn one sub-agent per independent file or module\n"
+            "- Each sub-agent gets a focused, self-contained instruction\n"
+            "- Do NOT spawn sub-agents for sequential work (where step N depends on step N-1)\n\n"
             f"Project: {context.project_path}\n"
             f"Task: {context.metadata.get('description', 'No description')}"
         )

@@ -30,6 +30,11 @@ Rules:
 - Never modify files not related to the bug unless constraints explicitly allow it
 - If stuck for >10 tool calls without progress → call human_input tool
 - Regression test is MANDATORY — do not skip even for "obvious" fixes
+
+Parallel Sub-Agents:
+If the fix requires changes to 5+ independent files, use the Agent tool to \
+parallelize independent modifications. Do NOT use sub-agents for the sequential \
+reproduce → isolate → fix → verify workflow.
 """
 
 
