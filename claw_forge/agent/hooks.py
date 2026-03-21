@@ -298,6 +298,98 @@ async def subagent_stop_hook(
     )
 
 
+# ── Sub-agent hook factory ────────────────────────────────────────────────
+
+
+def make_subagent_hooks(
+    max_subagents: int = 5,
+    state_url: str | None = None,
+) -> tuple[Callable[..., Any], Callable[..., Any], dict[str, int]]:
+    """Factory for SubagentStart/Stop hooks with per-task counter and soft-limit.
+
+    Args:
+        max_subagents: Max sub-agents before injecting warning. 0 = unlimited.
+        state_url: Optional state service URL for PATCH updates.
+
+    Returns:
+        (start_hook, stop_hook, state_dict) — state_dict exposes counters
+        for testing: {"active": int, "total_spawned": int}.
+    """
+    state: dict[str, int] = {"active": 0, "total_spawned": 0}
+
+    async def _patch_subagent_count(task_id: str | None, count: int) -> None:
+        if not state_url or not task_id:
+            return
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                await client.patch(
+                    f"{state_url}/tasks/{task_id}",
+                    json={"active_subagents": count},
+                )
+        except Exception:  # noqa: BLE001
+            pass  # best-effort
+
+    async def start_hook(
+        input_data: HookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> SyncHookJSONOutput:
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+        )
+        agent_id = data.get("agent_id", "")
+        agent_type = data.get("agent_type", "")
+
+        state["active"] += 1
+        state["total_spawned"] += 1
+        print(f"[SubAgent] Starting: {agent_type} ({agent_id}) — active: {state['active']}")
+
+        task_id = data.get("task_id")
+        asyncio.create_task(_patch_subagent_count(task_id, state["active"]))
+
+        additional = f"You are a {agent_type} sub-agent. Follow claw-forge coding standards."
+        if max_subagents > 0 and state["total_spawned"] > max_subagents:
+            additional += (
+                f" You have reached the sub-agent limit ({max_subagents}) for this task."
+                " Complete remaining work sequentially — do not spawn more sub-agents."
+            )
+
+        return SyncHookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "SubagentStart",
+                "additionalContext": additional,
+            }
+        )
+
+    async def stop_hook(
+        input_data: HookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> SyncHookJSONOutput:
+        data: dict[str, Any] = (
+            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+        )
+        agent_id = data.get("agent_id", "")
+        agent_type = data.get("agent_type", "")
+
+        state["active"] = max(0, state["active"] - 1)
+        print(f"[SubAgent] Stopped: {agent_type} ({agent_id}) — active: {state['active']}")
+
+        task_id = data.get("task_id")
+        asyncio.create_task(_patch_subagent_count(task_id, state["active"]))
+
+        return SyncHookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "SubagentStop",
+                "additionalContext": "",
+            }
+        )
+
+    return start_hook, stop_hook, state
+
+
 # ── Auto-push hook factory ────────────────────────────────────────────────────
 
 
@@ -512,6 +604,8 @@ def get_default_hooks(
     loop_detect_threshold: int = 5,
     verify_on_exit: bool = True,
     auto_push: str | None = None,
+    max_subagents: int = 5,
+    state_url: str | None = None,
 ) -> dict[str, Any]:
     """Return the default hooks dict for ClaudeAgentOptions.
 
@@ -567,6 +661,11 @@ def get_default_hooks(
         )
         post_tool_use_hooks.append(HookMatcher(hooks=[_loop_hook_fn]))
 
+    _sa_start, _sa_stop, _ = make_subagent_hooks(
+        max_subagents=max_subagents,
+        state_url=state_url,
+    )
+
     hooks_dict: dict[str, Any] = {
         "PreToolUse": pre_tool_use_hooks,
         "PreCompact": [
@@ -577,10 +676,10 @@ def get_default_hooks(
             HookMatcher(hooks=[post_tool_failure_hook]),
         ],
         "SubagentStart": [
-            HookMatcher(hooks=[subagent_start_hook]),
+            HookMatcher(hooks=[_sa_start]),
         ],
         "SubagentStop": [
-            HookMatcher(hooks=[subagent_stop_hook]),
+            HookMatcher(hooks=[_sa_stop]),
         ],
     }
 
