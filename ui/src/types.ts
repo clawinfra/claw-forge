@@ -33,6 +33,8 @@ export interface Feature {
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
+  /** Number of currently active sub-agents for this task */
+  active_subagents?: number;
   error_message?: string;
   created_at: string;
   started_at?: string;

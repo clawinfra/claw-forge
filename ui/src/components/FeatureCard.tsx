@@ -197,6 +197,13 @@ export function FeatureCard({
             {isStopping ? "stopping…" : isResuming ? "resuming…" : feature.status}
           </motion.span>
 
+          {feature.active_subagents != null && feature.active_subagents > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900 dark:text-violet-200">
+              <span className="text-[10px]">&#9889;</span>
+              {feature.active_subagents} sub-agent{feature.active_subagents > 1 ? "s" : ""}
+            </span>
+          )}
+
           {/* Stop button */}
           {feature.status === "running" && onStop && (
             <button
