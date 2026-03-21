@@ -116,6 +116,13 @@ Feature branches use semantic names derived from the task's category and descrip
 - **Centralized**: `make_slug()` and `make_branch_name()` replace all ad-hoc slug patterns; all call sites in `cli.py` use these functions
 - **Squash merge**: each feature branch is squash-merged to main with a semantic commit message including completed steps, task-ID, and session trailers
 
+### Git Worktree Lifecycle (`claw_forge/git/branching.py`)
+
+Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees/`. Worktrees share the same `.git` object store (no repo duplication) — only the working-tree files are checked out separately. Cleanup is automatic via three layers:
+- **Post-merge** (`merge.py`): `squash_merge()` calls `remove_worktree()` then `delete_branch()` — disk reclaimed immediately after the feature lands
+- **Startup sweep** (`prune_worktrees()`): removes all directories under `.claw-forge/worktrees/` and runs `git worktree prune` — catches stale worktrees from crashed runs
+- **Pre-create guard** (`create_worktree()`): if the target path already exists, it is force-removed before creating the new worktree
+
 ### SQLite Crash Safety
 
 The state service uses SQLite WAL mode with multi-layer corruption defense:
