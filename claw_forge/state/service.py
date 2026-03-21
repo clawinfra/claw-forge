@@ -41,6 +41,7 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "priority": task.priority,
         "depends_on": task.depends_on,
         "steps": task.steps or [],
+        "active_subagents": task.active_subagents,
     }
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,7 @@ class UpdateTaskRequest(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    active_subagents: int | None = None
 
 
 class HumanInputRequest(BaseModel):
@@ -728,6 +730,8 @@ class AgentStateService:
                     task.output_tokens = (task.output_tokens or 0) + req.output_tokens
                 if req.cost_usd is not None:
                     task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
+                if req.active_subagents is not None:
+                    task.active_subagents = req.active_subagents
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),
@@ -744,6 +748,7 @@ class AgentStateService:
                         "cost_usd": task.cost_usd,
                         "input_tokens": task.input_tokens,
                         "output_tokens": task.output_tokens,
+                        "active_subagents": task.active_subagents,
                     },
                 )
                 return {"id": task.id, "status": task.status}
