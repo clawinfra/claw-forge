@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
+from claw_forge.git.commits import (
+    branch_commit_subjects,
+    commit_checkpoint,
+    has_remote,
+    push_to_remote,
+    task_history,
+)
 
 
 @pytest.fixture()
@@ -171,3 +177,100 @@ class TestBranchCommitSubjects:
     def test_returns_empty_for_nonexistent_branch(self, git_repo: Path) -> None:
         subjects = branch_commit_subjects(git_repo, "nonexistent", "main")
         assert subjects == []
+
+
+class TestPushToRemote:
+    def test_push_no_remote_returns_error(self, git_repo: Path) -> None:
+        result = push_to_remote(git_repo)
+        assert result["success"] is False
+        assert result["error"]
+        assert result["branch"] == "main"
+
+    def test_push_explicit_branch(self, git_repo: Path) -> None:
+        # No remote configured — push will fail, but the branch param is passed
+        result = push_to_remote(git_repo, branch="main")
+        assert result["success"] is False
+        assert result["branch"] == "main"
+
+    def test_push_default_branch_detection(self, git_repo: Path) -> None:
+        # When branch is None, it detects the current branch
+        result = push_to_remote(git_repo)
+        assert result["branch"] == "main"
+
+    def test_push_to_local_remote_succeeds(self, git_repo: Path, tmp_path: Path) -> None:
+        # Create a bare repo as a local remote
+        bare = tmp_path / "bare.git"
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(bare)],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        result = push_to_remote(git_repo, branch="main")
+        assert result["success"] is True
+        assert result["error"] is None
+
+
+class TestHasRemote:
+    def test_no_remote_returns_false(self, git_repo: Path) -> None:
+        assert has_remote(git_repo) is False
+
+    def test_has_remote_after_adding(self, git_repo: Path) -> None:
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://example.com/repo.git"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        assert has_remote(git_repo) is True
+
+    def test_has_remote_wrong_name(self, git_repo: Path) -> None:
+        subprocess.run(
+            ["git", "remote", "add", "upstream", "https://example.com/repo.git"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        assert has_remote(git_repo, "origin") is False
+        assert has_remote(git_repo, "upstream") is True
+
+    def test_has_remote_nonrepo_returns_false(self, tmp_path: Path) -> None:
+        assert has_remote(tmp_path) is False
+
+
+class TestTaskHistoryEdgeCases:
+    def test_history_on_nonrepo_returns_empty(self, tmp_path: Path) -> None:
+        result = task_history(tmp_path)
+        assert result == []
+
+    def test_history_empty_hash_skipped(self, git_repo: Path) -> None:
+        # The initial commit already exists; just verify parsing works
+        history = task_history(git_repo, limit=100)
+        # All returned commits should have non-empty hashes
+        for commit in history:
+            assert commit["hash"]
+
+    def test_history_malformed_entries_skipped(self, git_repo: Path) -> None:
+        """Verify that malformed log entries (< 4 parts) are skipped."""
+        from unittest.mock import MagicMock, patch
+
+        # Mock _run_git to return a malformed log entry
+        mock_result = MagicMock()
+        # Two entries: one malformed (too few separators) and one valid
+        sep = "---COMMIT-SEP---"
+        mock_result.stdout = (
+            f"abc1234{sep}good msg{sep}2024-01-01T00:00:00{sep}body{sep}\n"
+            f"short{sep}bad\n"  # malformed — fewer than 4 parts
+        )
+        with patch("claw_forge.git.commits._run_git", return_value=mock_result):
+            history = task_history(git_repo)
+        assert len(history) == 1
+        assert history[0]["message"] == "good msg"
+
+    def test_history_empty_hash_entry_skipped(self, git_repo: Path) -> None:
+        """Entries where full_hash is empty after stripping are skipped."""
+        from unittest.mock import MagicMock, patch
+
+        mock_result = MagicMock()
+        sep = "---COMMIT-SEP---"
+        mock_result.stdout = (
+            f"  {sep}empty hash{sep}2024-01-01{sep}body{sep}\n"
+        )
+        with patch("claw_forge.git.commits._run_git", return_value=mock_result):
+            history = task_history(git_repo)
+        assert history == []

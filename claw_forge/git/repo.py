@@ -12,6 +12,7 @@ _GITIGNORE_ENTRIES = [
     ".claw-forge/state.db-journal",
     ".claw-forge/state.db-wal",
     ".claw-forge/state.db-shm",
+    ".claw-forge/worktrees/",
 ]
 
 

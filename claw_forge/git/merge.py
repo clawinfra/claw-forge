@@ -6,7 +6,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from claw_forge.git.branching import branch_exists, current_branch, delete_branch, switch_branch
+from claw_forge.git.branching import (
+    branch_exists,
+    current_branch,
+    delete_branch,
+    remove_worktree,
+    switch_branch,
+)
 from claw_forge.git.commits import branch_commit_subjects
 from claw_forge.git.repo import _run_git
 
@@ -55,6 +61,7 @@ def squash_merge(
     steps: list[str] | None = None,
     task_id: str | None = None,
     session_id: str | None = None,
+    worktree_path: Path | None = None,
 ) -> dict[str, Any]:
     if not branch_exists(project_dir, branch):
         return {"merged": False, "error": f"branch {branch!r} not found"}
@@ -78,6 +85,8 @@ def squash_merge(
         short_hash = _run_git(
             ["rev-parse", "--short", "HEAD"], project_dir
         ).stdout.strip()
+        if worktree_path is not None:
+            remove_worktree(project_dir, worktree_path)
         delete_branch(project_dir, branch, force=True)
         return {"merged": True, "commit_hash": short_hash}
     except Exception as exc:

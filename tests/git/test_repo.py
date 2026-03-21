@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from claw_forge.git.repo import ensure_gitignore, init_or_detect
+from claw_forge.git.repo import _detect_default_branch, ensure_gitignore, init_or_detect
 
 
 class TestInitOrDetect:
@@ -57,3 +57,18 @@ class TestEnsureGitignore:
         ensure_gitignore(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
         assert content.count(".claw-forge/state.log") == 1
+
+    def test_appends_newline_when_missing(self, tmp_path: Path) -> None:
+        """When existing .gitignore doesn't end with newline, one is prepended."""
+        (tmp_path / ".gitignore").write_text("*.pyc")  # no trailing \n
+        ensure_gitignore(tmp_path)
+        content = (tmp_path / ".gitignore").read_text()
+        assert content.startswith("*.pyc\n")
+        assert ".claw-forge/state.log" in content
+
+
+class TestDetectDefaultBranch:
+    def test_returns_main_in_non_repo(self, tmp_path: Path) -> None:
+        """Fallback to 'main' when not a git repo."""
+        result = _detect_default_branch(tmp_path)
+        assert result == "main"

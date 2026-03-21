@@ -738,15 +738,18 @@ def run(
                     task_node.plugin_name,
                     prefix=git_branch_prefix,
                 ).removeprefix(f"{git_branch_prefix}/")
+                _worktree_path: Path | None = None
                 if git_enabled:
                     try:
-                        await git_ops.create_branch(
+                        _wt_result = await git_ops.create_worktree(
                             task_node.id, _slug, prefix=git_branch_prefix,
                         )
-                    except Exception as _git_branch_err:
+                        if _wt_result:
+                            _, _worktree_path = _wt_result
+                    except Exception as _git_wt_err:
                         _logging.getLogger(__name__).warning(
-                            "Git branch creation failed for task %s (continuing): %s",
-                            task_node.id, _git_branch_err,
+                            "Git worktree creation failed for task %s (continuing): %s",
+                            task_node.id, _git_wt_err,
                         )
 
                 output = ""
@@ -832,16 +835,17 @@ def run(
                                 ),
                             )
 
+                            _agent_cwd = _worktree_path or project_path
                             options = ClaudeAgentOptions(
                                 model=model,
-                                cwd=str(project_path),
+                                cwd=str(_agent_cwd),
                                 env=sdk_env,
                                 permission_mode="bypassPermissions",
                                 hooks=agent_hooks,  # type: ignore[arg-type]
                                 settings=json.dumps({"enabledPlugins": {}}),
                                 setting_sources=["project"],
                                 stderr=_stderr_filter,
-                                can_use_tool=make_can_use_tool(project_dir=project_path),
+                                can_use_tool=make_can_use_tool(project_dir=_agent_cwd),
                                 sandbox=_sandbox,
                             )
 
@@ -1000,7 +1004,7 @@ def run(
                         **({"error_message": output} if not success else {}),
                     )
 
-                    # Git: checkpoint + optional merge on success
+                    # Git: checkpoint + optional merge on success, cleanup on failure
                     if git_enabled and success and git_commit_on_boundary:
                         _desc = (
                             task_node.description
@@ -1012,6 +1016,7 @@ def run(
                             plugin=task_node.plugin_name,
                             phase=task_node.plugin_name,
                             session_id=session_id,
+                            cwd=_worktree_path,
                         )
                         if git_merge_strategy == "auto":
                             _branch_name = f"{git_branch_prefix}/{_slug}"
@@ -1021,7 +1026,10 @@ def run(
                                 steps=task_node.steps or None,
                                 task_id=task_node.id,
                                 session_id=session_id,
+                                worktree_path=_worktree_path,
                             )
+                    elif git_enabled and not success and _worktree_path:
+                        await git_ops.remove_worktree(_worktree_path)
 
             return {"success": success, "output": output}
 

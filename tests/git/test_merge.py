@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from claw_forge.git.branching import branch_exists, create_feature_branch, current_branch
+from claw_forge.git.branching import (
+    branch_exists,
+    create_feature_branch,
+    create_worktree,
+    current_branch,
+)
 from claw_forge.git.commits import commit_checkpoint
 from claw_forge.git.merge import squash_merge
 
@@ -139,3 +144,102 @@ class TestSquashMerge:
             cwd=git_repo, capture_output=True, text=True, check=True,
         )
         assert log.stdout.strip() == "merge: feat/legacy (squash)"
+
+    def test_squash_merge_title_no_phases(self, git_repo: Path) -> None:
+        """Merge with title but branch has same commits as main (empty phases)."""
+        # Create a branch, add a file, but the branch_commit_subjects will
+        # return the commit subject. To get empty phases, we need the branch
+        # to exist but with no commits ahead of target. Since squash_merge
+        # collects phases before merging, we simulate by providing title + steps
+        # but the branch has a single commit. The phases list will be non-empty
+        # so let's test the no-steps no-phases path instead.
+        create_feature_branch(git_repo, "t-np", "no-phases")
+        (git_repo / "np.py").write_text("np = True\n")
+        commit_checkpoint(
+            git_repo, message="only commit",
+            task_id="t-np", plugin="coding", phase="coding", session_id="s1",
+        )
+        # Merge with title but without steps (steps=None)
+        result = squash_merge(
+            git_repo, "feat/no-phases",
+            title="No steps merge",
+            task_id="t-np",
+        )
+        assert result["merged"] is True
+
+    def test_squash_merge_with_title_no_trailers(self, git_repo: Path) -> None:
+        """Merge with title but no task_id/session_id — covers branch miss."""
+        create_feature_branch(git_repo, "t8", "no-trailers")
+        (git_repo / "nt.py").write_text("nt = True\n")
+        commit_checkpoint(
+            git_repo, message="add nt",
+            task_id="t8", plugin="coding", phase="coding", session_id="s1",
+        )
+        result = squash_merge(
+            git_repo, "feat/no-trailers",
+            title="Title only merge",
+            # no task_id, no session_id, no steps
+        )
+        assert result["merged"] is True
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        body = log.stdout
+        assert "Title only merge" in body
+        assert "Task-ID" not in body
+        assert "Session" not in body
+
+    def test_squash_merge_conflict_aborts(self, git_repo: Path) -> None:
+        """Conflicting merge triggers abort and error return."""
+        create_feature_branch(git_repo, "t9", "conflict")
+        (git_repo / "README.md").write_text("# conflict branch\n")
+        commit_checkpoint(
+            git_repo, message="change readme on branch",
+            task_id="t9", plugin="coding", phase="coding", session_id="s1",
+        )
+        # Go back to main and make a conflicting change
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        (git_repo / "README.md").write_text("# main branch conflict\n")
+        subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "conflict on main"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        result = squash_merge(git_repo, "feat/conflict")
+        assert result["merged"] is False
+        assert "error" in result
+
+    def test_squash_merge_with_worktree_cleanup(self, git_repo: Path) -> None:
+        branch, wt_path = create_worktree(git_repo, "t6", "wt-merge")
+        (wt_path / "wt_file.py").write_text("wt = True\n")
+        commit_checkpoint(
+            wt_path, message="add wt file",
+            task_id="t6", plugin="coding", phase="coding", session_id="s1",
+        )
+
+        result = squash_merge(
+            git_repo, branch,
+            title="Worktree merge",
+            task_id="t6",
+            worktree_path=wt_path,
+        )
+        assert result["merged"] is True
+        assert not wt_path.exists()
+        assert (git_repo / "wt_file.py").exists()
+
+    def test_squash_merge_failure_preserves_worktree(self, git_repo: Path) -> None:
+        _, wt_path = create_worktree(git_repo, "t7", "fail-merge")
+        # Don't commit anything — merge of empty branch will fail or produce
+        # nothing different from main. Use a nonexistent branch to test the
+        # failure path where worktree_path is passed but branch is missing.
+        result = squash_merge(
+            git_repo, "nonexistent/branch",
+            worktree_path=wt_path,
+        )
+        assert result["merged"] is False
+        # Worktree should still exist since merge failed
+        assert wt_path.exists()
