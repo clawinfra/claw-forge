@@ -45,11 +45,17 @@ Orchestrator + Agent Execution + Provider Pool  ────────
   claw_forge/orchestrator/dispatcher.py — asyncio.TaskGroup parallel dispatch
   claw_forge/agent/runner.py            — wraps claude-agent-sdk query()
   claw_forge/pool/manager.py            — multi-provider rotation + circuit breaker
+
+Git Workspace Tracking  ────────────────────────────────
+  claw_forge/git/slug.py     — centralized slug generation (make_slug, make_branch_name)
+  claw_forge/git/branching.py — feature branch create/switch/delete
+  claw_forge/git/commits.py  — checkpoint commits with structured trailers
+  claw_forge/git/merge.py    — squash-merge feature branches to main
 ```
 
 ### How a `claw-forge run` Works
 
-1. **State service** (`localhost:8888`) is started (subprocess) and manages all task state in SQLite
+1. **State service** (`localhost:8420`) is started (subprocess) and manages all task state in SQLite
 2. **Dispatcher** pulls "ready" tasks from the scheduler (tasks whose dependencies are all completed)
 3. Each task is handed to the matching **plugin** (coding, testing, reviewer, bugfix)
 4. The plugin calls `run_agent()` which wraps `claude_agent_sdk.query()` and yields messages
@@ -84,7 +90,7 @@ Two MCP surfaces:
 - **`sdk_server.py`** (`create_feature_mcp_server`) — in-process SDK MCP, used by default (`use_sdk_mcp=True`)
 - **`feature_mcp.py`** — subprocess FastMCP server (legacy fallback). Exposes `claim_feature`, `update_feature`, `list_features`, `get_feature` tools to agents.
 
-### State Service API (default `localhost:8888`)
+### State Service API (default `localhost:8420`)
 
 All CLI commands communicate with the state service via HTTP. Key endpoints:
 - `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`
@@ -102,6 +108,24 @@ React + Vite + TypeScript Kanban board. Built with `npm --prefix ui run build`; 
 
 Parses `app_spec.txt` or `app_spec.xml` (greenfield or brownfield) into a `ProjectSpec` with a list of features and dependency edges. The `initializer` plugin calls this to seed the task DAG in the state service.
 
+### Git Branch Naming (`claw_forge/git/slug.py`)
+
+Feature branches use semantic names derived from the task's category and description:
+- **Format**: `feat/{category}-{description-slug}` (e.g. `feat/auth-jwt-authentication`)
+- **Verb stripping**: leading action verbs (add, implement, create, build, fix, …) are removed so branch names read as noun phrases
+- **Centralized**: `make_slug()` and `make_branch_name()` replace all ad-hoc slug patterns; all call sites in `cli.py` use these functions
+- **Squash merge**: each feature branch is squash-merged to main with a semantic commit message including completed steps, task-ID, and session trailers
+
+### SQLite Crash Safety
+
+The state service uses SQLite WAL mode with multi-layer corruption defense:
+- **`synchronous=FULL`**: every WAL page is fsynced before ack — crash-safe even on dirty kills
+- **Lifespan teardown**: async `PRAGMA wal_checkpoint(PASSIVE)` runs on clean FastAPI shutdown
+- **atexit handler**: synchronous `PRAGMA wal_checkpoint(TRUNCATE)` via plain `sqlite3` — runs on any normal Python exit (KeyboardInterrupt, SIGTERM), needs no event loop
+- **SafeJSON columns**: `TypeDecorator` on all JSON columns catches `JSONDecodeError` from truncated payloads and returns a fallback value instead of crashing
+- **Tiered recovery on startup**: Level 1 drops WAL/SHM files → Level 2 uses `sqlite3 .recover` → Level 3 raises actionable error
+- **Graceful shutdown**: both `dev.sh` and `claw-forge ui` POST `/shutdown` before sending SIGTERM to give the lifespan teardown time to run
+
 ## Key Conventions
 
 - **Async throughout**: pure `asyncio`, no threads. `asyncio.TaskGroup` for structured concurrency in the dispatcher.
@@ -110,3 +134,4 @@ Parses `app_spec.txt` or `app_spec.xml` (greenfield or brownfield) into a `Proje
 - **Coverage gate**: CI enforces `fail_under = 90` (branch coverage). Adding new source files without tests will fail CI.
 - **Version in `pyproject.toml`** is a static `0.0.0.dev0` placeholder — never bump it manually. The publish workflow sets the real version from the release tag.
 - **`.claw-forge/state.log`** is a runtime file, gitignored. Do not commit it.
+- **Default state port is `8420`** — configurable via `--port` flag or `state.port` in `claw-forge.yaml`.

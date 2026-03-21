@@ -133,7 +133,8 @@ skills:
   - git-workflow
 
 state:
-  database_url: "sqlite+aiosqlite:///claw_forge.db"
+  # database_url: postgresql+asyncpg://user:pass@localhost:5432/claw_forge
+  # database_url: sqlite+aiosqlite:///path/to/state.db  # (default)
   host: "0.0.0.0"
   port: 8420
 
@@ -1183,6 +1184,12 @@ def state(
         False, "--reload",
         help="Enable hot-reload — restart the server on Python file changes (dev only).",
     ),
+    database_url: str | None = typer.Option(
+        None, "--database-url",
+        help="Database URL override "
+        "(e.g. postgresql+asyncpg://user:pass@host/db). "
+        "Default: SQLite in .claw-forge/state.db",
+    ),
 ) -> None:
     """Start the AgentStateService REST + WebSocket API.
 
@@ -1200,23 +1207,31 @@ def state(
         # Start on a custom port, local-only
         claw-forge state --port 9000 --host 127.0.0.1
 
+        # Start with PostgreSQL
+        claw-forge state --database-url postgresql+asyncpg://u:p@host/db
+
         # Start the UI separately (connects to state service automatically)
         claw-forge ui --state-port 8420
     """
     import uvicorn
 
+    from claw_forge.state.backend import mask_url_password, resolve_database_url
+
     project_path = Path(project).resolve()
-    # Load .env from the project directory so API keys are available
     _load_env_file(project_path)
-    db_path = project_path / ".claw-forge" / "state.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    db_url = f"sqlite+aiosqlite:///{db_path}"
-    console.print(f"[dim]Database: {db_path}[/dim]")
+    cfg = _load_config(config)
+    db_url = resolve_database_url(
+        cli_override=database_url,
+        config=cfg.get("state"),
+        project_path=project_path,
+    )
+    console.print(f"[dim]Database: {mask_url_password(db_url)}[/dim]")
 
     try:
         if reload:
             console.print("[bold yellow]🔄 Hot-reload enabled[/bold yellow]")
             os.environ["CLAW_FORGE_DB_URL"] = db_url
+            os.environ["CLAW_FORGE_PROJECT_PATH"] = str(project_path)
             uvicorn.run(
                 "claw_forge.state.service:create_app_from_env",
                 factory=True,
@@ -1228,7 +1243,9 @@ def state(
         else:
             from claw_forge.state.service import AgentStateService
 
-            svc = AgentStateService(database_url=db_url)
+            svc = AgentStateService(
+                database_url=db_url, project_path=project_path,
+            )
             uvicorn.run(svc.create_app(), host=host, port=port)
     except OSError as exc:
         if "Address already in use" in str(exc) or getattr(exc, "errno", None) in (48, 98):

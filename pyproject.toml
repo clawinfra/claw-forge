@@ -43,6 +43,7 @@ dependencies = [
 bedrock = ["boto3>=1.35,<2", "anthropic[bedrock]>=0.40,<1"]
 azure = ["azure-identity>=1.17,<2", "openai>=1.50,<2"]
 vertex = ["anthropic[vertex]>=0.40,<1", "google-auth>=2,<3"]
+postgres = ["asyncpg>=0.29,<1"]
 all-providers = ["claw-forge[bedrock,azure,vertex]"]
 dev = [
     "pytest>=8,<9",

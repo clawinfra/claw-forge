@@ -60,7 +60,11 @@ def create_app_from_env() -> FastAPI:
     db_url = os.environ.get(
         "CLAW_FORGE_DB_URL", "sqlite+aiosqlite:///./state.db"
     )
-    svc = AgentStateService(database_url=db_url)
+    project_path_str = os.environ.get("CLAW_FORGE_PROJECT_PATH")
+    project_path = Path(project_path_str) if project_path_str else None
+    svc = AgentStateService(
+        database_url=db_url, project_path=project_path,
+    )
     return svc.create_app()
 
 
@@ -249,50 +253,65 @@ class AgentStateService:
         self,
         database_url: str = "sqlite+aiosqlite:///claw_forge.db",
         pool_manager: ProviderPoolManager | None = None,
+        project_path: Path | None = None,
     ) -> None:
-        self._engine = create_async_engine(database_url, echo=False)
+        from claw_forge.state.backend import is_sqlite
 
-        # Extract the raw file path so the atexit handler can checkpoint
-        # without an async engine or a running event loop.
+        self._is_sqlite = is_sqlite(database_url)
+        self._database_url = database_url
+        self._explicit_project_path = project_path
+
+        # PostgreSQL benefits from connection pooling; SQLite does not.
+        engine_kwargs: dict[str, Any] = {}
+        if not self._is_sqlite:
+            engine_kwargs = {
+                "pool_size": 10,
+                "max_overflow": 20,
+                "pool_pre_ping": True,
+            }
+        self._engine = create_async_engine(
+            database_url, echo=False, **engine_kwargs,
+        )
+
+        # ── SQLite-specific: file path extraction + pragmas + atexit ──
         self._db_file_path: str | None = None
-        try:
-            url_str = str(self._engine.url)
-            if "///" in url_str:
-                raw = url_str.split("///", 1)[-1]
-                # Must be a real absolute path, not :memory: or empty
-                if raw and raw.startswith("/") and not raw.startswith(":"):
-                    self._db_file_path = raw
-        except Exception:  # noqa: BLE001
-            pass
-
-        @event.listens_for(self._engine.sync_engine, "connect")
-        def _set_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
-            cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=FULL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.close()
-
-        # Last-resort WAL checkpoint: runs on normal interpreter exit
-        # (KeyboardInterrupt, SIGTERM) even if the async lifespan teardown
-        # is skipped by uvicorn's --reload supervisor.  Uses synchronous
-        # sqlite3 so it needs no event loop.
-        import atexit
-        import sqlite3
-
-        db_file = self._db_file_path
-
-        def _sync_wal_checkpoint() -> None:
-            if not db_file:
-                return
+        if self._is_sqlite:
             try:
-                conn = sqlite3.connect(db_file)
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.close()
+                url_str = str(self._engine.url)
+                if "///" in url_str:
+                    raw = url_str.split("///", 1)[-1]
+                    if raw and raw.startswith("/") and not raw.startswith(":"):
+                        self._db_file_path = raw
             except Exception:  # noqa: BLE001
                 pass
 
-        atexit.register(_sync_wal_checkpoint)
+            @event.listens_for(self._engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=FULL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.close()
+
+            # Last-resort WAL checkpoint: runs on normal interpreter exit
+            # (KeyboardInterrupt, SIGTERM) even if the async lifespan
+            # teardown is skipped by uvicorn's --reload supervisor.
+            import atexit
+            import sqlite3
+
+            db_file = self._db_file_path
+
+            def _sync_wal_checkpoint() -> None:
+                if not db_file:
+                    return
+                try:
+                    conn = sqlite3.connect(db_file)
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            atexit.register(_sync_wal_checkpoint)
 
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
@@ -314,12 +333,16 @@ class AgentStateService:
         self._resume_task_requested: set[str] = set()
         # Task IDs currently paused via stop-all; agent logs for these are suppressed
         self._paused_task_ids: set[str] = set()
-        # Derive project root from DB path for config discovery
-        # e.g. "sqlite+aiosqlite:////abs/path/.claw-forge/state.db" → "/abs/path"
-        _db = self._db_path()
-        self._project_path: Path | None = (
-            _db.resolve().parent.parent if _db is not None else None
-        )
+        # Derive project root: use explicit path if given (required for
+        # PostgreSQL where the DB URL doesn't encode the project directory),
+        # otherwise infer from the SQLite file path.
+        if self._explicit_project_path is not None:
+            self._project_path: Path | None = self._explicit_project_path
+        else:
+            _db = self._db_path()
+            self._project_path = (
+                _db.resolve().parent.parent if _db is not None else None
+            )
 
     def _db_path(self) -> Path | None:
         """Extract the filesystem path from the engine's SQLite URL."""
@@ -458,18 +481,17 @@ class AgentStateService:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with self._engine.begin() as conn:
-            # Verify database integrity early so corruption is caught here
-            # (where tiered recovery can handle it) rather than at runtime
-            # when a query happens to hit a damaged page or index.
-            # quick_check is O(N) in pages but skips expensive cross-checks.
-            result = await conn.execute(text("PRAGMA quick_check"))
-            status = result.scalar()
-            if status != "ok":
-                raise SADatabaseError(
-                    statement="PRAGMA quick_check",
-                    params=None,
-                    orig=Exception(f"quick_check failed: {status}"),
-                )
+            # SQLite: verify database integrity early so corruption is
+            # caught here (where tiered recovery can handle it).
+            if self._is_sqlite:
+                result = await conn.execute(text("PRAGMA quick_check"))
+                status = result.scalar()
+                if status != "ok":
+                    raise SADatabaseError(
+                        statement="PRAGMA quick_check",
+                        params=None,
+                        orig=Exception(f"quick_check failed: {status}"),
+                    )
             # Schema migration: add columns introduced after initial table creation.
             # SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we catch errors.
             for ddl in [
@@ -525,21 +547,18 @@ class AgentStateService:
             if self._reviewer is not None:
                 await self._reviewer.stop()
                 self._reviewer = None
-            # Checkpoint the WAL before closing so the DB file is self-contained.
-            # Use PASSIVE (not TRUNCATE) — PASSIVE only copies frames that don't
-            # require a lock and never modifies the WAL file itself, so even if
-            # the process is killed mid-checkpoint the WAL remains intact and
-            # recoverable on the next open.  TRUNCATE rewrites the main DB then
-            # truncates the WAL; a kill between those two steps corrupts the DB.
-            try:
-                async with self._engine.begin() as _conn:
-                    await _conn.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
-            except BaseException:  # noqa: BLE001
-                # CancelledError is a BaseException — must catch it here so
-                # engine.dispose() below is guaranteed to run.
-                pass
-            finally:
-                await self._engine.dispose()
+            # SQLite WAL checkpoint before closing so the DB is self-contained.
+            if self._is_sqlite:
+                try:
+                    async with self._engine.begin() as _conn:
+                        await _conn.execute(
+                            text("PRAGMA wal_checkpoint(PASSIVE)")
+                        )
+                except BaseException:  # noqa: BLE001
+                    # CancelledError is a BaseException — must catch it
+                    # so engine.dispose() below is guaranteed to run.
+                    pass
+            await self._engine.dispose()
 
         app = FastAPI(title="claw-forge State Service", version="0.1.0", lifespan=lifespan)
         self._register_routes(app)
