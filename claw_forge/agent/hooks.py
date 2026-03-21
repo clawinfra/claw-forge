@@ -15,6 +15,11 @@ except ImportError:  # pragma: no cover — SDK always installed in production
 
 from .security import bash_security_hook
 
+
+def _as_dict(input_data: HookInput) -> dict[str, Any]:
+    """Narrow HookInput to a dict, returning empty dict for non-dict inputs."""
+    return cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+
 # ── Pre-compact hook ──────────────────────────────────────────────────────────
 
 
@@ -87,7 +92,7 @@ async def post_tool_failure_hook(
     context: HookContext,
 ) -> SyncHookJSONOutput:
     """Auto-log tool failures and inject recovery guidance into the context."""
-    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
+    data = _as_dict(input_data)
     error = str(data.get("error", ""))
     tool_name = str(data.get("tool_name", ""))
     print(f"[Tool failure] {tool_name}: {error[:200]}")
@@ -175,11 +180,7 @@ def make_stop_hook(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data)
-            if isinstance(input_data, dict)
-            else {}
-        )
+        data = _as_dict(input_data)
         if data.get("stop_hook_active") and should_continue_fn():
             return SyncHookJSONOutput(
                 continue_=True,
@@ -227,11 +228,7 @@ def make_notification_hook(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data)
-            if isinstance(input_data, dict)
-            else {}
-        )
+        data = _as_dict(input_data)
         msg = data.get("message", "")
         title = data.get("title", "Agent")
         print(f"[{title}] {msg}")
@@ -248,54 +245,6 @@ def make_notification_hook(
             }
         )
     return hook
-
-
-# ── SubagentStart hook ────────────────────────────────────────────────────────
-
-
-async def subagent_start_hook(
-    input_data: HookInput,
-    tool_use_id: str | None,
-    context: HookContext,
-) -> SyncHookJSONOutput:
-    """Log and inject standards into each sub-agent as it starts.
-
-    Automatically injects claw-forge coding standards into the sub-agent's
-    context so that every spawned agent starts with the same baseline.
-    """
-    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-    agent_id = data.get("agent_id", "")
-    agent_type = data.get("agent_type", "")
-    print(f"[SubAgent] Starting: {agent_type} ({agent_id})")
-    return SyncHookJSONOutput(
-        hookSpecificOutput={
-            "hookEventName": "SubagentStart",
-            "additionalContext": (
-                f"You are a {agent_type} sub-agent. Follow claw-forge coding standards."
-            ),
-        }
-    )
-
-
-# ── SubagentStop hook ─────────────────────────────────────────────────────────
-
-
-async def subagent_stop_hook(
-    input_data: HookInput,
-    tool_use_id: str | None,
-    context: HookContext,
-) -> SyncHookJSONOutput:
-    """Log when a sub-agent finishes."""
-    data: dict[str, Any] = cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-    agent_id = data.get("agent_id", "")
-    agent_type = data.get("agent_type", "")
-    print(f"[SubAgent] Stopped: {agent_type} ({agent_id})")
-    return SyncHookJSONOutput(
-        hookSpecificOutput={  # type: ignore[typeddict-item,misc]
-            "hookEventName": "SubagentStop",
-            "additionalContext": "",
-        }
-    )
 
 
 # ── Sub-agent hook factory ────────────────────────────────────────────────
@@ -316,18 +265,23 @@ def make_subagent_hooks(
         for testing: {"active": int, "total_spawned": int}.
     """
     state: dict[str, int] = {"active": 0, "total_spawned": 0}
+    _shared_client: dict[str, Any] = {}  # lazy-init shared httpx client
+
+    async def _get_client() -> Any:
+        if "client" not in _shared_client:
+            import httpx
+            _shared_client["client"] = httpx.AsyncClient(timeout=2.0)
+        return _shared_client["client"]
 
     async def _patch_subagent_count(task_id: str | None, count: int) -> None:
         if not state_url or not task_id:
             return
         try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                await client.patch(
-                    f"{state_url}/tasks/{task_id}",
-                    json={"active_subagents": count},
-                )
+            client = await _get_client()
+            await client.patch(
+                f"{state_url}/tasks/{task_id}",
+                json={"active_subagents": count},
+            )
         except Exception:  # noqa: BLE001
             pass  # best-effort
 
@@ -336,9 +290,7 @@ def make_subagent_hooks(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-        )
+        data = _as_dict(input_data)
         agent_id = data.get("agent_id", "")
         agent_type = data.get("agent_type", "")
 
@@ -368,9 +320,7 @@ def make_subagent_hooks(
         tool_use_id: str | None,
         context: HookContext,
     ) -> SyncHookJSONOutput:
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-        )
+        data = _as_dict(input_data)
         agent_id = data.get("agent_id", "")
         agent_type = data.get("agent_type", "")
 
@@ -388,6 +338,10 @@ def make_subagent_hooks(
         )
 
     return start_hook, stop_hook, state
+
+
+# Backward-compatible module-level aliases (used by existing tests/imports)
+subagent_start_hook, subagent_stop_hook, _default_sa_state = make_subagent_hooks()
 
 
 # ── Auto-push hook factory ────────────────────────────────────────────────────
@@ -474,9 +428,7 @@ def hashline_read_hook() -> Any:
     ) -> SyncHookJSONOutput:
         from claw_forge.hashline import HashlineError, annotate
 
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-        )
+        data = _as_dict(input_data)
         result_content = str(data.get("output", data.get("content", "")))
 
         try:
@@ -516,9 +468,7 @@ def hashline_edit_hook() -> Any:
 
         from claw_forge.hashline import HashlineError, apply_edits, parse_edit_ops
 
-        data: dict[str, Any] = (
-            cast(dict[str, Any], input_data) if isinstance(input_data, dict) else {}
-        )
+        data = _as_dict(input_data)
         tool_input = str(data.get("input", data.get("content", "")))
 
         # Only intercept if this looks like a hashline edit block

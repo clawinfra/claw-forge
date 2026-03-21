@@ -353,7 +353,7 @@ class AgentStateService:
             return None
         # URL form: sqlite+aiosqlite:////abs/path or sqlite+aiosqlite:///rel
         raw = url_str.split("///")[-1]
-        if not raw:
+        if not raw or raw.startswith(":"):
             return None
         return Path(raw)
 
