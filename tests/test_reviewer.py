@@ -499,8 +499,14 @@ class TestRegressionStatusEndpoint:
             db.add(session)
             await db.commit()
             await db.refresh(session)
-            t1 = Task(id="task-1", session_id=session.id, plugin_name="coding", description="Auth")
-            t2 = Task(id="task-4", session_id=session.id, plugin_name="coding", description="Payments")
+            t1 = Task(
+                id="task-1", session_id=session.id,
+                plugin_name="coding", description="Auth",
+            )
+            t2 = Task(
+                id="task-4", session_id=session.id,
+                plugin_name="coding", description="Payments",
+            )
             db.add_all([t1, t2])
             await db.commit()
 
