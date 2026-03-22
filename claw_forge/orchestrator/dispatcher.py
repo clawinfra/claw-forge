@@ -164,6 +164,9 @@ class Dispatcher:
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
         # Task IDs running outside the semaphore (individually resumed tasks)
         self._resumed_tasks: set[str] = set()
+        # Errors from tasks that exhausted retries (keyed by task ID).
+        # Stored here instead of raised so TaskGroup doesn't cancel siblings.
+        self._task_errors: dict[str, Exception | None] = {}
 
         if self._config.yolo:
             logger.warning(_YOLO_WARNING)
@@ -282,9 +285,9 @@ class Dispatcher:
                         )
 
                 for task_id, future in wave_futures.items():
-                    exc = future.exception() if future.done() else None
-                    if exc:
-                        result.failed[task_id] = str(exc)
+                    stored_err = self._task_errors.pop(task_id, None)
+                    if stored_err is not None:
+                        result.failed[task_id] = str(stored_err)
                         self._scheduler.mark_failed(task_id)
                     else:
                         task_result = future.result()
@@ -310,6 +313,11 @@ class Dispatcher:
         If the task's asyncio.Task is cancelled (via the stop UI control), the
         cancellation is caught gracefully and ``None`` is returned — the state
         service has already reset the task to ``pending``.
+
+        Non-cancellation exceptions are caught after retry exhaustion and
+        stored in ``_task_errors`` instead of re-raising.  This prevents
+        ``asyncio.TaskGroup`` from killing the entire wave when a single
+        task fails.
         """
         self._running_tasks[task.id] = asyncio.current_task()  # type: ignore[assignment]
         try:
@@ -350,7 +358,10 @@ class Dispatcher:
                                 "Task %s failed after %d attempts", task.id, attempt
                             )
 
-                raise last_exc  # type: ignore[misc]
+                # Store the error instead of raising — TaskGroup would cancel
+                # all sibling tasks if we let the exception propagate.
+                self._task_errors[task.id] = last_exc
+                return None
         except asyncio.CancelledError:
             # Cancelled while waiting to acquire the semaphore
             logger.info(

@@ -1109,7 +1109,13 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 /** Filter out sessions created by pytest (tmp_path artifacts). */
 function isRealSession(s: { project_path: string }): boolean {
   const p = s.project_path;
-  return !p.includes("/pytest-") && !p.includes("/tmp/") && !p.includes("\\Temp\\");
+  return (
+    !p.includes("/pytest-") &&
+    !p.includes("/tmp/") &&
+    !p.includes("\\Temp\\") &&
+    // macOS temp dirs: /private/var/folders/.../T/...
+    !p.startsWith("/private/var/folders/")
+  );
 }
 
 function SessionSelector({ onSelect }: { onSelect: (id: string) => void }) {

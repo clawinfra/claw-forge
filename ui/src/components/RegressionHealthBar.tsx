@@ -11,7 +11,9 @@
  * the shared WebSocket managed by useWebSocket (passed as props).
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 
 interface ImplicatedFeature {
   id: string;
@@ -124,19 +126,12 @@ export function RegressionHealthBar({ isRunning }: RegressionHealthBarProps) {
     );
   }
 
-  // Build context label: show trigger features (what completed before this run)
-  // and implicated features (which ones the failures matched to)
-  const formatFeatures = (features: ImplicatedFeature[]) =>
-    features.map((f) => `${f.name} (${f.id.slice(0, 8)})`).join(", ");
-
-  const parts: string[] = [];
-  if (result.trigger_features && result.trigger_features.length > 0) {
-    parts.push(`After: ${formatFeatures(result.trigger_features)}`);
-  }
-  if (result.implicated_features && result.implicated_features.length > 0) {
-    parts.push(`Implicated: ${formatFeatures(result.implicated_features)}`);
-  }
-  const featureLabel = parts.length > 0 ? ` | ${parts.join(" | ")}` : "";
+  const triggerFeatures = result.trigger_features ?? [];
+  const implicatedFeatures = result.implicated_features ?? [];
+  const hasDetails =
+    result.failed_tests.length > 1 ||
+    triggerFeatures.length > 0 ||
+    implicatedFeatures.length > 0;
 
   // Test command errored (non-zero exit) but no individual test failures parsed —
   // e.g. build failure, missing dependency, import error before tests ran.
@@ -144,31 +139,142 @@ export function RegressionHealthBar({ isRunning }: RegressionHealthBarProps) {
     const hint = result.output
       ? result.output.split("\n").filter(Boolean).slice(-1)[0]?.slice(0, 120) ?? ""
       : "";
+    const warnHasDetails = triggerFeatures.length > 0 || implicatedFeatures.length > 0;
     return (
-      <div className="w-full bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 px-4 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 flex items-center gap-2">
-        <span className="text-amber-500">&#x26A0;</span>
-        <span>
-          Test command failed (no test results){featureLabel}
-          {hint ? ` — ${hint}` : ""}
-        </span>
-      </div>
+      <HealthBarAccordion
+        color="amber"
+        icon={<span className="text-amber-500">&#x26A0;</span>}
+        summary={
+          <>
+            Test command failed (no test results)
+            {hint ? <span className="ml-1 font-normal opacity-75">— {hint}</span> : null}
+          </>
+        }
+        hasDetails={warnHasDetails}
+      >
+        <FeatureSection label="Triggered after" features={triggerFeatures} color="amber" />
+        <FeatureSection label="Implicated features" features={implicatedFeatures} color="amber" />
+      </HealthBarAccordion>
     );
   }
 
   const firstFailed = result.failed_tests[0] ?? "unknown";
-  const extra =
-    result.failed_tests.length > 1
-      ? ` +${result.failed_tests.length - 1} more`
-      : "";
 
   return (
-    <div className="w-full bg-red-100 dark:bg-red-900/40 border-b border-red-300 dark:border-red-700 px-4 py-1.5 text-xs font-medium text-red-800 dark:text-red-200 flex items-center gap-2">
-      <span>🔴</span>
-      <span>
-        {result.failed} regression{result.failed !== 1 ? "s" : ""} —{" "}
-        {firstFailed}
-        {extra}{featureLabel}
-      </span>
+    <HealthBarAccordion
+      color="red"
+      icon={<span>🔴</span>}
+      summary={
+        <>
+          {result.failed} regression{result.failed !== 1 ? "s" : ""} — {firstFailed}
+          {result.failed_tests.length > 1 && (
+            <span className="ml-1 font-normal opacity-75">
+              +{result.failed_tests.length - 1} more
+            </span>
+          )}
+        </>
+      }
+      hasDetails={hasDetails}
+    >
+      {result.failed_tests.length > 1 && (
+        <div className="mb-1.5">
+          <span className="font-semibold">Failed tests:</span>
+          <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+            {result.failed_tests.map((t) => (
+              <li key={t} className="break-all">{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <FeatureSection label="Triggered after" features={triggerFeatures} color="red" />
+      <FeatureSection label="Implicated features" features={implicatedFeatures} color="red" />
+    </HealthBarAccordion>
+  );
+}
+
+/* ── Shared sub-components ─────────────────────────────────────────────────── */
+
+const COLOR_MAP = {
+  red: {
+    bar: "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-700",
+    text: "text-red-800 dark:text-red-200",
+    detail: "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800",
+    bullet: "text-red-400 dark:text-red-500",
+  },
+  amber: {
+    bar: "bg-amber-100 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700",
+    text: "text-amber-800 dark:text-amber-200",
+    detail: "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+    bullet: "text-amber-400 dark:text-amber-500",
+  },
+} as const;
+
+function HealthBarAccordion({
+  color,
+  icon,
+  summary,
+  hasDetails,
+  children,
+}: {
+  color: keyof typeof COLOR_MAP;
+  icon: React.ReactNode;
+  summary: React.ReactNode;
+  hasDetails: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const c = COLOR_MAP[color];
+
+  return (
+    <div className={`w-full ${c.bar} border-b`}>
+      <button
+        type="button"
+        className={`w-full px-4 py-1.5 text-xs font-medium ${c.text} flex items-center gap-2 text-left`}
+        onClick={() => hasDetails && setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        {icon}
+        <span className="truncate min-w-0">{summary}</span>
+        {hasDetails && (
+          <ChevronRight
+            size={12}
+            className={`shrink-0 ml-auto transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+          />
+        )}
+      </button>
+      {open && hasDetails && (
+        <div className={`px-6 pb-2 pt-0.5 text-xs ${c.text} ${c.detail} border-t`}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatureSection({
+  label,
+  features,
+  color,
+}: {
+  label: string;
+  features: ImplicatedFeature[];
+  color: keyof typeof COLOR_MAP;
+}) {
+  if (features.length === 0) return null;
+  const c = COLOR_MAP[color];
+  return (
+    <div className="mb-1.5 last:mb-0">
+      <span className="font-semibold">{label}:</span>
+      <ul className={`list-disc list-inside mt-0.5 space-y-0.5 ${c.bullet}`}>
+        {features.map((f) => (
+          <li key={f.id}>
+            <span className={c.text}>
+              {f.name}{" "}
+              <span className="opacity-50 font-mono text-[10px]">({f.id.slice(0, 8)})</span>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

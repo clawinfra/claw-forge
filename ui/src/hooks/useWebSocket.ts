@@ -62,8 +62,13 @@ export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {
     try {
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
-        return (JSON.parse(stored) as Array<ActivityLogEntry & { timestamp: string }>)
+        const restored = (JSON.parse(stored) as Array<ActivityLogEntry & { timestamp: string }>)
           .map((e) => ({ ...e, timestamp: new Date(e.timestamp) }));
+        // Ensure new IDs never collide with restored entries
+        if (restored.length > 0) {
+          logIdCounter = Math.max(logIdCounter, ...restored.map((e) => e.id));
+        }
+        return restored;
       }
     } catch {}
     return [];

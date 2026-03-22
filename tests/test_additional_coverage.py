@@ -1057,9 +1057,10 @@ async def test_dispatcher_with_failed_handler() -> None:
         config=DispatcherConfig(max_concurrency=2, yolo=True, retry_attempts=1),
     )
     d.add_task(TaskNode(id="t0", plugin_name="coding", priority=0, depends_on=[]))
-    # Handler error propagates out of run()
-    with pytest.raises((RuntimeError, Exception)):
-        await d.run()
+    # Handler error is captured in result.failed (not raised)
+    result = await d.run()
+    assert "t0" in result.failed
+    assert "handler failed" in result.failed["t0"]
 
 
 # ---------------------------------------------------------------------------

@@ -612,7 +612,15 @@ class AgentStateService:
         @app.get("/sessions")
         async def list_sessions() -> list[dict[str, Any]]:
             async with self._session_factory() as db:
-                result = await db.execute(select(Session).order_by(Session.created_at.desc()))
+                query = select(Session).order_by(Session.created_at.desc())
+                # When the service knows its project, filter out sessions
+                # from other projects (e.g. test artifacts that leaked into
+                # a shared SQLite file).
+                if self._project_path is not None:
+                    query = query.where(
+                        Session.project_path == str(self._project_path)
+                    )
+                result = await db.execute(query)
                 sessions = result.scalars().all()
                 return [
                     {

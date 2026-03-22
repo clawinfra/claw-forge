@@ -601,6 +601,30 @@ class TestParseOutput:
         assert failed == 0
         assert names == []
 
+    def test_parse_pytest_collection_errors(self) -> None:
+        output = (
+            "ERROR tests/test_data_generator.py\n"
+            "ERROR tests/test_scorer.py\n"
+            "259 tests collected, 9 errors in 1.41s\n"
+        )
+        total, failed, names = ParallelReviewer._parse_output(output)
+        assert total == 9
+        assert failed == 9
+        assert "tests/test_data_generator.py" in names
+        assert "tests/test_scorer.py" in names
+
+    def test_parse_pytest_passed_with_errors(self) -> None:
+        output = (
+            "ERROR tests/test_broken.py\n"
+            "FAILED tests/test_foo.py::test_bar\n"
+            "5 passed, 1 failed, 2 errors in 3.5s\n"
+        )
+        total, failed, names = ParallelReviewer._parse_output(output)
+        assert total == 5 + 1 + 2  # passed + failed + errors
+        assert failed == 1 + 2
+        assert "tests/test_broken.py" in names
+        assert "tests/test_foo.py::test_bar" in names
+
 
 # ── test_command property ───────────────────────────────────────────────
 

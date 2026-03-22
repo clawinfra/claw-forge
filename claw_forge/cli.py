@@ -731,10 +731,22 @@ def run(
         async def task_handler(task_node: TaskNode) -> dict[str, Any]:
             async with httpx.AsyncClient(timeout=_http_timeout) as http:
                 # Fetch task details + mark as running via HTTP
-                task_resp = await _http_retry(
-                    http, "get",
-                    f"{_state_base}/tasks/{task_node.id}",
-                )
+                try:
+                    task_resp = await _http_retry(
+                        http, "get",
+                        f"{_state_base}/tasks/{task_node.id}",
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        logging.getLogger("claw_forge.cli").warning(
+                            "Task %s not found in state service — skipping",
+                            task_node.id,
+                        )
+                        raise RuntimeError(
+                            f"Task {task_node.id} not found in state service "
+                            "(stale session or service restart)"
+                        ) from exc
+                    raise
                 task_data = task_resp.json()
                 task_name = (
                     task_data.get("description") or task_data["plugin_name"]

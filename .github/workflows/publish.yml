@@ -54,14 +54,6 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build UI (Vite → claw_forge/ui_dist/)
-        run: |
-          npm --prefix ui ci
-          npm --prefix ui run build
-          # Copy built assets into the Python package so the wheel ships them
-          rm -rf claw_forge/ui_dist
-          cp -r ui/dist claw_forge/ui_dist
-
       - name: Sync version from release tag
         run: |
           TAG="${{ github.event.release.tag_name }}"
@@ -69,7 +61,22 @@ jobs:
           VERSION="${TAG#v}"
           echo "Release version: $VERSION"
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          # Patch ui/package.json so the UI build picks up the release version
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('ui/package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('ui/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build UI (Vite → claw_forge/ui_dist/)
+        run: |
+          npm --prefix ui ci
+          npm --prefix ui run build
+          # Copy built assets into the Python package so the wheel ships them
+          rm -rf claw_forge/ui_dist
+          cp -r ui/dist claw_forge/ui_dist
 
       - name: Build wheel + sdist
         run: uv build

@@ -428,7 +428,7 @@ class ParallelReviewer:
         failed = 0
         failed_names: list[str] = []
 
-        # pytest: "X passed, Y failed"
+        # pytest: "X passed, Y failed" and/or "Z errors"
         m = re.search(
             r"(\d+) passed(?:.*?(\d+) failed)?", output
         )
@@ -437,6 +437,13 @@ class ParallelReviewer:
             f = int(m.group(2)) if m.group(2) else 0
             total = p + f
             failed = f
+
+        # pytest collection errors: "N errors" (e.g. import failures)
+        m_err = re.search(r"(\d+) error", output)
+        if m_err:
+            errs = int(m_err.group(1))
+            total += errs
+            failed += errs
 
         # cargo test: "test result: ok. X passed; Y failed"
         m2 = re.search(
@@ -469,6 +476,13 @@ class ParallelReviewer:
             r"test\s+(\S+)\s+\.\.\.\s+FAILED", output
         ):
             failed_names.append(line)
+
+        # pytest ERROR lines (collection/import errors)
+        for line in re.findall(
+            r"ERROR\s+(\S+)", output
+        ):
+            if line not in failed_names:
+                failed_names.append(line)
 
         return total, failed, failed_names
 

@@ -381,7 +381,7 @@ class TestDispatcherStopReviewer:
 
 class TestDispatcherFailedTask:
     @pytest.mark.asyncio
-    async def test_failed_task_raises_exception_group(self) -> None:
+    async def test_failed_task_captured_in_result(self) -> None:
         from claw_forge.orchestrator.dispatcher import Dispatcher, DispatcherConfig
         from claw_forge.state.scheduler import TaskNode
 
@@ -391,8 +391,9 @@ class TestDispatcherFailedTask:
         cfg = DispatcherConfig(retry_attempts=1)
         d = Dispatcher(handler=_fail_handler, config=cfg)
         d.add_task(TaskNode("fail-task", "coding", 1, []))
-        with pytest.raises(ExceptionGroup):
-            await d.run()
+        result = await d.run()
+        assert "fail-task" in result.failed
+        assert "boom" in result.failed["fail-task"]
 
 
 # ===========================================================================

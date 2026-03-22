@@ -38,6 +38,20 @@ class TestDispatcher:
         assert "b" in result.completed
 
     @pytest.mark.asyncio
+    async def test_failing_task_does_not_crash_wave(self):
+        """A failing task should be recorded in result.failed without
+        crashing sibling tasks via ExceptionGroup (TaskGroup safety)."""
+        d = Dispatcher(
+            handler=_failing_handler,
+            config=DispatcherConfig(retry_attempts=1),
+        )
+        d.add_task(TaskNode("fail", "coding", 1, []))
+        d.add_task(TaskNode("ok", "coding", 1, []))
+        result = await d.run()
+        assert "fail" in result.failed
+        assert "ok" in result.completed
+
+    @pytest.mark.asyncio
     async def test_dependency_waves(self):
         order = []
 
