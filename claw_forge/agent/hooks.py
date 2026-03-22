@@ -331,7 +331,7 @@ def make_subagent_hooks(
         asyncio.create_task(_patch_subagent_count(task_id, state["active"]))
 
         return SyncHookJSONOutput(
-            hookSpecificOutput={
+            hookSpecificOutput={  # type: ignore[typeddict-item,misc]
                 "hookEventName": "SubagentStop",
                 "additionalContext": "",
             }

@@ -631,7 +631,7 @@ def run(
             """HTTP call with retry on transient timeout/connection errors."""
             for attempt in range(max_retries):
                 try:
-                    resp = await getattr(client, method)(url, **kwargs)
+                    resp: httpx.Response = await getattr(client, method)(url, **kwargs)
                     resp.raise_for_status()
                     return resp
                 except (httpx.TimeoutException, httpx.ConnectError):
