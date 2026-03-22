@@ -79,6 +79,7 @@ class RegressionResult:
     duration_ms: int = 0
     run_number: int = 0
     implicated_feature_ids: list[str] = field(default_factory=list)
+    trigger_features: list[dict[str, str]] = field(default_factory=list)
     output: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,6 +92,7 @@ class RegressionResult:
             "duration_ms": self.duration_ms,
             "run_number": self.run_number,
             "implicated_feature_ids": self.implicated_feature_ids,
+            "trigger_features": self.trigger_features,
             "output": self.output,
         }
 
@@ -128,6 +130,8 @@ class ParallelReviewer:
         self._last_result: RegressionResult | None = None
         self._test_command = detect_test_command(self._project_dir)
         self.session_id: str | None = None
+        # Buffer of features completed since last trigger
+        self._pending_triggers: list[dict[str, str]] = []
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -146,9 +150,15 @@ class ParallelReviewer:
         """The detected (or overridden) test command."""
         return self._test_command
 
-    def notify_feature_completed(self) -> None:
+    def notify_feature_completed(
+        self,
+        task_id: str = "",
+        task_name: str = "",
+    ) -> None:
         """Call when a feature completes to potentially trigger a run."""
         self._completed_count += 1
+        if task_id:
+            self._pending_triggers.append({"id": task_id, "name": task_name})
         if (
             self._completed_count - self._last_triggered
             >= self._interval
@@ -198,6 +208,9 @@ class ParallelReviewer:
             self._last_triggered = self._completed_count
             self._run_number += 1
             run_num = self._run_number
+            # Snapshot and clear the trigger buffer
+            triggers = list(self._pending_triggers)
+            self._pending_triggers.clear()
 
             # Broadcast start
             await self._state_service.ws_manager.broadcast(
@@ -205,6 +218,7 @@ class ParallelReviewer:
             )
 
             result = await self._run_tests(run_num)
+            result.trigger_features = triggers
             self._last_result = result
 
             # Auto-dispatch bugfix tasks for regressions

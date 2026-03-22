@@ -30,6 +30,7 @@ interface RegressionStatus {
     run_number: number;
     implicated_feature_ids: string[];
     implicated_features?: ImplicatedFeature[];
+    trigger_features?: ImplicatedFeature[];
     output: string;
   } | null;
 }
@@ -37,8 +38,6 @@ interface RegressionStatus {
 interface RegressionHealthBarProps {
   /** Whether a regression suite is currently running (from shared WebSocket). */
   isRunning: boolean;
-  /** The run number of the currently running suite. */
-  runNumber: number;
 }
 
 // Use relative path — Vite proxy handles it in dev, same-origin in production
@@ -57,7 +56,7 @@ function secondsAgo(durationMs: number): string {
   return `${Math.round(s / 3600)}h`;
 }
 
-export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBarProps) {
+export function RegressionHealthBar({ isRunning }: RegressionHealthBarProps) {
   const { data, isLoading } = useQuery<RegressionStatus>({
     queryKey: ["regression", "status"],
     queryFn: fetchRegressionStatus,
@@ -70,7 +69,7 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
     return (
       <div className="w-full bg-yellow-100 dark:bg-yellow-900/40 border-b border-yellow-300 dark:border-yellow-700 px-4 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-200 animate-pulse flex items-center gap-2">
         <span>🔄</span>
-        <span>Running regression suite… (Run #{runNumber})</span>
+        <span>Running regression suite…</span>
       </div>
     );
   }
@@ -125,14 +124,19 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
     );
   }
 
-  // Build the "implicated features" suffix for failure banners
-  const featureTag =
-    result.implicated_features && result.implicated_features.length > 0
-      ? result.implicated_features.map((f) => f.name).join(", ")
-      : null;
-  const runLabel = featureTag
-    ? `Features: ${featureTag}`
-    : `Run #${result.run_number}`;
+  // Build context label: show trigger features (what completed before this run)
+  // and implicated features (which ones the failures matched to)
+  const formatFeatures = (features: ImplicatedFeature[]) =>
+    features.map((f) => `${f.name} (${f.id.slice(0, 8)})`).join(", ");
+
+  const parts: string[] = [];
+  if (result.trigger_features && result.trigger_features.length > 0) {
+    parts.push(`After: ${formatFeatures(result.trigger_features)}`);
+  }
+  if (result.implicated_features && result.implicated_features.length > 0) {
+    parts.push(`Implicated: ${formatFeatures(result.implicated_features)}`);
+  }
+  const featureLabel = parts.length > 0 ? ` | ${parts.join(" | ")}` : "";
 
   // Test command errored (non-zero exit) but no individual test failures parsed —
   // e.g. build failure, missing dependency, import error before tests ran.
@@ -144,7 +148,7 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
       <div className="w-full bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 px-4 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 flex items-center gap-2">
         <span className="text-amber-500">&#x26A0;</span>
         <span>
-          Test command failed (no test results) | {runLabel}
+          Test command failed (no test results){featureLabel}
           {hint ? ` — ${hint}` : ""}
         </span>
       </div>
@@ -163,7 +167,7 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
       <span>
         {result.failed} regression{result.failed !== 1 ? "s" : ""} —{" "}
         {firstFailed}
-        {extra} | {runLabel}
+        {extra}{featureLabel}
       </span>
     </div>
   );

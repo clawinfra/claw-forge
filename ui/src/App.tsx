@@ -300,7 +300,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     addToast,
     removeToast,
     regressionIsRunning,
-    regressionRunNumber,
   } = useWebSocket(sessionId, {
     onCommandEvent: handleCommandEvent,
     onRegressionResult: setImplicatedFeatureIds,
@@ -811,7 +810,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       {/* ── Regression health bar ────────────────────────────────────── */}
       <RegressionHealthBar
         isRunning={regressionIsRunning}
-        runNumber={regressionRunNumber}
       />
 
       {/* ── Filter bar ──────────────────────────────────────────────────── */}

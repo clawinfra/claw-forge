@@ -730,7 +730,10 @@ class AgentStateService:
                     elif req.status in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
                         if req.status == "completed" and self._reviewer is not None:
-                            self._reviewer.notify_feature_completed()
+                            self._reviewer.notify_feature_completed(
+                                task_id=str(task.id),
+                                task_name=task.description or task.plugin_name,
+                            )
                 if req.result is not None:
                     task.result_json = req.result
                 if req.error_message is not None:
