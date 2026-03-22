@@ -617,14 +617,38 @@ def run(
 
         # Build task handler — communicates with the state service via HTTP
         # so that WebSocket events are broadcast to the Kanban UI.
+        # Generous timeout: read=30s handles SQLite WAL contention under parallel load
+        _http_timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+
+        async def _http_retry(
+            client: httpx.AsyncClient,
+            method: str,
+            url: str,
+            *,
+            max_retries: int = 3,
+            **kwargs: Any,
+        ) -> httpx.Response:
+            """HTTP call with retry on transient timeout/connection errors."""
+            for attempt in range(max_retries):
+                try:
+                    resp = await getattr(client, method)(url, **kwargs)
+                    resp.raise_for_status()
+                    return resp
+                except (httpx.TimeoutException, httpx.ConnectError):
+                    if attempt == max_retries - 1:
+                        raise
+                    await asyncio.sleep(1.0 * (attempt + 1))
+            raise httpx.TimeoutException("exhausted retries")  # unreachable
+
         async def _patch_task(
             client: httpx.AsyncClient, task_id: str, **fields: Any,
         ) -> None:
             """PATCH task status via HTTP (triggers WS broadcast)."""
             with suppress(httpx.HTTPError):
-                await client.patch(
+                await _http_retry(
+                    client, "patch",
                     f"{_state_base}/tasks/{task_id}",
-                    json=fields, timeout=5,
+                    json=fields,
                 )
 
         def _short_name(desc: str) -> str:
@@ -702,16 +726,15 @@ def run(
                         "level": level,
                         "model": model or None,
                     },
-                    timeout=5,
                 )
 
         async def task_handler(task_node: TaskNode) -> dict[str, Any]:
-            async with httpx.AsyncClient() as http:
+            async with httpx.AsyncClient(timeout=_http_timeout) as http:
                 # Fetch task details + mark as running via HTTP
-                task_resp = await http.get(
-                    f"{_state_base}/tasks/{task_node.id}", timeout=10,
+                task_resp = await _http_retry(
+                    http, "get",
+                    f"{_state_base}/tasks/{task_node.id}",
                 )
-                task_resp.raise_for_status()
                 task_data = task_resp.json()
                 task_name = (
                     task_data.get("description") or task_data["plugin_name"]
@@ -1061,6 +1084,29 @@ def run(
             total_failed.update(dispatch_result.failed)
 
             if not dispatcher.is_paused:
+                # Check for dynamically-created tasks (e.g. bugfix from reviewer)
+                async with httpx.AsyncClient() as check_client:
+                    _tasks_resp = await check_client.get(
+                        f"{_state_base}/sessions/{session_id}/tasks",
+                        timeout=10,
+                    )
+                    _tasks_resp.raise_for_status()
+                    _all = _tasks_resp.json()
+                _new_pending = _task_dicts_to_nodes(
+                    [
+                        t for t in _all
+                        if t["status"] == "pending"
+                        and t["id"] not in total_completed
+                        and t["id"] not in total_failed
+                    ]
+                )
+                if _new_pending:
+                    console.print(
+                        f"\n[yellow]🔧 {len(_new_pending)} bugfix task(s) "
+                        "dispatched by regression reviewer[/yellow]"
+                    )
+                    current_nodes = _new_pending
+                    continue
                 break  # Normal completion — all waves done
 
             # ── Paused: wait for Resume All ────────────────────────────

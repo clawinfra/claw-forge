@@ -16,7 +16,8 @@ logger.error = (msg, opts) => {
   if (
     err?.message?.includes("ended by the other party") ||
     err?.code === "ECONNRESET" ||
-    err?.code === "ECONNREFUSED"
+    err?.code === "ECONNREFUSED" ||
+    err?.code === "EPIPE"
   ) {
     return; // suppress routine state-service disconnect noise
   }

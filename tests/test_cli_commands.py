@@ -483,11 +483,20 @@ def test_load_config_missing_raises(tmp_path: Path) -> None:
 def test_load_config_with_env_file(tmp_path: Path) -> None:
     import yaml  # type: ignore[import-untyped]
 
+    from tests.helpers import make_fake_httpx_client
+
     env_file = tmp_path / ".env"
     env_file.write_text("MY_KEY=abc123\n")
     cfg_path = tmp_path / "claw-forge.yaml"
     cfg_path.write_text(yaml.dump({"providers": {}, "key": "${MY_KEY}"}))
-    with patch("claw_forge.cli._ensure_state_service", return_value=8420):
+    FakeClient = make_fake_httpx_client(
+        init_response={"session_id": "s1", "orphans_reset": 0, "tasks": []},
+        task_response={},
+    )
+    with (
+        patch("claw_forge.cli._ensure_state_service", return_value=8420),
+        patch("claw_forge.cli.httpx.AsyncClient", FakeClient),
+    ):
         result = runner.invoke(app, ["run", "--config", str(cfg_path), "--project", str(tmp_path)])
     assert result.exit_code == 0
 

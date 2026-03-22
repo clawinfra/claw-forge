@@ -133,7 +133,7 @@ export interface RegressionResultEvent {
   failed_tests: string[];
   duration_ms: number;
   run_number: number;
-  implicated_feature_ids: number[];
+  implicated_feature_ids: string[];
   output: string;
 }
 

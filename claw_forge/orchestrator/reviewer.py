@@ -8,7 +8,6 @@ This is a pure asyncio subprocess task — **not** an LLM session.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import re
 import time
@@ -79,7 +78,7 @@ class RegressionResult:
     failed_tests: list[str] = field(default_factory=list)
     duration_ms: int = 0
     run_number: int = 0
-    implicated_feature_ids: list[int] = field(default_factory=list)
+    implicated_feature_ids: list[str] = field(default_factory=list)
     output: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -114,10 +113,12 @@ class ParallelReviewer:
         project_dir: str | Path,
         state_service: AgentStateService,
         interval_features: int = 3,
+        max_bugfix_retries: int = 2,
     ) -> None:
         self._project_dir = Path(project_dir)
         self._state_service = state_service
         self._interval = max(1, interval_features)
+        self._max_bugfix_retries = max_bugfix_retries
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._feature_event = asyncio.Event()
@@ -126,6 +127,7 @@ class ParallelReviewer:
         self._run_number = 0
         self._last_result: RegressionResult | None = None
         self._test_command = detect_test_command(self._project_dir)
+        self.session_id: str | None = None
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -205,18 +207,143 @@ class ParallelReviewer:
             result = await self._run_tests(run_num)
             self._last_result = result
 
+            # Auto-dispatch bugfix tasks for regressions
+            bugfix_ids: list[str] = []
+            if not result.passed:
+                bugfix_ids = await self._dispatch_bugfix_tasks(result)
+
             # Broadcast result
             await self._state_service.ws_manager.broadcast(
                 {"type": "regression_result", **result.to_dict()}
             )
+            if bugfix_ids:
+                await self._state_service.ws_manager.broadcast(
+                    {
+                        "type": "bugfix_dispatched",
+                        "task_ids": bugfix_ids,
+                        "run_number": run_num,
+                    }
+                )
             logger.info(
-                "Regression run #%d: %s (%d total, %d failed, %dms)",
+                "Regression run #%d: %s (%d total, %d failed, %dms)%s",
                 run_num,
                 "PASS" if result.passed else "FAIL",
                 result.total,
                 result.failed,
                 result.duration_ms,
+                f" — dispatched {len(bugfix_ids)} bugfix task(s)" if bugfix_ids else "",
             )
+
+    async def _dispatch_bugfix_tasks(
+        self, result: RegressionResult,
+    ) -> list[str]:
+        """Create bugfix tasks for features implicated in test failures.
+
+        Returns the IDs of created tasks. Respects ``max_bugfix_retries``
+        to prevent infinite fix loops.
+        """
+        from sqlalchemy import select
+
+        from claw_forge.state.models import Session, Task
+
+        # Find the active session (most recent running/pending)
+        session_id = self.session_id
+        if session_id is None:
+            try:
+                async with self._state_service._session_factory() as db:
+                    sess_result = await db.execute(
+                        select(Session)
+                        .where(Session.status.in_(["running", "pending"]))
+                        .order_by(Session.created_at.desc())
+                        .limit(1)
+                    )
+                    session = sess_result.scalar_one_or_none()
+                    if session is None:
+                        return []
+                    session_id = session.id
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not determine session for bugfix dispatch")
+                return []
+
+        try:
+            async with self._state_service._session_factory() as db:
+                tasks_result = await db.execute(
+                    select(Task).where(Task.session_id == session_id)
+                )
+                all_tasks = list(tasks_result.scalars().all())
+
+                # Build feature list for implication matching
+                features = [
+                    {"id": t.id, "name": t.description or t.plugin_name}
+                    for t in all_tasks
+                    if t.status == "completed" and t.plugin_name != "bugfix"
+                ]
+
+                implicated_ids = self._implicate_features(result.output, features)
+                result.implicated_feature_ids = implicated_ids
+                if not implicated_ids:
+                    logger.info("Regression detected but no features implicated")
+                    return []
+
+                created_ids: list[str] = []
+                for feat_id in implicated_ids:
+                    original = next(
+                        (t for t in all_tasks if t.id == str(feat_id)),
+                        None,
+                    )
+                    if original is None:
+                        continue
+
+                    # Check retry limit
+                    existing_retries = max(
+                        (
+                            t.bugfix_retry_count
+                            for t in all_tasks
+                            if t.parent_task_id == original.id
+                            and t.plugin_name == "bugfix"
+                        ),
+                        default=0,
+                    )
+                    if existing_retries >= self._max_bugfix_retries:
+                        logger.warning(
+                            "Bugfix retry limit (%d) reached for task %s — skipping",
+                            self._max_bugfix_retries,
+                            original.id,
+                        )
+                        continue
+
+                    import uuid as _uuid
+
+                    failed_names = ", ".join(result.failed_tests) or "unknown"
+                    task_id = str(_uuid.uuid4())
+                    new_task = Task(
+                        id=task_id,
+                        session_id=session_id,
+                        plugin_name="bugfix",
+                        description=(
+                            f"Fix regression: "
+                            f"{original.description or original.plugin_name}"
+                        ),
+                        category="bugfix",
+                        depends_on=[original.id],
+                        parent_task_id=original.id,
+                        bugfix_retry_count=existing_retries + 1,
+                        priority=(original.priority or 0) + 10,
+                        steps=[
+                            f"Failed tests: {failed_names}",
+                            "Run the test suite and fix the failing tests.",
+                            f"Test output (last 4000 chars):\n{result.output}",
+                        ],
+                    )
+                    db.add(new_task)
+                    created_ids.append(task_id)
+
+                if created_ids:
+                    await db.commit()
+                return created_ids
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to dispatch bugfix tasks")
+            return []
 
     async def _run_tests(self, run_number: int) -> RegressionResult:
         """Execute the test command as a subprocess."""
@@ -335,13 +462,13 @@ class ParallelReviewer:
         self,
         output: str,
         features: list[dict[str, Any]],
-    ) -> list[int]:
+    ) -> list[str]:
         """Match test output to feature names heuristically.
 
         Looks for feature names (or slugified versions) in the test
         output and returns their IDs.
         """
-        implicated: list[int] = []
+        implicated: list[str] = []
         output_lower = output.lower()
         for feat in features:
             name = str(feat.get("name", ""))
@@ -351,6 +478,5 @@ class ParallelReviewer:
             # Check for name or slug in output
             slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
             if name.lower() in output_lower or slug in output_lower:
-                with contextlib.suppress(ValueError, TypeError):
-                    implicated.append(int(feat_id))
+                implicated.append(str(feat_id))
         return implicated

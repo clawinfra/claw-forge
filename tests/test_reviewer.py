@@ -117,7 +117,7 @@ class TestRegressionResult:
             failed_tests=["test_a", "test_b"],
             duration_ms=123,
             run_number=3,
-            implicated_feature_ids=[1, 2],
+            implicated_feature_ids=["1", "2"],
             output="FAILED test_a",
         )
         d = r.to_dict()
@@ -127,7 +127,7 @@ class TestRegressionResult:
         assert d["failed_tests"] == ["test_a", "test_b"]
         assert d["duration_ms"] == 123
         assert d["run_number"] == 3
-        assert d["implicated_feature_ids"] == [1, 2]
+        assert d["implicated_feature_ids"] == ["1", "2"]
         assert d["output"] == "FAILED test_a"
 
     def test_asdict_compatibility(self) -> None:
@@ -345,9 +345,9 @@ class TestImplicateFeatures:
             "FAILED test_payment_gateway.py::test_charge"
         )
         result = reviewer._implicate_features(output, features)
-        assert 1 in result
-        assert 2 in result
-        assert 3 not in result
+        assert "1" in result
+        assert "2" in result
+        assert "3" not in result
 
     def test_implicate_by_slug(self) -> None:
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
@@ -359,7 +359,7 @@ class TestImplicateFeatures:
         ]
         output = "tests/test_api_rate_limiting.py FAILED"
         result = reviewer._implicate_features(output, features)
-        assert 10 in result
+        assert "10" in result
 
     def test_implicate_empty_features(self) -> None:
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
@@ -486,8 +486,24 @@ class TestRegressionStatusEndpoint:
         assert data["last_result"]["total"] == 10
 
     @pytest.mark.asyncio
-    async def test_with_failed_result(self) -> None:
-        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+    async def test_with_failed_result(self, tmp_path: Path) -> None:
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        # Create tasks so the endpoint can look up implicated feature names
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+            t1 = Task(id="task-1", session_id=session.id, plugin_name="coding", description="Auth")
+            t2 = Task(id="task-4", session_id=session.id, plugin_name="coding", description="Payments")
+            db.add_all([t1, t2])
+            await db.commit()
+
         mock_reviewer = MagicMock()
         mock_reviewer.run_count = 5
         mock_reviewer.last_result = RegressionResult(
@@ -497,7 +513,7 @@ class TestRegressionStatusEndpoint:
             failed_tests=["test_a", "test_b", "test_c"],
             run_number=5,
             duration_ms=2000,
-            implicated_feature_ids=[1, 4],
+            implicated_feature_ids=["task-1", "task-4"],
         )
         svc._reviewer = mock_reviewer
 
@@ -511,9 +527,12 @@ class TestRegressionStatusEndpoint:
         data = resp.json()
         assert data["last_result"]["passed"] is False
         assert data["last_result"]["failed"] == 3
-        assert data["last_result"]["implicated_feature_ids"] == [
-            1, 4
-        ]
+        assert data["last_result"]["implicated_feature_ids"] == ["task-1", "task-4"]
+        assert len(data["last_result"]["implicated_features"]) == 2
+        names = [f["name"] for f in data["last_result"]["implicated_features"]]
+        assert "Auth" in names
+        assert "Payments" in names
+        await svc.dispose()
 
 
 # ── _parse_output tests ─────────────────────────────────────────────────
@@ -597,3 +616,471 @@ class TestTestCommandProperty:
             project_dir=tmp_path, state_service=svc
         )
         assert reviewer.test_command is None
+
+
+# ── Bugfix dispatch tests ──────────────────────────────────────────────
+
+
+class TestBugfixDispatch:
+    """Tests for auto-dispatching bugfix tasks on regression failure."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_creates_bugfix_task(self, tmp_path: Path) -> None:
+        """Bugfix task is created when a completed feature is implicated."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, max_bugfix_retries=2,
+        )
+
+        # Create a session and a completed task
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            task = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="User Authentication",
+                status="completed",
+            )
+            db.add(task)
+            await db.commit()
+            await db.refresh(task)
+            task_id = task.id
+            session_id = session.id
+
+        reviewer.session_id = session_id
+
+        result = RegressionResult(
+            passed=False, total=5, failed=1,
+            failed_tests=["test_user_authentication.py::test_login"],
+            run_number=1, duration_ms=100,
+            output="FAILED test_user_authentication.py::test_login",
+        )
+
+        created_ids = await reviewer._dispatch_bugfix_tasks(result)
+        assert len(created_ids) == 1
+
+        # Verify bugfix task in DB
+        async with svc._session_factory() as db:
+            bugfix = await db.get(Task, created_ids[0])
+            assert bugfix is not None
+            assert bugfix.plugin_name == "bugfix"
+            assert bugfix.parent_task_id == task_id
+            assert bugfix.bugfix_retry_count == 1
+            assert task_id in bugfix.depends_on
+            assert "test_user_authentication" in bugfix.steps[0]
+
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_no_dispatch_on_pass(self, tmp_path: Path) -> None:
+        """No bugfix tasks when tests pass."""
+        svc = AgentStateService(
+            database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        )
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+        reviewer.session_id = "nonexistent"
+
+        result = RegressionResult(
+            passed=True, total=5, failed=0,
+            run_number=1, duration_ms=50,
+        )
+        # _dispatch_bugfix_tasks is only called when not passed
+        # (see _loop), but verify it returns empty if called anyway
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert created == []
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_retry_limit_respected(self, tmp_path: Path) -> None:
+        """Bugfix tasks are not created past max_bugfix_retries."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, max_bugfix_retries=1,
+        )
+
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            original = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="Payment Gateway",
+                status="completed",
+            )
+            db.add(original)
+            await db.commit()
+            await db.refresh(original)
+
+            # Existing bugfix already at retry count 1
+            existing_bugfix = Task(
+                session_id=session.id,
+                plugin_name="bugfix",
+                description="Fix regression: Payment Gateway",
+                status="failed",
+                parent_task_id=original.id,
+                bugfix_retry_count=1,
+            )
+            db.add(existing_bugfix)
+            await db.commit()
+            session_id = session.id
+
+        reviewer.session_id = session_id
+
+        result = RegressionResult(
+            passed=False, total=3, failed=1,
+            failed_tests=["test_payment_gateway.py::test_charge"],
+            run_number=2, duration_ms=80,
+            output="FAILED test_payment_gateway.py::test_charge",
+        )
+
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert created == []  # retry limit reached
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_no_session_graceful(self, tmp_path: Path) -> None:
+        """No crash when session_id is not set and no active session exists."""
+        svc = AgentStateService(
+            database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        )
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+        # session_id is None and DB has no sessions
+
+        result = RegressionResult(
+            passed=False, total=1, failed=1,
+            failed_tests=["test_x"], run_number=1,
+            output="FAILED test_x",
+        )
+
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert created == []
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_no_implicated_features(self, tmp_path: Path) -> None:
+        """No bugfix tasks when no features match test output."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            task = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="Unrelated Feature",
+                status="completed",
+            )
+            db.add(task)
+            await db.commit()
+            session_id = session.id
+
+        reviewer.session_id = session_id
+
+        result = RegressionResult(
+            passed=False, total=2, failed=1,
+            failed_tests=["test_something_else.py::test_xyz"],
+            run_number=1, duration_ms=60,
+            output="FAILED test_something_else.py::test_xyz",
+        )
+
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert created == []
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_auto_discovers_session(self, tmp_path: Path) -> None:
+        """When session_id is not set, reviewer finds the active session from DB."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, max_bugfix_retries=2,
+        )
+        # session_id is NOT set — reviewer must discover it
+
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path), status="running")
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            task = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="Email Service",
+                status="completed",
+            )
+            db.add(task)
+            await db.commit()
+
+        result = RegressionResult(
+            passed=False, total=3, failed=1,
+            failed_tests=["test_email_service.py::test_send"],
+            run_number=1, duration_ms=80,
+            output="FAILED test_email_service.py::test_send",
+        )
+
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert len(created) == 1
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_db_error_returns_empty(self, tmp_path: Path) -> None:
+        """DB exceptions in main dispatch block return [] gracefully."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+
+        # Create session and task so implication works
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            task = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="Some Feature",
+                status="completed",
+            )
+            db.add(task)
+            await db.commit()
+            session_id = session.id
+
+        reviewer.session_id = session_id
+
+        result = RegressionResult(
+            passed=False, total=1, failed=1,
+            failed_tests=["test_some_feature.py::test_x"],
+            run_number=1,
+            output="FAILED test_some_feature.py::test_x",
+        )
+
+        # Force the outer except by making _implicate_features raise
+        # after the DB query succeeds (hits lines 343-345)
+        with patch.object(
+            reviewer, "_implicate_features",
+            side_effect=RuntimeError("boom"),
+        ):
+            created = await reviewer._dispatch_bugfix_tasks(result)
+            assert created == []
+        await svc.dispose()
+
+
+class TestLoopBranches:
+    """Cover _loop branches not hit by the broadcast tests."""
+
+    @pytest.mark.asyncio
+    async def test_loop_no_test_command(self, tmp_path: Path) -> None:
+        """When no test command is detected, loop logs warning and continues."""
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        svc.ws_manager = MagicMock()
+        svc.ws_manager.broadcast = AsyncMock()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, interval_features=1,
+        )
+        reviewer._test_command = None  # simulate no test framework detected
+
+        await reviewer.start()
+        reviewer.notify_feature_completed()
+        await asyncio.sleep(0.1)
+        await reviewer.stop()
+
+        # No broadcast should have been made (no test command → skip)
+        svc.ws_manager.broadcast.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_loop_stop_before_run(self, tmp_path: Path) -> None:
+        """Loop exits cleanly when stop_event is set before feature triggers."""
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        svc.ws_manager = MagicMock()
+        svc.ws_manager.broadcast = AsyncMock()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, interval_features=1,
+        )
+        reviewer._test_command = "echo ok"
+
+        await reviewer.start()
+        # Stop immediately, then trigger feature to unblock wait
+        await reviewer.stop()
+        assert reviewer._task is None
+
+    @pytest.mark.asyncio
+    async def test_loop_broadcasts_bugfix_dispatched(self, tmp_path: Path) -> None:
+        """When tests fail and bugfix tasks are created, bugfix_dispatched is broadcast."""
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        svc.ws_manager = MagicMock()
+        svc.ws_manager.broadcast = AsyncMock()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc, interval_features=1,
+        )
+        reviewer._test_command = "echo fail"
+
+        fail_result = RegressionResult(
+            passed=False, total=3, failed=1,
+            failed_tests=["test_foo.py::test_bar"],
+            run_number=1, duration_ms=100,
+            output="FAILED test_foo",
+        )
+
+        with (
+            patch.object(reviewer, "_run_tests", new_callable=AsyncMock, return_value=fail_result),
+            patch.object(
+                reviewer, "_dispatch_bugfix_tasks",
+                new_callable=AsyncMock, return_value=["bugfix-task-id-1"],
+            ),
+        ):
+            await reviewer.start()
+            reviewer.notify_feature_completed()
+            await asyncio.sleep(0.15)
+            await reviewer.stop()
+
+        calls = svc.ws_manager.broadcast.call_args_list
+        types = [c.args[0]["type"] for c in calls]
+        assert "bugfix_dispatched" in types
+        bugfix_event = next(c.args[0] for c in calls if c.args[0]["type"] == "bugfix_dispatched")
+        assert bugfix_event["task_ids"] == ["bugfix-task-id-1"]
+
+
+class TestDispatchEdgeCases:
+    """Cover remaining edge-case branches in _dispatch_bugfix_tasks."""
+
+    @pytest.mark.asyncio
+    async def test_session_lookup_exception(self, tmp_path: Path) -> None:
+        """Exception during session lookup returns [] gracefully."""
+        svc = AgentStateService(
+            database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        )
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+        # session_id is None, so it will try to look up — but we break the factory
+        original_factory = svc._session_factory
+
+        def _broken_factory() -> Any:
+            raise RuntimeError("DB gone")
+
+        svc._session_factory = _broken_factory  # type: ignore[assignment]
+
+        result = RegressionResult(
+            passed=False, total=1, failed=1,
+            failed_tests=["test_x"], run_number=1,
+            output="FAILED test_x",
+        )
+
+        created = await reviewer._dispatch_bugfix_tasks(result)
+        assert created == []
+        svc._session_factory = original_factory  # restore
+        await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_implicated_id_not_found_in_tasks(self, tmp_path: Path) -> None:
+        """Implicated feature ID that doesn't exist in tasks is skipped."""
+        from claw_forge.state.models import Session, Task
+
+        db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        svc = AgentStateService(database_url=db_url)
+        await svc.init_db()
+
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+        )
+
+        async with svc._session_factory() as db:
+            session = Session(project_path=str(tmp_path))
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            task = Task(
+                session_id=session.id,
+                plugin_name="coding",
+                description="My Feature",
+                status="completed",
+            )
+            db.add(task)
+            await db.commit()
+            session_id = session.id
+
+        reviewer.session_id = session_id
+
+        # Mock _implicate_features to return an ID that doesn't exist
+        with patch.object(
+            reviewer, "_implicate_features", return_value=["nonexistent-id"],
+        ):
+            result = RegressionResult(
+                passed=False, total=1, failed=1,
+                failed_tests=["test_x"], run_number=1,
+                output="FAILED test_x",
+            )
+            created = await reviewer._dispatch_bugfix_tasks(result)
+            assert created == []
+        await svc.dispose()
+
+
+class TestNotifyThreshold:
+    """Cover notify_feature_completed when count < interval (152->exit)."""
+
+    def test_notify_below_threshold(self) -> None:
+        """notify_feature_completed does not trigger when below interval."""
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir="/tmp", state_service=svc, interval_features=3,
+        )
+        reviewer.notify_feature_completed()  # 1 < 3 → no trigger
+        assert not reviewer._feature_event.is_set()
+        reviewer.notify_feature_completed()  # 2 < 3 → no trigger
+        assert not reviewer._feature_event.is_set()
+        reviewer.notify_feature_completed()  # 3 >= 3 → trigger
+        assert reviewer._feature_event.is_set()

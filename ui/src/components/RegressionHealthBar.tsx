@@ -13,6 +13,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+interface ImplicatedFeature {
+  id: string;
+  name: string;
+}
+
 interface RegressionStatus {
   run_count: number;
   has_test_command: boolean;
@@ -23,7 +28,8 @@ interface RegressionStatus {
     failed_tests: string[];
     duration_ms: number;
     run_number: number;
-    implicated_feature_ids: number[];
+    implicated_feature_ids: string[];
+    implicated_features?: ImplicatedFeature[];
     output: string;
   } | null;
 }
@@ -119,6 +125,32 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
     );
   }
 
+  // Build the "implicated features" suffix for failure banners
+  const featureTag =
+    result.implicated_features && result.implicated_features.length > 0
+      ? result.implicated_features.map((f) => f.name).join(", ")
+      : null;
+  const runLabel = featureTag
+    ? `Features: ${featureTag}`
+    : `Run #${result.run_number}`;
+
+  // Test command errored (non-zero exit) but no individual test failures parsed —
+  // e.g. build failure, missing dependency, import error before tests ran.
+  if (result.failed === 0 && result.failed_tests.length === 0) {
+    const hint = result.output
+      ? result.output.split("\n").filter(Boolean).slice(-1)[0]?.slice(0, 120) ?? ""
+      : "";
+    return (
+      <div className="w-full bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 px-4 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 flex items-center gap-2">
+        <span className="text-amber-500">&#x26A0;</span>
+        <span>
+          Test command failed (no test results) | {runLabel}
+          {hint ? ` — ${hint}` : ""}
+        </span>
+      </div>
+    );
+  }
+
   const firstFailed = result.failed_tests[0] ?? "unknown";
   const extra =
     result.failed_tests.length > 1
@@ -131,7 +163,7 @@ export function RegressionHealthBar({ isRunning, runNumber }: RegressionHealthBa
       <span>
         {result.failed} regression{result.failed !== 1 ? "s" : ""} —{" "}
         {firstFailed}
-        {extra} | Run #{result.run_number}
+        {extra} | {runLabel}
       </span>
     </div>
   );

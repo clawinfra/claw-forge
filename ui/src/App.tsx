@@ -140,7 +140,7 @@ interface PendingDropColumnProps {
   featuresLoading: boolean;
   setSelectedFeatureId: (id: string) => void;
   setLongPressFeature: (f: Feature) => void;
-  implicatedFeatureIds: number[];
+  implicatedFeatureIds: string[];
 }
 
 function PendingDropColumn({
@@ -286,7 +286,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
   // Regression implicated feature IDs — declared before useWebSocket so the
   // setter can be passed as onRegressionResult callback
-  const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<number[]>([]);
+  const [implicatedFeatureIds, setImplicatedFeatureIds] = useState<string[]>([]);
 
 
   // Shared WebSocket
@@ -1108,12 +1108,28 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
 
 // ── Session selector (shown when no session in URL) ───────────────────────────
 
+/** Filter out sessions created by pytest (tmp_path artifacts). */
+function isRealSession(s: { project_path: string }): boolean {
+  const p = s.project_path;
+  return !p.includes("/pytest-") && !p.includes("/tmp/") && !p.includes("\\Temp\\");
+}
+
 function SessionSelector({ onSelect }: { onSelect: (id: string) => void }) {
-  const { data: sessions, isLoading, error, refetch } = useQuery({
+  const { data: rawSessions, isLoading, error, refetch } = useQuery({
     queryKey: ["sessions"],
     queryFn: fetchSessions,
     refetchInterval: 5000,
   });
+
+  // Filter out test artifacts and auto-select the latest real session
+  const sessions = rawSessions?.filter(isRealSession);
+  const autoSelected = useRef(false);
+  useEffect(() => {
+    if (sessions && sessions.length > 0 && !autoSelected.current) {
+      autoSelected.current = true;
+      onSelect(sessions[0].id);
+    }
+  }, [sessions, onSelect]);
 
   const fmt = (iso: string) => {
     try {
@@ -1209,7 +1225,10 @@ function AppInner() {
   const [sessionId, setSessionId] = useState(urlSession || "");
 
   if (!sessionId) {
-    return <SessionSelector onSelect={(id) => setSessionId(id)} />;
+    return <SessionSelector onSelect={(id) => {
+      setSessionId(id);
+      window.location.hash = id;
+    }} />;
   }
 
   return <KanbanBoard sessionId={sessionId} />;

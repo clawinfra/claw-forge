@@ -46,7 +46,7 @@ interface FeatureCardProps {
   feature: Feature;
   onClick?: () => void;
   /** IDs of features implicated by the last regression failure */
-  implicatedFeatureIds?: number[];
+  implicatedFeatureIds?: string[];
   /** Called when user selects a quick command action */
   onQuickCommand?: (commandId: string, args: Record<string, unknown>) => void;
   /** Called on long-press — opens task detail modal */
@@ -130,7 +130,7 @@ export function FeatureCard({
   const depCount = feature.depends_on.length;
   const isImplicated =
     implicatedFeatureIds.length > 0 &&
-    implicatedFeatureIds.includes(Number(feature.id));
+    implicatedFeatureIds.includes(feature.id);
 
   // Haptic feedback on status change
   useEffect(() => {

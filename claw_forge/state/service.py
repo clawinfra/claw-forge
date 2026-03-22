@@ -190,6 +190,8 @@ class CreateTaskRequest(BaseModel):
     depends_on: list[str] = []
     category: str | None = None
     steps: list[str] = []
+    parent_task_id: str | None = None
+    bugfix_retry_count: int = 0
 
 
 class SessionInitRequest(BaseModel):
@@ -498,6 +500,9 @@ class AgentStateService:
             # SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN, so we catch errors.
             for ddl in [
                 "ALTER TABLE sessions ADD COLUMN project_paused INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE tasks ADD COLUMN active_subagents INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE tasks ADD COLUMN parent_task_id VARCHAR(36)",
+                "ALTER TABLE tasks ADD COLUMN bugfix_retry_count INTEGER NOT NULL DEFAULT 0",
             ]:
                 with suppress(Exception):
                     await conn.execute(text(ddl))
@@ -656,6 +661,10 @@ class AgentStateService:
                 if orphans_reset:
                     await db.commit()
 
+                # Inform the reviewer which session is active
+                if self._reviewer is not None:
+                    self._reviewer.session_id = session.id
+
                 return {
                     "session_id": session.id,
                     "orphans_reset": orphans_reset,
@@ -695,6 +704,8 @@ class AgentStateService:
                     depends_on=req.depends_on,
                     category=req.category,
                     steps=req.steps,
+                    parent_task_id=req.parent_task_id,
+                    bugfix_retry_count=req.bugfix_retry_count,
                 )
                 db.add(task)
                 await db.commit()
@@ -1143,9 +1154,22 @@ class AgentStateService:
             if reviewer.run_count == 0:
                 return {"run_count": 0, "last_result": None, "has_test_command": True}
             last = reviewer.last_result
+            result_dict = last.to_dict() if last else None
+            # Enrich with feature names for UI display
+            if result_dict and result_dict.get("implicated_feature_ids"):
+                async with self._session_factory() as db:
+                    ids = result_dict["implicated_feature_ids"]
+                    tasks_result = await db.execute(
+                        select(Task).where(Task.id.in_(ids))
+                    )
+                    tasks = tasks_result.scalars().all()
+                    result_dict["implicated_features"] = [
+                        {"id": t.id, "name": t.description or t.plugin_name}
+                        for t in tasks
+                    ]
             return {
                 "run_count": reviewer.run_count,
-                "last_result": last.to_dict() if last else None,
+                "last_result": result_dict,
                 "has_test_command": True,
             }
 

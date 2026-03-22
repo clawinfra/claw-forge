@@ -10,13 +10,13 @@ class FakeHttpxResponse:
 
     status_code = 200
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(self, data: Any) -> None:
         self._data = data
 
     def raise_for_status(self) -> None:
         pass
 
-    def json(self) -> dict[str, Any]:
+    def json(self) -> Any:
         return self._data
 
 
@@ -40,6 +40,9 @@ def make_fake_httpx_client(
     """
 
     class _FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
         async def __aenter__(self) -> _FakeClient:
             return self
 
@@ -50,6 +53,9 @@ def make_fake_httpx_client(
             return FakeHttpxResponse(init_response)
 
         async def get(self, url: str, **kw: Any) -> FakeHttpxResponse:
+            # GET /sessions/{id}/tasks returns a list; GET /tasks/{id} returns a dict
+            if "/sessions/" in url and url.endswith("/tasks"):
+                return FakeHttpxResponse([])
             return FakeHttpxResponse(task_response)
 
         async def patch(self, url: str, **kw: Any) -> FakeHttpxResponse:

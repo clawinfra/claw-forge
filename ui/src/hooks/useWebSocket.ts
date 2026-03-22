@@ -48,7 +48,7 @@ function eventToMessage(event: WsEvent): string {
 
 export interface UseWebSocketOptions {
   onCommandEvent?: (event: Record<string, unknown>) => void;
-  onRegressionResult?: (implicatedIds: number[]) => void;
+  onRegressionResult?: (implicatedIds: string[]) => void;
 }
 
 export function useWebSocket(sessionId: string, options: UseWebSocketOptions = {}) {
