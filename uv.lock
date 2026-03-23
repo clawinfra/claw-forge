@@ -398,6 +398,7 @@ bedrock = [
     { name = "boto3" },
 ]
 dev = [
+    { name = "asyncpg" },
     { name = "mypy" },
     { name = "playwright" },
     { name = "pytest" },
@@ -425,6 +426,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.40,<1" },
     { name = "anthropic", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=0.40,<1" },
     { name = "anthropic", extras = ["vertex"], marker = "extra == 'vertex'", specifier = ">=0.40,<1" },
+    { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.29,<1" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29,<1" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.17,<2" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.35,<2" },

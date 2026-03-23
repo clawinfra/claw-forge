@@ -40,6 +40,8 @@ interface RegressionStatus {
 interface RegressionHealthBarProps {
   /** Whether a regression suite is currently running (from shared WebSocket). */
   isRunning: boolean;
+  /** When true, disables background polling (e.g. all tasks complete). */
+  paused?: boolean;
 }
 
 // Use relative path — Vite proxy handles it in dev, same-origin in production
@@ -58,11 +60,11 @@ function secondsAgo(durationMs: number): string {
   return `${Math.round(s / 3600)}h`;
 }
 
-export function RegressionHealthBar({ isRunning }: RegressionHealthBarProps) {
+export function RegressionHealthBar({ isRunning, paused = false }: RegressionHealthBarProps) {
   const { data, isLoading } = useQuery<RegressionStatus>({
     queryKey: ["regression", "status"],
     queryFn: fetchRegressionStatus,
-    refetchInterval: 10_000,
+    refetchInterval: paused ? false : 10_000,
     retry: 1,
   });
 
@@ -267,9 +269,9 @@ function FeatureSection({
       <span className="font-semibold">{label}:</span>
       <ul className={`list-disc list-inside mt-0.5 space-y-0.5 ${c.bullet}`}>
         {features.map((f) => (
-          <li key={f.id}>
+          <li key={f.id} className="truncate max-w-full" title={f.name}>
             <span className={c.text}>
-              {f.name}{" "}
+              {f.name.length > 80 ? f.name.slice(0, 80) + "…" : f.name}{" "}
               <span className="opacity-50 font-mono text-[10px]">({f.id.slice(0, 8)})</span>
             </span>
           </li>

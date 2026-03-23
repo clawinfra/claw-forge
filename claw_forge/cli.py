@@ -1061,7 +1061,7 @@ def run(
                         )
                         if git_merge_strategy == "auto":
                             _branch_name = f"{git_branch_prefix}/{_slug}"
-                            await git_ops.merge(
+                            _merge_result = await git_ops.merge(
                                 _branch_name,
                                 title=task_node.description or None,
                                 steps=task_node.steps or None,
@@ -1069,6 +1069,15 @@ def run(
                                 session_id=session_id,
                                 worktree_path=_worktree_path,
                             )
+                            if (
+                                _merge_result
+                                and not _merge_result.get("merged")
+                            ):
+                                logging.getLogger("claw_forge.cli").warning(
+                                    "Merge failed for %s: %s",
+                                    _branch_name,
+                                    _merge_result.get("error", "unknown"),
+                                )
                     elif git_enabled and not success and _worktree_path:
                         await git_ops.remove_worktree(_worktree_path)
 
@@ -1096,8 +1105,28 @@ def run(
             total_failed.update(dispatch_result.failed)
 
             if not dispatcher.is_paused:
-                # Check for dynamically-created tasks (e.g. bugfix from reviewer)
+                # Wait for in-flight regression run to finish before
+                # checking for bugfix tasks — the reviewer runs in the
+                # state service process and may still be mid-test.
                 async with httpx.AsyncClient() as check_client:
+                    try:
+                        for _wait in range(60):  # up to ~60s
+                            _reg_resp = await check_client.get(
+                                f"{_state_base}/regression/status",
+                                timeout=5,
+                            )
+                            _reg = _reg_resp.json()
+                            if not _reg.get("has_pending_work", False):
+                                break
+                            if _wait == 0:
+                                console.print(
+                                    "[dim]Waiting for regression suite "
+                                    "to finish…[/dim]"
+                                )
+                            await asyncio.sleep(1)
+                    except (httpx.HTTPError, Exception):  # noqa: BLE001
+                        pass  # reviewer unreachable — skip wait
+
                     _tasks_resp = await check_client.get(
                         f"{_state_base}/sessions/{session_id}/tasks",
                         timeout=10,

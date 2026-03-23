@@ -625,6 +625,20 @@ class TestParseOutput:
         assert "tests/test_broken.py" in names
         assert "tests/test_foo.py::test_bar" in names
 
+    def test_parse_pytest_error_collecting_not_captured(self) -> None:
+        """'ERROR collecting ...' should capture the file path, not 'collecting'."""
+        output = (
+            "ERROR collecting tests/test_foo.py\n"
+            "ERROR collecting tests/test_bar.py\n"
+            "2 errors in 0.5s\n"
+        )
+        total, failed, names = ParallelReviewer._parse_output(output)
+        assert total == 2
+        assert failed == 2
+        assert "collecting" not in names
+        assert "tests/test_foo.py" in names
+        assert "tests/test_bar.py" in names
+
 
 # ── test_command property ───────────────────────────────────────────────
 

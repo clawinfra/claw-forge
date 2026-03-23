@@ -17,11 +17,11 @@ export const POOL_KEY = ["pool", "status"];
  * Returns react-query result with `{ data: PoolStatusResponse, isLoading, error }`.
  * Real-time updates arrive via the shared useWebSocket hook.
  */
-export function usePoolStatus() {
+export function usePoolStatus(paused = false) {
   return useQuery<PoolStatusResponse>({
     queryKey: POOL_KEY,
     queryFn: fetchPoolStatus,
     staleTime: 10_000,
-    refetchInterval: 10_000,
+    refetchInterval: paused ? false : 10_000,
   });
 }

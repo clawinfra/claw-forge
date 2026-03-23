@@ -132,6 +132,8 @@ class ParallelReviewer:
         self.session_id: str | None = None
         # Buffer of features completed since last trigger
         self._pending_triggers: list[dict[str, str]] = []
+        # Set while a regression test run is in progress
+        self._running = False
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -149,6 +151,11 @@ class ParallelReviewer:
     def test_command(self) -> str | None:
         """The detected (or overridden) test command."""
         return self._test_command
+
+    @property
+    def has_pending_work(self) -> bool:
+        """True when a test run is in progress or triggers are buffered."""
+        return self._running or self._feature_event.is_set()
 
     def notify_feature_completed(
         self,
@@ -212,41 +219,47 @@ class ParallelReviewer:
             triggers = list(self._pending_triggers)
             self._pending_triggers.clear()
 
-            # Broadcast start
-            await self._state_service.ws_manager.broadcast(
-                {"type": "regression_started", "run_number": run_num}
-            )
-
-            result = await self._run_tests(run_num)
-            result.trigger_features = triggers
-            self._last_result = result
-
-            # Auto-dispatch bugfix tasks for regressions
-            bugfix_ids: list[str] = []
-            if not result.passed:
-                bugfix_ids = await self._dispatch_bugfix_tasks(result)
-
-            # Broadcast result
-            await self._state_service.ws_manager.broadcast(
-                {"type": "regression_result", **result.to_dict()}
-            )
-            if bugfix_ids:
+            self._running = True
+            try:
+                # Broadcast start
                 await self._state_service.ws_manager.broadcast(
-                    {
-                        "type": "bugfix_dispatched",
-                        "task_ids": bugfix_ids,
-                        "run_number": run_num,
-                    }
+                    {"type": "regression_started", "run_number": run_num}
                 )
-            logger.info(
-                "Regression run #%d: %s (%d total, %d failed, %dms)%s",
-                run_num,
-                "PASS" if result.passed else "FAIL",
-                result.total,
-                result.failed,
-                result.duration_ms,
-                f" — dispatched {len(bugfix_ids)} bugfix task(s)" if bugfix_ids else "",
-            )
+
+                result = await self._run_tests(run_num)
+                result.trigger_features = triggers
+                self._last_result = result
+
+                # Auto-dispatch bugfix tasks for regressions
+                bugfix_ids: list[str] = []
+                if not result.passed:
+                    bugfix_ids = await self._dispatch_bugfix_tasks(result)
+
+                # Broadcast result
+                await self._state_service.ws_manager.broadcast(
+                    {"type": "regression_result", **result.to_dict()}
+                )
+                if bugfix_ids:
+                    await self._state_service.ws_manager.broadcast(
+                        {
+                            "type": "bugfix_dispatched",
+                            "task_ids": bugfix_ids,
+                            "run_number": run_num,
+                        }
+                    )
+                logger.info(
+                    "Regression run #%d: %s (%d total, %d failed, %dms)%s",
+                    run_num,
+                    "PASS" if result.passed else "FAIL",
+                    result.total,
+                    result.failed,
+                    result.duration_ms,
+                    f" — dispatched {len(bugfix_ids)} bugfix task(s)"
+                    if bugfix_ids
+                    else "",
+                )
+            finally:
+                self._running = False
 
     async def _dispatch_bugfix_tasks(
         self, result: RegressionResult,
@@ -478,8 +491,15 @@ class ParallelReviewer:
             failed_names.append(line)
 
         # pytest ERROR lines (collection/import errors)
+        # "ERROR collecting tests/foo.py" → capture the file path, not "collecting"
         for line in re.findall(
-            r"ERROR\s+(\S+)", output
+            r"ERROR\s+collecting\s+(\S+)", output
+        ):
+            if line not in failed_names:
+                failed_names.append(line)
+        # Other ERROR lines (non-collection)
+        for line in re.findall(
+            r"ERROR\s+(?!collecting\s)(\S+)", output
         ):
             if line not in failed_names:
                 failed_names.append(line)

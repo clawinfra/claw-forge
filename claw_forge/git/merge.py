@@ -90,9 +90,14 @@ def squash_merge(
         delete_branch(project_dir, branch, force=True)
         return {"merged": True, "commit_hash": short_hash}
     except Exception as exc:
-        # Abort merge if in progress, restore original branch
+        # Clean up staged changes from the failed squash merge.
+        # ``git merge --abort`` only works for real merge commits; a
+        # squash merge stages changes without creating a merge state,
+        # so we must ``reset --hard`` to restore the working tree.
         with suppress(Exception):
             _run_git(["merge", "--abort"], project_dir)
+        with suppress(Exception):
+            _run_git(["reset", "--hard", "HEAD"], project_dir)
         with suppress(Exception):
             switch_branch(project_dir, original_branch)
         return {"merged": False, "error": str(exc)}

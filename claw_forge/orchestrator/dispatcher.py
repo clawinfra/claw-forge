@@ -296,6 +296,9 @@ class Dispatcher:
                         # Notify reviewer of feature completion
                         if self._reviewer is not None:
                             self._reviewer.notify_feature_completed()
+
+            # ── Bugfix sweep: pick up tasks created by the reviewer ───────
+            await self._run_bugfix_sweep(result)
         finally:
             if monitor is not None:
                 monitor.cancel()
@@ -303,6 +306,78 @@ class Dispatcher:
                     await monitor
 
         return result
+
+    async def _run_bugfix_sweep(self, result: DispatchResult) -> None:
+        """Execute pending bugfix tasks that the reviewer created mid-run.
+
+        The main wave plan is pre-computed, so bugfix tasks inserted into
+        the DB during execution are never scheduled.  This sweep queries
+        the state service for any pending bugfix tasks and runs them.
+        """
+        if self._state_url is None or self._paused:
+            return
+
+        import httpx
+
+        max_rounds = 3  # prevent infinite fix loops
+        for round_num in range(1, max_rounds + 1):
+            if self._paused:
+                break
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        f"{self._state_url}/sessions",
+                        timeout=5.0,
+                    )
+                    sessions = resp.json()
+                    if not sessions:
+                        return
+                    session_id = sessions[0]["id"]
+
+                    resp = await client.get(
+                        f"{self._state_url}/sessions/{session_id}/tasks",
+                        timeout=5.0,
+                    )
+                    tasks = resp.json()
+            except Exception:  # noqa: BLE001
+                logger.warning("Bugfix sweep: failed to fetch tasks")
+                return
+
+            pending_bugfixes = [
+                t for t in tasks
+                if t.get("plugin_name") == "bugfix"
+                and t.get("status") == "pending"
+            ]
+            if not pending_bugfixes:
+                return
+
+            logger.info(
+                "Bugfix sweep round %d: %d pending bugfix task(s)",
+                round_num,
+                len(pending_bugfixes),
+            )
+            for task_data in pending_bugfixes:
+                if self._paused:
+                    break
+                node = TaskNode(
+                    id=task_data["id"],
+                    plugin_name="bugfix",
+                    priority=task_data.get("priority", 0),
+                    depends_on=[],
+                    status="pending",
+                    category=task_data.get("category", "bugfix"),
+                    steps=task_data.get("steps", []),
+                    description=task_data.get("description", ""),
+                )
+                try:
+                    task_result = await self._run_task(node)
+                    if self._task_errors.pop(node.id, None) is not None:
+                        result.failed[node.id] = "bugfix failed"
+                    else:
+                        result.completed[node.id] = task_result or {}
+                except Exception:  # noqa: BLE001
+                    logger.exception("Bugfix task %s failed", node.id)
+                    result.failed[node.id] = "bugfix exception"
 
     async def _run_task(self, task: TaskNode) -> dict[str, Any] | None:
         """Run a single task with retry logic.

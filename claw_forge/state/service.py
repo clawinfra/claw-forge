@@ -1182,6 +1182,7 @@ class AgentStateService:
                 "run_count": reviewer.run_count,
                 "last_result": result_dict,
                 "has_test_command": True,
+                "has_pending_work": reviewer.has_pending_work,
             }
 
         @app.get("/pool/status")

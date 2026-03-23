@@ -239,7 +239,16 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     isLoading: featuresLoading,
     error: featuresError,
   } = useFeatures(sessionId);
-  const { data: poolData, isLoading: poolLoading } = usePoolStatus();
+
+  const allFeatures = useMemo(() => features ?? [], [features]);
+
+  // Stop polling once every task has reached a terminal state
+  const sessionComplete = useMemo(() => {
+    const TERMINAL = new Set(["completed", "failed"]);
+    return allFeatures.length > 0 && allFeatures.every((f) => TERMINAL.has(f.status));
+  }, [allFeatures]);
+
+  const { data: poolData, isLoading: poolLoading } = usePoolStatus(sessionComplete);
   const providers = useMemo(() => poolData?.providers ?? [], [poolData?.providers]);
   const modelAliases = useMemo(() => poolData?.model_aliases ?? {}, [poolData?.model_aliases]);
   const { data: sessionData } = useQuery({
@@ -247,8 +256,6 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
     queryFn: () => fetchSession(sessionId),
     staleTime: 60_000,
   });
-
-  const allFeatures = useMemo(() => features ?? [], [features]);
 
   // Active executions for the ExecutionDrawer (declared before useWebSocket so callback can reference it)
   const [activeExecutions, setActiveExecutions] = useState<Execution[]>([]);
@@ -810,6 +817,7 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       {/* ── Regression health bar ────────────────────────────────────── */}
       <RegressionHealthBar
         isRunning={regressionIsRunning}
+        paused={sessionComplete}
       />
 
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
