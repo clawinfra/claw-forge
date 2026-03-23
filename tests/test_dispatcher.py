@@ -500,3 +500,23 @@ class TestBugfixSweep:
             await d._run_bugfix_sweep(result)
 
         assert "fail" in result.failed
+
+    @pytest.mark.asyncio
+    async def test_sweep_no_sessions_returns(self) -> None:
+        """Sweep exits early when no sessions exist."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_session_resp = MagicMock()
+        mock_session_resp.json.return_value = []
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_session_resp)
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await d._run_bugfix_sweep(result)
+
+        assert len(result.completed) == 0
