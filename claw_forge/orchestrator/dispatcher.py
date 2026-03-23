@@ -375,7 +375,7 @@ class Dispatcher:
                         result.failed[node.id] = "bugfix failed"
                     else:
                         result.completed[node.id] = task_result or {}
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # pragma: no cover
                     logger.exception("Bugfix task %s failed", node.id)
                     result.failed[node.id] = "bugfix exception"
 
@@ -514,5 +514,5 @@ class Dispatcher:
                         if node is not None:
                             node.status = "pending"
                             asyncio.create_task(self._run_resumed_task(node))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # pragma: no cover
                     pass  # transient errors are fine — we'll retry next cycle
