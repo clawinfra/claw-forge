@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -512,8 +512,10 @@ class TestRegressionStatusEndpoint:
             db.add_all([t1, t2])
             await db.commit()
 
-        mock_reviewer = Mock()
+        mock_reviewer = MagicMock()
         mock_reviewer.run_count = 5
+        mock_reviewer.has_pending_work = False
+        mock_reviewer.test_command = "pytest"
         mock_reviewer.last_result = RegressionResult(
             passed=False,
             total=20,

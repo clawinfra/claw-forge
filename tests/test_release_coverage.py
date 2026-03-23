@@ -232,9 +232,13 @@ class TestCreateAppFromEnv:
 
 class TestRegressionStatus:
     async def test_with_run_count(self, client: AsyncClient, service: AgentStateService) -> None:
-        mock_reviewer = Mock()
+        from unittest.mock import MagicMock
+
+        mock_reviewer = MagicMock()
         mock_reviewer.run_count = 3
-        mock_last = Mock()
+        mock_reviewer.has_pending_work = False
+        mock_reviewer.test_command = "pytest"
+        mock_last = MagicMock()
         mock_last.to_dict.return_value = {"passed": True, "failures": []}
         mock_reviewer.last_result = mock_last
         service._reviewer = mock_reviewer
@@ -249,8 +253,12 @@ class TestRegressionStatus:
     async def test_with_run_count_no_last_result(
         self, client: AsyncClient, service: AgentStateService
     ) -> None:
-        mock_reviewer = Mock()
+        from unittest.mock import MagicMock
+
+        mock_reviewer = MagicMock()
         mock_reviewer.run_count = 1
+        mock_reviewer.has_pending_work = False
+        mock_reviewer.test_command = "pytest"
         mock_reviewer.last_result = None
         service._reviewer = mock_reviewer
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -355,7 +355,7 @@ async def test_execute_calls_run_agent(tmp_path: Path) -> None:
         metadata={"bug_report": bug},
     )
 
-    mock_message = Mock()
+    mock_message = MagicMock()
     mock_message.__class__ = type("ResultMessage", (), {})
 
     async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
