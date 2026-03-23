@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
@@ -507,7 +507,7 @@ class TestPauseResume:
 class TestConnectionManagerUnit:
     async def test_connect_accepts_and_registers(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -516,7 +516,7 @@ class TestConnectionManagerUnit:
 
     async def test_disconnect_removes_connection(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -526,16 +526,16 @@ class TestConnectionManagerUnit:
 
     async def test_disconnect_safe_when_not_connected(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         mgr.disconnect(ws)  # should not raise
         assert mgr.active_count == 0
 
     async def test_broadcast_sends_to_all(self) -> None:
         mgr = ConnectionManager()
-        ws1 = MagicMock()
+        ws1 = Mock()
         ws1.accept = AsyncMock()
         ws1.send_json = AsyncMock()
-        ws2 = MagicMock()
+        ws2 = Mock()
         ws2.accept = AsyncMock()
         ws2.send_json = AsyncMock()
 
@@ -551,10 +551,10 @@ class TestConnectionManagerUnit:
 
     async def test_broadcast_prunes_dead_connections(self) -> None:
         mgr = ConnectionManager()
-        healthy = MagicMock()
+        healthy = Mock()
         healthy.accept = AsyncMock()
         healthy.send_json = AsyncMock()
-        dead = MagicMock()
+        dead = Mock()
         dead.accept = AsyncMock()
         dead.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
 
@@ -568,7 +568,7 @@ class TestConnectionManagerUnit:
 
     async def test_broadcast_feature_update(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -580,7 +580,7 @@ class TestConnectionManagerUnit:
 
     async def test_broadcast_agent_started(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -592,7 +592,7 @@ class TestConnectionManagerUnit:
 
     async def test_broadcast_agent_completed(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -604,7 +604,7 @@ class TestConnectionManagerUnit:
 
     async def test_broadcast_cost_update(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -618,7 +618,7 @@ class TestConnectionManagerUnit:
         mgr = ConnectionManager()
         wss = []
         for _ in range(5):
-            ws = MagicMock()
+            ws = Mock()
             ws.accept = AsyncMock()
             ws.send_json = AsyncMock()
             await mgr.connect(ws)

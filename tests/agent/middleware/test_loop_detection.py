@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -286,7 +286,7 @@ class TestLoopDetectionHookGracefulness:
     async def test_logs_on_exception(self, caplog: pytest.LogCaptureFixture) -> None:
         hook_fn, ctx = loop_detection_hook(threshold=5)
         # Monkeypatch edit_counts to raise on __setitem__
-        broken_dict = MagicMock(spec=dict)
+        broken_dict = Mock(spec=dict)
         broken_dict.get.side_effect = RuntimeError("boom")
         ctx.edit_counts = broken_dict  # type: ignore[assignment]
 

@@ -1,7 +1,7 @@
 """Tests for AgentSession — bidirectional ClaudeSDKClient wrapper."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import claude_agent_sdk
 import pytest
@@ -19,23 +19,23 @@ def _make_options(**kwargs) -> ClaudeAgentOptions:
 
 
 def _make_user_message(uuid_val: str) -> claude_agent_sdk.UserMessage:
-    msg = MagicMock(spec=claude_agent_sdk.UserMessage)
+    msg = Mock(spec=claude_agent_sdk.UserMessage)
     msg.uuid = uuid_val
     msg.__class__ = type("UserMessage", (), {})
     return msg
 
 
 def _make_assistant_message(text: str = "hello") -> claude_agent_sdk.AssistantMessage:
-    block = MagicMock(spec=claude_agent_sdk.TextBlock)
+    block = Mock(spec=claude_agent_sdk.TextBlock)
     block.text = text
-    msg = MagicMock(spec=claude_agent_sdk.AssistantMessage)
+    msg = Mock(spec=claude_agent_sdk.AssistantMessage)
     msg.content = [block]
     msg.__class__ = type("AssistantMessage", (), {})
     return msg
 
 
 def _make_result_message(result: str = "done") -> claude_agent_sdk.ResultMessage:
-    msg = MagicMock(spec=claude_agent_sdk.ResultMessage)
+    msg = Mock(spec=claude_agent_sdk.ResultMessage)
     msg.result = result
     msg.__class__ = type("ResultMessage", (), {})
     return msg
@@ -124,7 +124,7 @@ class TestAgentSessionRun:
             mock_client = AsyncMock()
             mock_cls.return_value = mock_client
             # receive_response is a non-awaited method returning an async iterator
-            mock_client.receive_response = MagicMock(
+            mock_client.receive_response = Mock(
                 return_value=AsyncIterableList([assistant, result])
             )
 
@@ -148,7 +148,7 @@ class TestAgentSessionRun:
         with patch("claw_forge.agent.session.ClaudeSDKClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value = mock_client
-            mock_client.receive_response = MagicMock(
+            mock_client.receive_response = Mock(
                 return_value=AsyncIterableList([user1, assistant, user2])
             )
 
@@ -161,13 +161,13 @@ class TestAgentSessionRun:
     @pytest.mark.asyncio
     async def test_run_skips_messages_without_uuid(self):
         """UserMessages without a uuid should not create checkpoints."""
-        user_no_uuid = MagicMock(spec=claude_agent_sdk.UserMessage)
+        user_no_uuid = Mock(spec=claude_agent_sdk.UserMessage)
         user_no_uuid.uuid = None
 
         with patch("claw_forge.agent.session.ClaudeSDKClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value = mock_client
-            mock_client.receive_response = MagicMock(
+            mock_client.receive_response = Mock(
                 return_value=AsyncIterableList([user_no_uuid])
             )
 
@@ -192,7 +192,7 @@ class TestAgentSessionFollowUp:
         with patch("claw_forge.agent.session.ClaudeSDKClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value = mock_client
-            mock_client.receive_response = MagicMock(
+            mock_client.receive_response = Mock(
                 return_value=AsyncIterableList([result])
             )
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -355,7 +355,7 @@ async def test_execute_calls_run_agent(tmp_path: Path) -> None:
         metadata={"bug_report": bug},
     )
 
-    mock_message = MagicMock()
+    mock_message = Mock()
     mock_message.__class__ = type("ResultMessage", (), {})
 
     async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]
@@ -563,7 +563,7 @@ def test_unknown_heading_returns_none_in_normalise() -> None:
 @pytest.mark.asyncio
 async def test_execute_assistant_message_with_text(tmp_path: Path) -> None:
     """AssistantMessage with text blocks collected (lines 103-105). No bug_report → 81->84."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import Mock, patch
 
     plugin = BugFixPlugin()
     ctx = PluginContext(
@@ -572,9 +572,9 @@ async def test_execute_assistant_message_with_text(tmp_path: Path) -> None:
         task_id="test",
         metadata={},  # no bug_report
     )
-    block = MagicMock()
+    block = Mock()
     block.text = "fixing the bug now"
-    mock_message = MagicMock()
+    mock_message = Mock()
     mock_message.__class__ = type("AssistantMessage", (), {})
     mock_message.content = [block]
 
@@ -591,7 +591,7 @@ async def test_execute_assistant_message_with_text(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_execute_result_message_with_files(tmp_path: Path) -> None:
     """ResultMessage with files_modified recorded (106->92 branch)."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import Mock, patch
 
     plugin = BugFixPlugin()
     ctx = PluginContext(
@@ -599,7 +599,7 @@ async def test_execute_result_message_with_files(tmp_path: Path) -> None:
         session_id="test",
         task_id="test",
     )
-    mock_message = MagicMock()
+    mock_message = Mock()
     mock_message.__class__ = type("ResultMessage", (), {})
     mock_message.files_modified = ["src/main.py", "tests/test_main.py"]
 
@@ -616,7 +616,7 @@ async def test_execute_result_message_with_files(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_execute_assistant_message_block_without_text(tmp_path: Path) -> None:
     """AssistantMessage block without .text attr is skipped (104->103 branch)."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import Mock, patch
 
     plugin = BugFixPlugin()
     ctx = PluginContext(
@@ -625,11 +625,11 @@ async def test_execute_assistant_message_block_without_text(tmp_path: Path) -> N
         task_id="test",
     )
     # A block that has NO text attribute (e.g., ToolUseBlock)
-    block_no_text = MagicMock(spec=["type"])  # spec with only 'type', no 'text'
-    block_with_text = MagicMock()
+    block_no_text = Mock(spec=["type"])  # spec with only 'type', no 'text'
+    block_with_text = Mock()
     block_with_text.text = "some output"
 
-    mock_message = MagicMock()
+    mock_message = Mock()
     mock_message.__class__ = type("AssistantMessage", (), {})
     mock_message.content = [block_no_text, block_with_text]  # first block has no text
 
@@ -646,7 +646,7 @@ async def test_execute_assistant_message_block_without_text(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_execute_unknown_message_type_skipped(tmp_path: Path) -> None:
     """Unknown message type → elif False → loop continues (106->92 branch)."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import Mock, patch
 
     plugin = BugFixPlugin()
     ctx = PluginContext(
@@ -655,7 +655,7 @@ async def test_execute_unknown_message_type_skipped(tmp_path: Path) -> None:
         task_id="test",
     )
     # Neither AssistantMessage nor ResultMessage
-    mock_message = MagicMock()
+    mock_message = Mock()
     mock_message.__class__ = type("ToolResultMessage", (), {})
 
     async def _fake_run_agent(prompt: str, **kwargs: object):  # type: ignore[misc]

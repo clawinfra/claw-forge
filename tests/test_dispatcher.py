@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -256,11 +256,11 @@ class TestCancelMonitor:
         d = Dispatcher(handler=_success_handler, state_url="http://localhost:0")
 
         # A regular running task (not in _resumed_tasks → freeze + cancel)
-        mock_task = MagicMock()
+        mock_task = Mock()
         d._running_tasks["t-stop"] = mock_task
 
         # A resumed task (in _resumed_tasks → cancel but NO freeze)
-        resumed_mock = MagicMock()
+        resumed_mock = Mock()
         d._running_tasks["t-resumed"] = resumed_mock
         d._resumed_tasks.add("t-resumed")
 
@@ -304,7 +304,7 @@ class TestCancelMonitor:
                 # Signal done after all responses consumed
                 raise asyncio.CancelledError()
 
-        async def mock_get(*args: object, **kwargs: object) -> MagicMock:
+        async def mock_get(*args: object, **kwargs: object) -> Mock:
             nonlocal get_count
             if get_count < len(responses):
                 data = responses[get_count]
@@ -313,7 +313,7 @@ class TestCancelMonitor:
                 # cover except Exception: pass
                 get_count += 1
                 raise RuntimeError("transient http error")
-            mock_resp = MagicMock()
+            mock_resp = Mock()
             mock_resp.json.return_value = data
             return mock_resp
 
@@ -322,11 +322,11 @@ class TestCancelMonitor:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        def fake_create_task(coro: object) -> MagicMock:
+        def fake_create_task(coro: object) -> Mock:
             # Prevent real tasks from being spawned; close the coroutine
             if hasattr(coro, "close"):
                 coro.close()  # type: ignore[union-attr]
-            t = MagicMock()
+            t = Mock()
             created_tasks.append(t)
             return t
 
@@ -380,7 +380,7 @@ class TestBugfixSweep:
         d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
         from claw_forge.orchestrator.dispatcher import DispatchResult
 
-        mock_session_resp = MagicMock()
+        mock_session_resp = Mock()
         mock_session_resp.json.return_value = [{"id": "sess-1"}]
 
         bugfix_tasks = [
@@ -394,13 +394,13 @@ class TestBugfixSweep:
                 "description": "Fix regression",
             },
         ]
-        mock_tasks_resp = MagicMock()
+        mock_tasks_resp = Mock()
         mock_tasks_resp.json.return_value = bugfix_tasks
 
         # Second round returns no pending bugfixes (loop termination)
-        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2 = Mock()
         mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
-        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2 = Mock()
         mock_tasks_resp_2.json.return_value = []
 
         mock_client = AsyncMock()
@@ -466,10 +466,10 @@ class TestBugfixSweep:
         d = Dispatcher(handler=_failing_handler, state_url="http://localhost:8420")
         from claw_forge.orchestrator.dispatcher import DispatchResult
 
-        mock_session_resp = MagicMock()
+        mock_session_resp = Mock()
         mock_session_resp.json.return_value = [{"id": "sess-1"}]
 
-        mock_tasks_resp = MagicMock()
+        mock_tasks_resp = Mock()
         mock_tasks_resp.json.return_value = [
             {
                 "id": "fail",
@@ -482,9 +482,9 @@ class TestBugfixSweep:
             },
         ]
 
-        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2 = Mock()
         mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
-        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2 = Mock()
         mock_tasks_resp_2.json.return_value = []
 
         mock_client = AsyncMock()
@@ -507,10 +507,10 @@ class TestBugfixSweep:
         d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
         from claw_forge.orchestrator.dispatcher import DispatchResult
 
-        mock_session_resp = MagicMock()
+        mock_session_resp = Mock()
         mock_session_resp.json.return_value = [{"id": "sess-1"}]
 
-        mock_tasks_resp = MagicMock()
+        mock_tasks_resp = Mock()
         mock_tasks_resp.json.return_value = [
             {
                 "id": "bugfix-1",
@@ -523,9 +523,9 @@ class TestBugfixSweep:
             },
         ]
 
-        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2 = Mock()
         mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
-        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2 = Mock()
         mock_tasks_resp_2.json.return_value = [
             {
                 "id": "bugfix-2",
@@ -568,7 +568,7 @@ class TestBugfixSweep:
         d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
         from claw_forge.orchestrator.dispatcher import DispatchResult
 
-        mock_session_resp = MagicMock()
+        mock_session_resp = Mock()
         mock_session_resp.json.return_value = []
 
         mock_client = AsyncMock()

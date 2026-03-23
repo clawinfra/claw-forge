@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -82,7 +82,7 @@ class TestSubagentHooks:
         import httpx
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.patch = AsyncMock(return_value=MagicMock(status_code=200))
+        mock_client.patch = AsyncMock(return_value=Mock(status_code=200))
 
         start_hook, stop_hook, state = make_subagent_hooks(
             max_subagents=5, state_url="http://localhost:9999",
@@ -108,7 +108,7 @@ class TestSubagentHooks:
         import httpx
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.patch = AsyncMock(return_value=MagicMock(status_code=200))
+        mock_client.patch = AsyncMock(return_value=Mock(status_code=200))
 
         with patch("httpx.AsyncClient", return_value=mock_client) as mock_cls:
             start_hook, stop_hook, state = make_subagent_hooks(

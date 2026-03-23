@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy.exc import DatabaseError as SADatabaseError
@@ -99,7 +99,7 @@ class TestInitDbRecovery:
         _real_run = subprocess.run
 
         def mock_subprocess_run(cmd, **kwargs):  # noqa: ANN001, ANN003
-            result = MagicMock()
+            result = Mock()
             if ".recover" in cmd:
                 result.returncode = 0
                 result.stdout = recover_sql

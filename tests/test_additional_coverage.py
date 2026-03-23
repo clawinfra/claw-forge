@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -19,7 +19,7 @@ class TestPoolRunner:
     def _make_pool(self, fail: bool = False) -> Any:
         from claw_forge.pool.manager import ProviderPoolExhausted, ProviderPoolManager
 
-        pool = MagicMock(spec=ProviderPoolManager)
+        pool = Mock(spec=ProviderPoolManager)
         if fail:
             pool.execute = AsyncMock(side_effect=ProviderPoolExhausted("all exhausted"))
         else:
@@ -64,7 +64,7 @@ class TestPoolRunner:
     async def test_run_batch_unexpected_error(self) -> None:
         from claw_forge.orchestrator.pool_runner import AgentRun, PoolRunner
 
-        pool = MagicMock()
+        pool = Mock()
         pool.execute = AsyncMock(side_effect=RuntimeError("unexpected"))
 
         runner = PoolRunner(pool, max_concurrent=2)
@@ -75,7 +75,7 @@ class TestPoolRunner:
     def test_active_count_initially_zero(self) -> None:
         from claw_forge.orchestrator.pool_runner import PoolRunner
 
-        runner = PoolRunner(MagicMock(), max_concurrent=5)
+        runner = PoolRunner(Mock(), max_concurrent=5)
         assert runner.active_count == 0
 
     def test_agent_run_fields(self) -> None:
@@ -111,7 +111,7 @@ class TestRouterUncovered:
             provider_type=ProviderType.OPENAI_COMPAT,
             **kw,
         )
-        p = MagicMock(spec=BaseProvider)
+        p = Mock(spec=BaseProvider)
         p.name = name
         p.config = cfg
         return p
@@ -144,7 +144,7 @@ class TestRouterUncovered:
             self._make_provider("p1"),
             self._make_provider("p2"),
         ]
-        tracker = MagicMock(spec=UsageTracker)
+        tracker = Mock(spec=UsageTracker)
         tracker.get_avg_latency.side_effect = lambda name: 100.0 if name == "p1" else 50.0
         tracker.is_rate_limited.return_value = False
 
@@ -419,7 +419,7 @@ async def test_broadcast_methods() -> None:
     svc = AgentStateService("sqlite+aiosqlite:///:memory:")
     try:
         mgr = svc.ws_manager
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -617,7 +617,7 @@ class TestAnthropicProvider:
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 10, "output_tokens": 5},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -631,7 +631,7 @@ class TestAnthropicProvider:
         from claw_forge.pool.providers.base import RateLimitError
 
         provider = self._make_provider()
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 429
         mock_resp.headers = {"retry-after": "5"}
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -644,7 +644,7 @@ class TestAnthropicProvider:
         from claw_forge.pool.providers.base import AuthenticationError
 
         provider = self._make_provider()
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 401
         provider._client.post = AsyncMock(return_value=mock_resp)
 
@@ -656,7 +656,7 @@ class TestAnthropicProvider:
         from claw_forge.pool.providers.base import ProviderError
 
         provider = self._make_provider()
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 500
         mock_resp.text = "internal error"
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -684,7 +684,7 @@ class TestAnthropicProvider:
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 5, "output_tokens": 2},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -727,8 +727,8 @@ def test_ui_with_node_modules(tmp_path: Path) -> None:
         patch("claw_forge.cli.Path") as mock_path,
     ):
         # Make Path(__file__).parent.parent / "ui" return our ui_dir
-        mock_path.return_value = MagicMock()
-        mock_path.return_value.__truediv__ = MagicMock(return_value=ui_dir)
+        mock_path.return_value = Mock()
+        mock_path.return_value.__truediv__ = Mock(return_value=ui_dir)
         type(mock_path.return_value).parent = property(lambda self: mock_path.return_value)
         result = _runner.invoke(cli_app, ["ui", "--no-open"])
     # may exit 0 or 1 depending on mock complexity; just check it ran
@@ -751,8 +751,8 @@ def test_ui_runs_npm_install_when_no_node_modules(tmp_path: Path) -> None:
         patch("subprocess.run"),
         patch("claw_forge.cli.Path") as mock_path,
     ):
-        mock_path.return_value = MagicMock()
-        mock_path.return_value.__truediv__ = MagicMock(return_value=ui_dir)
+        mock_path.return_value = Mock()
+        mock_path.return_value.__truediv__ = Mock(return_value=ui_dir)
         type(mock_path.return_value).parent = property(lambda self: mock_path.return_value)
         result = _runner.invoke(cli_app, ["ui", "--no-open"])
     assert result.exit_code in (0, 1)
@@ -766,7 +766,7 @@ def test_fix_with_branch_succeeds(tmp_path: Path) -> None:
     from claw_forge.cli import app as cli_app
 
     _runner = _CLIRunner()
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "Fixed"
     mock_result.files_modified = []
@@ -791,7 +791,7 @@ def test_fix_with_branch_fails_gracefully(tmp_path: Path) -> None:
     from claw_forge.cli import app as cli_app
 
     _runner = _CLIRunner()
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "Fixed"
     mock_result.files_modified = []
@@ -852,13 +852,13 @@ def test_discover_plugins_load_error() -> None:
 
     from claw_forge.plugins.base import discover_plugins
 
-    bad_ep = MagicMock(spec=EntryPoint)
+    bad_ep = Mock(spec=EntryPoint)
     bad_ep.name = "bad"
     bad_ep.load.side_effect = ImportError("cannot import")
 
     with patch("claw_forge.plugins.base.entry_points") as mock_eps:
-        mock_eps.return_value = MagicMock(
-            select=MagicMock(return_value=[bad_ep])
+        mock_eps.return_value = Mock(
+            select=Mock(return_value=[bad_ep])
         )
         result = discover_plugins()
     assert isinstance(result, dict)
@@ -967,7 +967,7 @@ class TestAnthropicProviderUncovered:
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 5, "output_tokens": 2},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -985,7 +985,7 @@ class TestAnthropicProviderUncovered:
 
         provider = self._make_provider(api_key=None, oauth_token_file=str(token_file))
 
-        mock_401 = MagicMock()
+        mock_401 = Mock()
         mock_401.status_code = 401
         provider._client.post = AsyncMock(return_value=mock_401)
 
@@ -1003,7 +1003,7 @@ class TestAnthropicProviderUncovered:
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 5, "output_tokens": 0},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -1077,7 +1077,7 @@ async def test_emit_event_with_ws_clients() -> None:
     try:
         await svc.init_db()
 
-        dead_ws = MagicMock()
+        dead_ws = Mock()
         dead_ws.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
         svc._ws_clients.append(dead_ws)
 

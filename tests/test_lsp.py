@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -227,7 +227,7 @@ class TestRunAgentLspIntegration:
 
         import claw_forge.agent.runner as runner_module
 
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:
@@ -285,7 +285,7 @@ class TestRunAgentLspSimple:
         """With auto_detect_lsp=False and no explicit plugins, resolved list is empty."""
         import claw_forge.agent.runner as runner_module
 
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:
@@ -315,7 +315,7 @@ class TestRunAgentLspSimple:
         explicit = lsp_plugins_for_extensions({".rs"})
         assert len(explicit) == 1
 
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:

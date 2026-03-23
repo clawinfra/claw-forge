@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -50,13 +50,13 @@ def _chat_response(
 def _mock_response(
     status_code: int = 200,
     body: dict[str, Any] | None = None,
-) -> MagicMock:
-    resp = MagicMock(spec=httpx.Response)
+) -> Mock:
+    resp = Mock(spec=httpx.Response)
     resp.status_code = status_code
     if body is not None:
         resp.json.return_value = body
         resp.text = json.dumps(body)
-    resp.raise_for_status = MagicMock()
+    resp.raise_for_status = Mock()
     return resp
 
 
@@ -108,7 +108,7 @@ class TestOllamaProviderExecute:
 
         captured_body: dict[str, Any] = {}
 
-        async def capture_post(url: str, **kwargs: Any) -> MagicMock:
+        async def capture_post(url: str, **kwargs: Any) -> Mock:
             captured_body.update(kwargs.get("json", {}))
             return mock_resp
 
@@ -137,7 +137,7 @@ class TestOllamaProviderExecute:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        async def capture_post(url: str, **kwargs: Any) -> MagicMock:
+        async def capture_post(url: str, **kwargs: Any) -> Mock:
             captured_body.update(kwargs.get("json", {}))
             return mock_resp
 
@@ -163,7 +163,7 @@ class TestOllamaProviderExecute:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        async def capture_post(url: str, **kwargs: Any) -> MagicMock:
+        async def capture_post(url: str, **kwargs: Any) -> Mock:
             captured_body.update(kwargs.get("json", {}))
             return mock_resp
 
@@ -192,7 +192,7 @@ class TestOllamaProviderExecute:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        async def capture_post(url: str, **kwargs: Any) -> MagicMock:
+        async def capture_post(url: str, **kwargs: Any) -> Mock:
             captured_headers.update(kwargs.get("headers", {}))
             return mock_resp
 
@@ -218,7 +218,7 @@ class TestOllamaProviderExecute:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        async def capture_post(url: str, **kwargs: Any) -> MagicMock:
+        async def capture_post(url: str, **kwargs: Any) -> Mock:
             captured_headers.update(kwargs.get("headers", {}))
             return mock_resp
 
@@ -344,7 +344,7 @@ class TestOllamaListModels:
         cfg = _make_config()
         provider = OllamaProvider(cfg)
 
-        tags_response = MagicMock(spec=httpx.Response)
+        tags_response = Mock(spec=httpx.Response)
         tags_response.status_code = 200
         tags_response.json.return_value = {
             "models": [
@@ -353,7 +353,7 @@ class TestOllamaListModels:
                 {"name": "codellama:7b"},
             ]
         }
-        tags_response.raise_for_status = MagicMock()
+        tags_response.raise_for_status = Mock()
 
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -370,10 +370,10 @@ class TestOllamaListModels:
         cfg = _make_config()
         provider = OllamaProvider(cfg)
 
-        tags_response = MagicMock(spec=httpx.Response)
+        tags_response = Mock(spec=httpx.Response)
         tags_response.status_code = 200
         tags_response.json.return_value = {"models": []}
-        tags_response.raise_for_status = MagicMock()
+        tags_response.raise_for_status = Mock()
 
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -397,7 +397,7 @@ class TestOllamaHealthCheck:
         cfg = _make_config()
         provider = OllamaProvider(cfg)
 
-        ok_resp = MagicMock(spec=httpx.Response)
+        ok_resp = Mock(spec=httpx.Response)
         ok_resp.status_code = 200
 
         mock_client = AsyncMock()
@@ -445,7 +445,7 @@ class TestOllamaHealthCheck:
         cfg = _make_config()
         provider = OllamaProvider(cfg)
 
-        bad_resp = MagicMock(spec=httpx.Response)
+        bad_resp = Mock(spec=httpx.Response)
         bad_resp.status_code = 503
 
         mock_client = AsyncMock()

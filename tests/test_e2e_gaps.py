@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from typer.testing import CliRunner
@@ -212,7 +212,7 @@ class TestWebSocketProxyCloseGuard:
         """websocket.close() must not be called if state != CONNECTED."""
         from starlette.websockets import WebSocketState
 
-        mock_ws = MagicMock()
+        mock_ws = Mock()
         mock_ws.client_state = WebSocketState.DISCONNECTED
         mock_ws.close = AsyncMock()
 
@@ -228,7 +228,7 @@ class TestWebSocketProxyCloseGuard:
     async def test_close_guard_calls_when_connected(self) -> None:
         from starlette.websockets import WebSocketState
 
-        mock_ws = MagicMock()
+        mock_ws = Mock()
         mock_ws.client_state = WebSocketState.CONNECTED
         mock_ws.close = AsyncMock()
 
@@ -244,7 +244,7 @@ class TestWebSocketProxyCloseGuard:
         """RuntimeError from double-close must be swallowed, not propagated."""
         from starlette.websockets import WebSocketState
 
-        mock_ws = MagicMock()
+        mock_ws = Mock()
         mock_ws.client_state = WebSocketState.CONNECTED
         mock_ws.close = AsyncMock(side_effect=RuntimeError(
             "Unexpected ASGI message 'websocket.close'"

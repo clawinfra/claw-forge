@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -91,7 +91,7 @@ class TestAzureProvider:
             "model": "gpt-4",
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
 
@@ -114,7 +114,7 @@ class TestAzureProvider:
             api_key="key",
         )
         provider = AzureProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 429
         mock_resp.headers = {"retry-after": "2.0"}
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -132,7 +132,7 @@ class TestAzureProvider:
             api_key="key",
         )
         provider = AzureProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 401
         provider._client.post = AsyncMock(return_value=mock_resp)
 
@@ -149,7 +149,7 @@ class TestAzureProvider:
             api_key="key",
         )
         provider = AzureProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 500
         mock_resp.text = "Internal server error"
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -204,7 +204,7 @@ class TestAzureProvider:
             "model": "gpt-4",
             "usage": {"prompt_tokens": 10, "completion_tokens": 3},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -255,16 +255,16 @@ class TestBedrockProvider:
         cfg = _cfg(provider_type=ProviderType.BEDROCK)
         provider = BedrockProvider(cfg)
 
-        mock_block = MagicMock()
+        mock_block = Mock()
         mock_block.text = "bedrock response"
-        mock_response = MagicMock()
+        mock_response = Mock()
         mock_response.content = [mock_block]
         mock_response.model = "claude-3"
         mock_response.usage.input_tokens = 10
         mock_response.usage.output_tokens = 5
         mock_response.stop_reason = "end_turn"
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
@@ -281,7 +281,7 @@ class TestBedrockProvider:
         cfg = _cfg(provider_type=ProviderType.BEDROCK)
         provider = BedrockProvider(cfg)
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(
             side_effect=Exception("ThrottlingException: rate limit exceeded")
         )
@@ -297,7 +297,7 @@ class TestBedrockProvider:
         cfg = _cfg(provider_type=ProviderType.BEDROCK)
         provider = BedrockProvider(cfg)
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(side_effect=Exception("connection error"))
         provider._client = mock_client
 
@@ -311,16 +311,16 @@ class TestBedrockProvider:
         cfg = _cfg(provider_type=ProviderType.BEDROCK)
         provider = BedrockProvider(cfg)
 
-        mock_block = MagicMock()
+        mock_block = Mock()
         mock_block.text = "ok"
-        mock_response = MagicMock()
+        mock_response = Mock()
         mock_response.content = [mock_block]
         mock_response.model = "claude-3"
         mock_response.usage.input_tokens = 5
         mock_response.usage.output_tokens = 2
         mock_response.stop_reason = "end_turn"
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
@@ -340,7 +340,7 @@ class TestBedrockProvider:
 
         cfg = _cfg(provider_type=ProviderType.BEDROCK)
         provider = BedrockProvider(cfg)
-        provider._client = MagicMock()
+        provider._client = Mock()
         provider._client.messages.create = AsyncMock(side_effect=RuntimeError("error"))
         result = await provider.health_check()
         assert result is False
@@ -386,7 +386,7 @@ class TestOpenAICompatProvider:
             "model": "llama3",
             "usage": {"prompt_tokens": 8, "completion_tokens": 4},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -403,7 +403,7 @@ class TestOpenAICompatProvider:
             base_url="http://localhost:11434",
         )
         provider = OpenAICompatProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 429
         mock_resp.headers = {}
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -420,7 +420,7 @@ class TestOpenAICompatProvider:
             base_url="http://localhost:11434",
         )
         provider = OpenAICompatProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 403
         provider._client.post = AsyncMock(return_value=mock_resp)
 
@@ -452,7 +452,7 @@ class TestOpenAICompatProvider:
             base_url="http://localhost:11434",
         )
         provider = OpenAICompatProvider(cfg)
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 503
         mock_resp.text = "Service Unavailable"
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -476,7 +476,7 @@ class TestOpenAICompatProvider:
             "model": "llama3",
             "usage": {"prompt_tokens": 5, "completion_tokens": 2},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -499,7 +499,7 @@ class TestOpenAICompatProvider:
             "model": "llama3",
             "usage": {},
         }
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = response_data
         provider._client.post = AsyncMock(return_value=mock_resp)
@@ -567,16 +567,16 @@ class TestVertexProvider:
         cfg = _cfg(provider_type=ProviderType.VERTEX, project_id="proj")
         provider = VertexProvider(cfg)
 
-        mock_block = MagicMock()
+        mock_block = Mock()
         mock_block.text = "vertex response"
-        mock_response = MagicMock()
+        mock_response = Mock()
         mock_response.content = [mock_block]
         mock_response.model = "claude-3"
         mock_response.usage.input_tokens = 10
         mock_response.usage.output_tokens = 5
         mock_response.stop_reason = "end_turn"
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
@@ -590,7 +590,7 @@ class TestVertexProvider:
         cfg = _cfg(provider_type=ProviderType.VERTEX, project_id="proj")
         provider = VertexProvider(cfg)
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(
             side_effect=Exception("quota exceeded: 429")
         )
@@ -606,7 +606,7 @@ class TestVertexProvider:
         cfg = _cfg(provider_type=ProviderType.VERTEX, project_id="proj")
         provider = VertexProvider(cfg)
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(side_effect=Exception("generic error"))
         provider._client = mock_client
 
@@ -620,16 +620,16 @@ class TestVertexProvider:
         cfg = _cfg(provider_type=ProviderType.VERTEX, project_id="proj")
         provider = VertexProvider(cfg)
 
-        mock_block = MagicMock()
+        mock_block = Mock()
         mock_block.text = "ok"
-        mock_response = MagicMock()
+        mock_response = Mock()
         mock_response.content = [mock_block]
         mock_response.model = "claude-3"
         mock_response.usage.input_tokens = 5
         mock_response.usage.output_tokens = 2
         mock_response.stop_reason = "end_turn"
 
-        mock_client = MagicMock()
+        mock_client = Mock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
@@ -649,7 +649,7 @@ class TestVertexProvider:
 
         cfg = _cfg(provider_type=ProviderType.VERTEX, project_id="proj")
         provider = VertexProvider(cfg)
-        provider._client = MagicMock()
+        provider._client = Mock()
         provider._client.messages.create = AsyncMock(side_effect=RuntimeError("error"))
         result = await provider.health_check()
         assert result is False

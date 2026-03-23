@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -38,7 +38,7 @@ class TestPushToRemote:
         from claw_forge.git.commits import push_to_remote
 
         with patch("claw_forge.git.commits._run_git") as mock_git:
-            mock_git.return_value = MagicMock(stdout="main\n")
+            mock_git.return_value = Mock(stdout="main\n")
             result = push_to_remote(tmp_path, remote="origin", branch="main")
 
         assert result["success"] is True
@@ -63,7 +63,7 @@ class TestPushToRemote:
             patch("claw_forge.git.commits.current_branch", return_value="feat/my-branch"),
             patch("claw_forge.git.commits._run_git") as mock_git,
         ):
-            mock_git.return_value = MagicMock(stdout="")
+            mock_git.return_value = Mock(stdout="")
             result = push_to_remote(tmp_path, remote="origin")
 
         assert result["branch"] == "feat/my-branch"
@@ -78,7 +78,7 @@ class TestAutoPushHook:
         from claw_forge.agent.hooks import auto_push_hook
 
         hook = auto_push_hook(str(tmp_path))
-        result = await hook(input_data={}, tool_use_id=None, context=MagicMock())
+        result = await hook(input_data={}, tool_use_id=None, context=Mock())
         # Should return silently, not raise
         assert result is not None
 
@@ -89,7 +89,7 @@ class TestAutoPushHook:
 
         _run_git(["init"], tmp_path)
         hook = auto_push_hook(str(tmp_path))
-        result = await hook(input_data={}, tool_use_id=None, context=MagicMock())
+        result = await hook(input_data={}, tool_use_id=None, context=Mock())
         assert result is not None
 
     @pytest.mark.asyncio
@@ -104,7 +104,7 @@ class TestAutoPushHook:
             }) as mock_push,
         ):
             hook = auto_push_hook(str(tmp_path))
-            result = await hook(input_data={}, tool_use_id=None, context=MagicMock())
+            result = await hook(input_data={}, tool_use_id=None, context=Mock())
 
         mock_push.assert_called_once()
         assert result is not None
@@ -123,7 +123,7 @@ class TestAutoPushHook:
         ):
             hook = auto_push_hook(str(tmp_path))
             # Should not raise even on push failure
-            result = await hook(input_data={}, tool_use_id=None, context=MagicMock())
+            result = await hook(input_data={}, tool_use_id=None, context=Mock())
 
         assert result is not None
 

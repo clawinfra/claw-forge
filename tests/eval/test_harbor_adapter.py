@@ -5,7 +5,7 @@ No real HTTP connections made.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -27,7 +27,7 @@ def _make_response(
     text: str = "",
 ) -> httpx.Response:
     """Build a mock httpx.Response."""
-    resp = MagicMock(spec=httpx.Response)
+    resp = Mock(spec=httpx.Response)
     resp.status_code = status_code
     resp.json.return_value = json_data
     resp.text = text
@@ -45,7 +45,7 @@ def _make_adapter(
         request_timeout_s=request_timeout_s,
         task_timeout_s=task_timeout_s,
     )
-    adapter._client = MagicMock(spec=httpx.Client)
+    adapter._client = Mock(spec=httpx.Client)
     return adapter
 
 
@@ -290,7 +290,7 @@ class TestRunTask:
         mock_run_agent = AsyncMock(return_value="agent output text")
         with (
             patch("scripts.eval.harbor_adapter.run_agent", mock_run_agent, create=True),
-            patch.dict("sys.modules", {"claw_forge.sdk": MagicMock(run_agent=mock_run_agent)}),
+            patch.dict("sys.modules", {"claw_forge.sdk": Mock(run_agent=mock_run_agent)}),
         ):
             result = await adapter.run_task(
                     "task-001",
@@ -335,7 +335,7 @@ class TestRunTask:
         adapter._client.request.return_value = _make_response(200, SAMPLE_START_RESPONSE)
 
         mock_run_agent = AsyncMock(side_effect=RuntimeError("agent crashed"))
-        with patch.dict("sys.modules", {"claw_forge.sdk": MagicMock(run_agent=mock_run_agent)}):
+        with patch.dict("sys.modules", {"claw_forge.sdk": Mock(run_agent=mock_run_agent)}):
             result = await adapter.run_task(
                 "task-001",
                 config=ABLATION_CONFIGS["A"],
@@ -352,7 +352,7 @@ class TestRunTask:
             _make_response(200, score_resp),
         ]
         mock_run_agent = AsyncMock(return_value="output")
-        with patch.dict("sys.modules", {"claw_forge.sdk": MagicMock(run_agent=mock_run_agent)}):
+        with patch.dict("sys.modules", {"claw_forge.sdk": Mock(run_agent=mock_run_agent)}):
             result = await adapter.run_task(
                 "task-001",
                 config=ABLATION_CONFIGS["E"],

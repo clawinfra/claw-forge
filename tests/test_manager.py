@@ -1,6 +1,6 @@
 """Tests for ProviderPoolManager."""
 
-from unittest.mock import MagicMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -47,7 +47,7 @@ class TestProviderPoolManager:
         primary_mock = MockProvider(configs[0])
         fallback_mock = MockProvider(configs[1])
         mgr._providers = [primary_mock, fallback_mock]
-        mgr._circuits = {p.name: mgr._circuits.get(p.name, MagicMock()) for p in mgr._providers}
+        mgr._circuits = {p.name: mgr._circuits.get(p.name, Mock()) for p in mgr._providers}
         # Re-init circuits
         from claw_forge.pool.health import CircuitBreaker
         mgr._circuits = {p.name: CircuitBreaker(p.name) for p in mgr._providers}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -14,9 +14,9 @@ from claw_forge.state.service import ConnectionManager
 # ---------------------------------------------------------------------------
 
 
-def _make_ws(*, fail_on_send: bool = False) -> MagicMock:
+def _make_ws(*, fail_on_send: bool = False) -> Mock:
     """Create a mock WebSocket with async send_json."""
-    ws = MagicMock()
+    ws = Mock()
     if fail_on_send:
         ws.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
     else:

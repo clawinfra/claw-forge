@@ -7,7 +7,7 @@ Targets the code that was responsible for recurring 500 errors:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -159,7 +159,7 @@ async def test_proxy_streams_and_closes_response():
     async def _fake_aiter_raw():
         yield b'{"id": "abc"}'
 
-    mock_resp = MagicMock()
+    mock_resp = Mock()
     mock_resp.status_code = 200
     mock_resp.headers = {"content-type": "application/json"}
     mock_resp.aiter_raw = _fake_aiter_raw
@@ -188,7 +188,7 @@ async def test_proxy_strips_api_prefix():
     async def _fake_aiter_raw():
         yield b"[]"
 
-    mock_resp = MagicMock()
+    mock_resp = Mock()
     mock_resp.status_code = 200
     mock_resp.headers = {}
     mock_resp.aiter_raw = _fake_aiter_raw

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -220,7 +220,7 @@ def test_plan_with_valid_spec(tmp_path: Path) -> None:
 """
     )
     cfg = _yaml_config(tmp_path)
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "done"
     mock_result.metadata = {
@@ -287,7 +287,7 @@ def test_fix_report_not_found(tmp_path: Path) -> None:
 
 
 def test_fix_with_description(tmp_path: Path) -> None:
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "Fixed"
     mock_result.files_modified = ["app.py"]
@@ -306,7 +306,7 @@ def test_fix_with_description(tmp_path: Path) -> None:
 
 
 def test_fix_failure(tmp_path: Path) -> None:
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = False
     mock_result.output = "could not reproduce"
 
@@ -326,7 +326,7 @@ def test_fix_with_report_file(tmp_path: Path) -> None:
     report_path.write_text(
         "# Bug Report\n\n**Title:** Login 500 error\n\n## Steps\n1. go to /login\n"
     )
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "done"
     mock_result.files_modified = []
@@ -372,7 +372,7 @@ def test_add_with_spec(tmp_path: Path) -> None:
 </project>
 """
     )
-    mock_result = MagicMock()
+    mock_result = Mock()
     mock_result.success = True
     mock_result.output = "ok"
     mock_result.files_modified = []
@@ -706,7 +706,7 @@ def test_http_get_status_error() -> None:
     """_http_get exits on HTTP errors."""
     from claw_forge.cli import _http_get
 
-    mock_resp = MagicMock()
+    mock_resp = Mock()
     mock_resp.status_code = 500
     mock_resp.text = "Internal error"
     mock_resp.json.return_value = {}
@@ -724,7 +724,7 @@ def test_http_post_status_error() -> None:
     """_http_post exits on HTTP errors."""
     from claw_forge.cli import _http_post
 
-    mock_resp = MagicMock()
+    mock_resp = Mock()
     mock_resp.status_code = 404
     mock_resp.text = "Not found"
     mock_resp.json.return_value = {}
@@ -814,15 +814,15 @@ class TestEnsureStateService:
         """If port is bound and /info confirms same project, returns the port (no restart)."""
         import json
         import socket
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import Mock, patch
 
         from claw_forge import __version__
         from claw_forge.cli import _ensure_state_service
 
         # Simulate /info returning the same project path and current version
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.__exit__ = Mock(return_value=False)
         mock_resp.read.return_value = json.dumps(
             {"project_path": str(tmp_path.resolve()), "claw_forge_version": __version__}
         ).encode()
@@ -839,22 +839,22 @@ class TestEnsureStateService:
         """If /info returns a different project, the service is restarted."""
         import json
         import socket
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import Mock, patch
 
         from claw_forge.cli import _ensure_state_service
 
         wrong_project = "/some/other/project"
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.__exit__ = Mock(return_value=False)
         mock_resp.read.return_value = json.dumps(
             {"project_path": wrong_project}
         ).encode()
 
-        mock_popen = MagicMock()
-        mock_conn = MagicMock()
+        mock_popen = Mock()
+        mock_conn = Mock()
         mock_conn.__enter__ = lambda s: s
-        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.__exit__ = Mock(return_value=False)
         with socket.socket() as srv:
             srv.bind(("127.0.0.1", 0))
             srv.listen(1)
@@ -879,18 +879,18 @@ class TestEnsureStateService:
     def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
         """When port is free, Popen is called and returns True."""
         import json
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import Mock, patch
 
         from claw_forge.cli import _ensure_state_service
-        mock_popen = MagicMock()
-        mock_conn = MagicMock()
+        mock_popen = Mock()
+        mock_conn = Mock()
         mock_conn.__enter__ = lambda s: s
-        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.__exit__ = Mock(return_value=False)
         # Mock /info response so _verify_info succeeds after startup
-        mock_resp = MagicMock()
+        mock_resp = Mock()
         mock_resp.read.return_value = json.dumps({"project_path": str(tmp_path)}).encode()
         mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.__exit__ = Mock(return_value=False)
         # First call: port free (OSError). Second call: port ready after start.
         with (
             patch("subprocess.Popen", mock_popen),

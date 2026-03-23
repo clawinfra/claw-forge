@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -78,7 +78,7 @@ class TestParseArgs:
 
 class TestAblationRunnerStateFile:
     def test_load_state_empty_on_missing_file(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         runner = AblationRunner(adapter, output_dir=tmp_path)
         state = runner._load_state()
         assert len(state.completed_keys) == 0
@@ -98,7 +98,7 @@ class TestAblationRunnerStateFile:
         }
         state_file.write_text(json.dumps(result_data) + "\n")
 
-        adapter = MagicMock()
+        adapter = Mock()
         runner = AblationRunner(adapter, output_dir=tmp_path)
         state = runner._load_state()
         assert "A:task-001:1" in state.completed_keys
@@ -106,7 +106,7 @@ class TestAblationRunnerStateFile:
         assert state.completed_results[0].score == 85.0
 
     def test_append_result_creates_file(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         runner = AblationRunner(adapter, output_dir=tmp_path)
         result = _make_result()
         runner._append_result(result)
@@ -118,7 +118,7 @@ class TestAblationRunnerStateFile:
         assert data["score"] == 80.0
 
     def test_append_result_idempotent_on_reopen(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         runner = AblationRunner(adapter, output_dir=tmp_path)
         runner._append_result(_make_result(config_id="A", task_id="task-001", rep=1))
         runner._append_result(_make_result(config_id="A", task_id="task-002", rep=1))
@@ -130,7 +130,7 @@ class TestAblationRunnerStateFile:
         assert json.loads(lines[1])["task_id"] == "task-002"
 
     def test_make_key_format(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         runner = AblationRunner(adapter, output_dir=tmp_path)
         assert runner._make_key("A", "task-042", 2) == "A:task-042:2"
 
@@ -151,7 +151,7 @@ class TestAblationRunnerRun:
         }
         state_file.write_text(json.dumps(result_data) + "\n")
 
-        adapter = MagicMock()
+        adapter = Mock()
         adapter.run_task = AsyncMock(return_value=_make_result(config_id="A", task_id="task-002"))
         runner = AblationRunner(adapter, output_dir=tmp_path)
 
@@ -164,7 +164,7 @@ class TestAblationRunnerRun:
 
     @pytest.mark.asyncio
     async def test_run_collects_all_results(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         adapter.run_task = AsyncMock(return_value=_make_result())
         runner = AblationRunner(adapter, output_dir=tmp_path)
 
@@ -177,7 +177,7 @@ class TestAblationRunnerRun:
 
     @pytest.mark.asyncio
     async def test_run_dry_run_passes_flag_to_adapter(self, tmp_path: Path) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         adapter.run_task = AsyncMock(
             return_value=_make_result(error="dry-run", score=0.0)
         )
@@ -204,7 +204,7 @@ class TestAblationRunnerRun:
             with open(state_file, "a") as f:
                 f.write(json.dumps(data) + "\n")
 
-        adapter = MagicMock()
+        adapter = Mock()
         adapter.run_task = AsyncMock(return_value=_make_result())
         runner = AblationRunner(adapter, output_dir=tmp_path)
 
@@ -219,7 +219,7 @@ class TestAblationRunnerRun:
     async def test_run_fetches_tasks_from_adapter_when_none_provided(
         self, tmp_path: Path
     ) -> None:
-        adapter = MagicMock()
+        adapter = Mock()
         adapter.list_tasks.return_value = ["task-001"]
         adapter.run_task = AsyncMock(return_value=_make_result())
         runner = AblationRunner(adapter, output_dir=tmp_path)
@@ -231,7 +231,7 @@ class TestAblationRunnerRun:
 
 class TestMainCLI:
     def test_main_exits_0_on_success(self, tmp_path: Path) -> None:
-        mock_adapter = MagicMock()
+        mock_adapter = Mock()
         mock_adapter.list_tasks.return_value = ["task-001"]
         mock_adapter.run_task = AsyncMock(
             return_value=_make_result(score=90.0, passed=True)
@@ -258,7 +258,7 @@ class TestMainCLI:
         assert exit_code == 2
 
     def test_main_exits_1_on_partial_errors(self, tmp_path: Path) -> None:
-        mock_adapter = MagicMock()
+        mock_adapter = Mock()
         mock_adapter.list_tasks.return_value = ["task-001", "task-002"]
 
         results = [

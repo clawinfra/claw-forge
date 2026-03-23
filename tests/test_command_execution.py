@@ -8,8 +8,8 @@ import sys
 import unittest.mock
 
 # Mock claude_agent_sdk if not installed
-sys.modules.setdefault("claude_agent_sdk", unittest.mock.MagicMock())
-sys.modules.setdefault("claude_agent_sdk.types", unittest.mock.MagicMock())
+sys.modules.setdefault("claude_agent_sdk", unittest.mock.Mock())
+sys.modules.setdefault("claude_agent_sdk.types", unittest.mock.Mock())
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

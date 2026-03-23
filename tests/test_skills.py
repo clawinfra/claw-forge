@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -180,7 +180,7 @@ class TestRunnerAutoInjectSkills:
         """auto_inject_skills=False: no skill plugins are injected."""
         import claw_forge.agent.runner as runner_module
 
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:
@@ -206,7 +206,7 @@ class TestRunnerAutoInjectSkills:
         """auto_inject_skills=True with agent_type='coding' injects skill plugins."""
         import claw_forge.agent.runner as runner_module
 
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:
@@ -241,7 +241,7 @@ class TestRunnerAutoInjectSkills:
         from claw_forge.lsp import lsp_plugins_for_extensions
 
         explicit = lsp_plugins_for_extensions({".py"})
-        mock_options_class = MagicMock(return_value=MagicMock())
+        mock_options_class = Mock(return_value=Mock())
 
         async def fake_query(prompt: str, options: object):  # type: ignore[return]
             if False:

@@ -13,7 +13,7 @@ import sys
 import types
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import pytest_asyncio
@@ -192,7 +192,7 @@ class TestBroadcastAgentLog:
     @pytest.mark.asyncio
     async def test_agent_log_event_format(self) -> None:
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = Mock()
         ws.accept = AsyncMock()
         ws.send_json = AsyncMock()
         await mgr.connect(ws)
@@ -232,9 +232,9 @@ class TestCreateAppFromEnv:
 
 class TestRegressionStatus:
     async def test_with_run_count(self, client: AsyncClient, service: AgentStateService) -> None:
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.run_count = 3
-        mock_last = MagicMock()
+        mock_last = Mock()
         mock_last.to_dict.return_value = {"passed": True, "failures": []}
         mock_reviewer.last_result = mock_last
         service._reviewer = mock_reviewer
@@ -249,7 +249,7 @@ class TestRegressionStatus:
     async def test_with_run_count_no_last_result(
         self, client: AsyncClient, service: AgentStateService
     ) -> None:
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.run_count = 1
         mock_reviewer.last_result = None
         service._reviewer = mock_reviewer
@@ -315,7 +315,7 @@ class TestPoolStatusYAMLFallback:
         assert data["strategy"] == "round_robin"
 
     async def test_yaml_exception_returns_empty(self, service: AgentStateService) -> None:
-        bad_path = MagicMock()
+        bad_path = Mock()
         bad_path.read_text.side_effect = OSError("permission denied")
         app = service.create_app()
         transport = ASGITransport(app=app)
@@ -359,7 +359,7 @@ class TestDispatcherStopReviewer:
         from claw_forge.orchestrator.dispatcher import Dispatcher
 
         d = Dispatcher(handler=lambda t: {})
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.stop = AsyncMock()
         d._reviewer = mock_reviewer
         await d.stop_reviewer()
@@ -412,8 +412,8 @@ class TestDispatcherReviewerNotify:
 
         d = Dispatcher(handler=_ok)
         d.add_task(TaskNode("t1", "coding", 1, []))
-        mock_reviewer = MagicMock()
-        mock_reviewer.notify_feature_completed = MagicMock()
+        mock_reviewer = Mock()
+        mock_reviewer.notify_feature_completed = Mock()
         d._reviewer = mock_reviewer
         result = await d.run()
         assert result.all_succeeded
@@ -680,8 +680,8 @@ class TestDispatcherStartReviewer:
             return {}
 
         d = Dispatcher(handler=_noop)
-        mock_state = MagicMock()
-        mock_reviewer = MagicMock()
+        mock_state = Mock()
+        mock_reviewer = Mock()
         mock_reviewer.start = AsyncMock()
 
         # ParallelReviewer is imported inside start_reviewer body
@@ -1014,9 +1014,9 @@ class TestEnsureStateServicePortScan:
                 patch("urllib.request.urlopen", side_effect=Exception("no info")),
                 patch(
                     "socket.create_connection",
-                    side_effect=lambda addr, **kw: MagicMock(
+                    side_effect=lambda addr, **kw: Mock(
                         __enter__=lambda s: s,
-                        __exit__=MagicMock(return_value=False),
+                        __exit__=Mock(return_value=False),
                     ),
                 ),
                 pytest.raises(RuntimeError, match="Port.*occupied"),
@@ -1162,13 +1162,13 @@ class TestRouterDefaultReturn:
         # Manually set an unrecognised strategy value to hit the default return
         router.strategy = "UNKNOWN"  # type: ignore[assignment]
         # Create a minimal provider mock
-        prov = MagicMock()
+        prov = Mock()
         prov.name = "p1"
         prov.config.enabled = True
         prov.config.priority = 1
         prov.config.max_rpm = 0
-        tracker_mock = MagicMock()
-        tracker_mock.is_rate_limited = MagicMock(return_value=False)
+        tracker_mock = Mock()
+        tracker_mock.is_rate_limited = Mock(return_value=False)
         cb = CircuitBreaker(name="p1", failure_threshold=5, recovery_timeout=60)
         result = router.select([prov], {"p1": cb}, tracker_mock)
         assert len(result) == 1
@@ -1192,7 +1192,7 @@ class TestRegressionStatusRunCount0:
     async def test_run_count_0_with_reviewer(
         self, client: AsyncClient, service: AgentStateService
     ) -> None:
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.run_count = 0
         service._reviewer = mock_reviewer
         r = await client.get("/regression/status")
@@ -1246,7 +1246,7 @@ class TestPlanFailure:
         cfg_path = tmp_path / "claw-forge.yaml"
         cfg_path.write_text("project: test\nproviders: {}\n")
 
-        mock_result = MagicMock()
+        mock_result = Mock()
         mock_result.success = False
         mock_result.output = "parsing error"
 
@@ -1279,7 +1279,7 @@ class TestPlanWithPhases:
         cfg_path = tmp_path / "claw-forge.yaml"
         cfg_path.write_text("project: test\nproviders: {}\n")
 
-        mock_result = MagicMock()
+        mock_result = Mock()
         mock_result.success = True
         mock_result.output = "done"
         mock_result.metadata = {
@@ -1317,7 +1317,7 @@ class TestPlanNoFeatureCount:
         cfg_path = tmp_path / "claw-forge.yaml"
         cfg_path.write_text("project: test\nproviders: {}\n")
 
-        mock_result = MagicMock()
+        mock_result = Mock()
         mock_result.success = True
         mock_result.output = "done"
         mock_result.metadata = {"project_name": "test", "custom": "val"}

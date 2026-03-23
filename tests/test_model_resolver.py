@@ -5,11 +5,11 @@ import sys
 import unittest.mock
 
 # Mock claude_agent_sdk before any claw_forge imports
-sys.modules["claude_agent_sdk"] = unittest.mock.MagicMock()
-sys.modules["claude_agent_sdk.types"] = unittest.mock.MagicMock()
+sys.modules["claude_agent_sdk"] = unittest.mock.Mock()
+sys.modules["claude_agent_sdk.types"] = unittest.mock.Mock()
 
 import asyncio  # noqa: E402
-from unittest.mock import AsyncMock, MagicMock  # noqa: E402
+from unittest.mock import AsyncMock, Mock  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -213,8 +213,8 @@ class TestProviderHintInPool:
         pm = object.__new__(ProviderPoolManager)
         pm._providers = providers
         pm._circuits = circuits or {}
-        pm._tracker = MagicMock()
-        pm._router = MagicMock()
+        pm._tracker = Mock()
+        pm._router = Mock()
         pm._max_retries = 3
         pm._backoff_base = 1.0
         pm._backoff_max = 30.0
@@ -222,19 +222,19 @@ class TestProviderHintInPool:
         pm._active_tiers = {p.name: [] for p in providers}
         return pm
 
-    def _make_provider(self, name: str, enabled: bool = True) -> MagicMock:
-        p = MagicMock()
+    def _make_provider(self, name: str, enabled: bool = True) -> Mock:
+        p = Mock()
         p.name = name
-        p.config = MagicMock()
+        p.config = Mock()
         p.config.enabled = enabled
         p.config.cost_per_mtok_input = 3.0
         p.config.cost_per_mtok_output = 15.0
         return p
 
-    def _make_circuit(self, state_val: str = "closed") -> MagicMock:
+    def _make_circuit(self, state_val: str = "closed") -> Mock:
         from claw_forge.pool.health import CircuitState
 
-        cb = MagicMock()
+        cb = Mock()
         cb.state = CircuitState(state_val)
         return cb
 
@@ -324,7 +324,7 @@ class TestProviderHintInPool:
 
         cb = self._make_circuit("closed")
         pm = self._make_pool_manager([provider], {"proxy-c": cb})
-        pm._router.select = MagicMock(return_value=[provider])
+        pm._router.select = Mock(return_value=[provider])
 
         result = await ProviderPoolManager.execute(
             pm,

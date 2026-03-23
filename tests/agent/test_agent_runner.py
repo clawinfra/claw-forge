@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
 import claude_agent_sdk
 import pytest
@@ -15,16 +15,16 @@ from claw_forge.pool.providers.base import ProviderConfig, ProviderType
 # ---------------------------------------------------------------------------
 
 def _make_assistant_message(text: str) -> claude_agent_sdk.AssistantMessage:
-    block = MagicMock(spec=claude_agent_sdk.TextBlock)
+    block = Mock(spec=claude_agent_sdk.TextBlock)
     block.text = text
-    msg = MagicMock(spec=claude_agent_sdk.AssistantMessage)
+    msg = Mock(spec=claude_agent_sdk.AssistantMessage)
     msg.content = [block]
     msg.__class__ = type("AssistantMessage", (), {})
     return msg
 
 
 def _make_result_message(result: str) -> claude_agent_sdk.ResultMessage:
-    msg = MagicMock(spec=claude_agent_sdk.ResultMessage)
+    msg = Mock(spec=claude_agent_sdk.ResultMessage)
     msg.result = result
     msg.total_cost_usd = 0.001
     msg.__class__ = type("ResultMessage", (), {})
@@ -407,9 +407,9 @@ class TestRunAgentProjectDir:
     @pytest.mark.asyncio
     async def test_project_dir_injects_sdk_mcp(self):
         """With project_dir and use_sdk_mcp=True, SDK MCP server is injected."""
-        from unittest.mock import MagicMock
+        from unittest.mock import Mock
 
-        fake_mcp = MagicMock()
+        fake_mcp = Mock()
 
         with (
             patch("claw_forge.agent.runner.query") as mock_query,

@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -221,7 +221,7 @@ class TestParallelReviewer:
         """Completing enough features triggers a test run."""
         (tmp_path / "pyproject.toml").write_text("[project]")
         svc = self._make_service()
-        svc.ws_manager = MagicMock()
+        svc.ws_manager = Mock()
         svc.ws_manager.broadcast = AsyncMock()
 
         reviewer = ParallelReviewer(
@@ -404,7 +404,7 @@ class TestBroadcast:
     ) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]")
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
-        svc.ws_manager = MagicMock()
+        svc.ws_manager = Mock()
         svc.ws_manager.broadcast = AsyncMock()
 
         reviewer = ParallelReviewer(
@@ -462,7 +462,7 @@ class TestRegressionStatusEndpoint:
     async def test_with_result(self) -> None:
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
         # Simulate a reviewer with a result
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.run_count = 2
         mock_reviewer.has_pending_work = False
         mock_reviewer.last_result = RegressionResult(
@@ -512,7 +512,7 @@ class TestRegressionStatusEndpoint:
             db.add_all([t1, t2])
             await db.commit()
 
-        mock_reviewer = MagicMock()
+        mock_reviewer = Mock()
         mock_reviewer.run_count = 5
         mock_reviewer.last_result = RegressionResult(
             passed=False,
@@ -1038,7 +1038,7 @@ class TestLoopBranches:
     async def test_loop_no_test_command(self, tmp_path: Path) -> None:
         """When no test command is detected, loop logs warning and continues."""
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
-        svc.ws_manager = MagicMock()
+        svc.ws_manager = Mock()
         svc.ws_manager.broadcast = AsyncMock()
 
         reviewer = ParallelReviewer(
@@ -1058,7 +1058,7 @@ class TestLoopBranches:
     async def test_loop_stop_before_run(self, tmp_path: Path) -> None:
         """Loop exits cleanly when stop_event is set before feature triggers."""
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
-        svc.ws_manager = MagicMock()
+        svc.ws_manager = Mock()
         svc.ws_manager.broadcast = AsyncMock()
 
         reviewer = ParallelReviewer(
@@ -1075,7 +1075,7 @@ class TestLoopBranches:
     async def test_loop_broadcasts_bugfix_dispatched(self, tmp_path: Path) -> None:
         """When tests fail and bugfix tasks are created, bugfix_dispatched is broadcast."""
         svc = AgentStateService(database_url="sqlite+aiosqlite://")
-        svc.ws_manager = MagicMock()
+        svc.ws_manager = Mock()
         svc.ws_manager.broadcast = AsyncMock()
 
         reviewer = ParallelReviewer(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -33,12 +33,12 @@ def _make_config(**kwargs: Any) -> ProviderConfig:
     return ProviderConfig(**defaults)
 
 
-def _make_response(status: int = 200, json_body: dict[str, Any] | None = None) -> MagicMock:
-    resp = MagicMock(spec=httpx.Response)
+def _make_response(status: int = 200, json_body: dict[str, Any] | None = None) -> Mock:
+    resp = Mock(spec=httpx.Response)
     resp.status_code = status
     resp.text = ""
     resp.headers = {}
-    resp.json = MagicMock(
+    resp.json = Mock(
         return_value=json_body
         or {
             "id": "msg_test",

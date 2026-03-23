@@ -247,10 +247,10 @@ class TestTaskHistoryEdgeCases:
 
     def test_history_malformed_entries_skipped(self, git_repo: Path) -> None:
         """Verify that malformed log entries (< 4 parts) are skipped."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import Mock, patch
 
         # Mock _run_git to return a malformed log entry
-        mock_result = MagicMock()
+        mock_result = Mock()
         # Two entries: one malformed (too few separators) and one valid
         sep = "---COMMIT-SEP---"
         mock_result.stdout = (
@@ -264,9 +264,9 @@ class TestTaskHistoryEdgeCases:
 
     def test_history_empty_hash_entry_skipped(self, git_repo: Path) -> None:
         """Entries where full_hash is empty after stripping are skipped."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import Mock, patch
 
-        mock_result = MagicMock()
+        mock_result = Mock()
         sep = "---COMMIT-SEP---"
         mock_result.stdout = (
             f"  {sep}empty hash{sep}2024-01-01{sep}body{sep}\n"

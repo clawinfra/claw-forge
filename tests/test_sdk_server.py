@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -31,19 +31,19 @@ def _fake_tool(name: str, description: str, schema: Any) -> Any:  # type: ignore
     return decorator
 
 
-_mock_mcp_config = MagicMock()
-_mock_create_sdk = MagicMock(return_value=_mock_mcp_config)
+_mock_mcp_config = Mock()
+_mock_create_sdk = Mock(return_value=_mock_mcp_config)
 
-_sdk_mock = MagicMock()
+_sdk_mock = Mock()
 _sdk_mock.tool = _fake_tool
-_sdk_mock.McpSdkServerConfig = MagicMock
+_sdk_mock.McpSdkServerConfig = Mock
 _sdk_mock.create_sdk_mcp_server = _mock_create_sdk
 
-_sdk_types_mock = MagicMock()
+_sdk_types_mock = Mock()
 sys.modules["claude_agent_sdk"] = _sdk_mock
 sys.modules["claude_agent_sdk.types"] = _sdk_types_mock
 
-# Force reimport to pick up our custom mock (not a stale MagicMock from
+# Force reimport to pick up our custom mock (not a stale Mock from
 # another test module that may have imported first).
 import importlib  # noqa: E402
 
@@ -59,7 +59,7 @@ from claw_forge.mcp.sdk_server import (  # noqa: E402
 
 # Restore the real claude_agent_sdk modules so that test files collected
 # afterward (e.g. tests/test_lsp.py, tests/test_skills.py) import
-# claw_forge.lsp with the real SdkPluginConfig TypedDict, not a MagicMock.
+# claw_forge.lsp with the real SdkPluginConfig TypedDict, not a Mock.
 for _key in ("claude_agent_sdk", "claude_agent_sdk.types"):
     sys.modules.pop(_key, None)
 importlib.import_module("claude_agent_sdk")
