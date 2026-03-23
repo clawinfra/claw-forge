@@ -704,6 +704,38 @@ class TestHasPendingWork:
         assert reviewer.has_pending_work is False
 
 
+class TestNotifyFeatureCompleted:
+    """Tests for notify_feature_completed."""
+
+    def test_appends_trigger_with_task_id(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        reviewer.notify_feature_completed(task_id="t-1", task_name="Task 1")
+        assert len(reviewer._pending_triggers) == 1
+        assert reviewer._pending_triggers[0] == {"id": "t-1", "name": "Task 1"}
+
+    def test_skips_trigger_without_task_id(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        reviewer.notify_feature_completed()
+        assert len(reviewer._pending_triggers) == 0
+
+    def test_triggers_event_at_interval(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc,
+            interval_features=2,
+        )
+        reviewer.notify_feature_completed(task_id="t-1", task_name="A")
+        assert not reviewer._feature_event.is_set()
+        reviewer.notify_feature_completed(task_id="t-2", task_name="B")
+        assert reviewer._feature_event.is_set()
+
+
 # ── Bugfix dispatch tests ──────────────────────────────────────────────
 
 
