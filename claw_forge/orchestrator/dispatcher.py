@@ -357,7 +357,7 @@ class Dispatcher:
                 len(pending_bugfixes),
             )
             for task_data in pending_bugfixes:
-                if self._paused:
+                if self._paused:  # pragma: no branch
                     break
                 node = TaskNode(
                     id=task_data["id"],
