@@ -464,6 +464,7 @@ class TestRegressionStatusEndpoint:
         # Simulate a reviewer with a result
         mock_reviewer = MagicMock()
         mock_reviewer.run_count = 2
+        mock_reviewer.has_pending_work = False
         mock_reviewer.last_result = RegressionResult(
             passed=True,
             total=10,
@@ -484,6 +485,7 @@ class TestRegressionStatusEndpoint:
         assert data["run_count"] == 2
         assert data["last_result"]["passed"] is True
         assert data["last_result"]["total"] == 10
+        assert data["has_pending_work"] is False
 
     @pytest.mark.asyncio
     async def test_with_failed_result(self, tmp_path: Path) -> None:

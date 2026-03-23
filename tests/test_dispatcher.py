@@ -449,13 +449,54 @@ class TestBugfixSweep:
         from claw_forge.orchestrator.dispatcher import DispatchResult
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
 
         result = DispatchResult()
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             await d._run_bugfix_sweep(result)
 
         assert len(result.completed) == 0
         assert len(result.failed) == 0
+
+    @pytest.mark.asyncio
+    async def test_sweep_records_failed_bugfix(self) -> None:
+        """Sweep records failure when bugfix task handler raises."""
+        d = Dispatcher(handler=_failing_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_session_resp = MagicMock()
+        mock_session_resp.json.return_value = [{"id": "sess-1"}]
+
+        mock_tasks_resp = MagicMock()
+        mock_tasks_resp.json.return_value = [
+            {
+                "id": "fail",
+                "plugin_name": "bugfix",
+                "status": "pending",
+                "priority": 10,
+                "category": "bugfix",
+                "steps": [],
+                "description": "Fix regression",
+            },
+        ]
+
+        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
+        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2.json.return_value = []
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=[
+            mock_session_resp, mock_tasks_resp,
+            mock_session_resp_2, mock_tasks_resp_2,
+        ])
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await d._run_bugfix_sweep(result)
+
+        assert "fail" in result.failed
