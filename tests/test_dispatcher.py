@@ -502,6 +502,67 @@ class TestBugfixSweep:
         assert "fail" in result.failed
 
     @pytest.mark.asyncio
+    async def test_sweep_paused_mid_round(self) -> None:
+        """Sweep breaks when paused between rounds."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_session_resp = MagicMock()
+        mock_session_resp.json.return_value = [{"id": "sess-1"}]
+
+        mock_tasks_resp = MagicMock()
+        mock_tasks_resp.json.return_value = [
+            {
+                "id": "bugfix-1",
+                "plugin_name": "bugfix",
+                "status": "pending",
+                "priority": 10,
+                "category": "bugfix",
+                "steps": [],
+                "description": "Fix it",
+            },
+        ]
+
+        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
+        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2.json.return_value = [
+            {
+                "id": "bugfix-2",
+                "plugin_name": "bugfix",
+                "status": "pending",
+                "priority": 10,
+                "category": "bugfix",
+                "steps": [],
+                "description": "Fix another",
+            },
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=[
+            mock_session_resp, mock_tasks_resp,
+            mock_session_resp_2, mock_tasks_resp_2,
+        ])
+
+        original = d._run_task
+
+        async def _pause_then_run(node: TaskNode) -> dict:
+            res = await original(node)
+            d.pause()
+            return res
+
+        d._run_task = _pause_then_run  # type: ignore[assignment]
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await d._run_bugfix_sweep(result)
+
+        assert "bugfix-1" in result.completed
+        assert "bugfix-2" not in result.completed
+
+    @pytest.mark.asyncio
     async def test_sweep_no_sessions_returns(self) -> None:
         """Sweep exits early when no sessions exist."""
         d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
