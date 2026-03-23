@@ -662,6 +662,46 @@ class TestTestCommandProperty:
         assert reviewer.test_command is None
 
 
+# ── has_pending_work property ──────────────────────────────────────────
+
+
+class TestHasPendingWork:
+    """Tests for the has_pending_work property."""
+
+    def test_false_when_idle(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        assert reviewer.has_pending_work is False
+
+    def test_true_when_running(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        reviewer._running = True
+        assert reviewer.has_pending_work is True
+
+    def test_true_when_event_set(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        reviewer._feature_event.set()
+        assert reviewer.has_pending_work is True
+
+    def test_false_after_running_cleared(self, tmp_path: Path) -> None:
+        svc = AgentStateService(database_url="sqlite+aiosqlite://")
+        reviewer = ParallelReviewer(
+            project_dir=tmp_path, state_service=svc
+        )
+        reviewer._running = True
+        assert reviewer.has_pending_work is True
+        reviewer._running = False
+        assert reviewer.has_pending_work is False
+
+
 # ── Bugfix dispatch tests ──────────────────────────────────────────────
 
 

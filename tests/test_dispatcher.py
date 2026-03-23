@@ -344,3 +344,118 @@ class TestCancelMonitor:
         assert resumed_mock.cancel.called
         # resume_task_ids: t-resume-node should have spawned a task
         assert len(created_tasks) >= 1
+
+
+# ── Bugfix sweep tests ────────────────────────────────────────────────────
+
+
+class TestBugfixSweep:
+    """Tests for _run_bugfix_sweep."""
+
+    @pytest.mark.asyncio
+    async def test_sweep_skipped_when_no_state_url(self) -> None:
+        """Sweep does nothing when state_url is None."""
+        d = Dispatcher(handler=_success_handler, state_url=None)
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        result = DispatchResult()
+        await d._run_bugfix_sweep(result)
+        assert len(result.completed) == 0
+        assert len(result.failed) == 0
+
+    @pytest.mark.asyncio
+    async def test_sweep_skipped_when_paused(self) -> None:
+        """Sweep does nothing when dispatcher is paused."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        d.pause()
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        result = DispatchResult()
+        await d._run_bugfix_sweep(result)
+        assert len(result.completed) == 0
+
+    @pytest.mark.asyncio
+    async def test_sweep_runs_pending_bugfix_tasks(self) -> None:
+        """Sweep picks up pending bugfix tasks and runs them."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_session_resp = MagicMock()
+        mock_session_resp.json.return_value = [{"id": "sess-1"}]
+
+        bugfix_tasks = [
+            {
+                "id": "bugfix-1",
+                "plugin_name": "bugfix",
+                "status": "pending",
+                "priority": 10,
+                "category": "bugfix",
+                "steps": ["fix it"],
+                "description": "Fix regression",
+            },
+        ]
+        mock_tasks_resp = MagicMock()
+        mock_tasks_resp.json.return_value = bugfix_tasks
+
+        # Second round returns no pending bugfixes (loop termination)
+        mock_session_resp_2 = MagicMock()
+        mock_session_resp_2.json.return_value = [{"id": "sess-1"}]
+        mock_tasks_resp_2 = MagicMock()
+        mock_tasks_resp_2.json.return_value = []
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=[
+            mock_session_resp, mock_tasks_resp,
+            mock_session_resp_2, mock_tasks_resp_2,
+        ])
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await d._run_bugfix_sweep(result)
+
+        assert "bugfix-1" in result.completed
+
+    @pytest.mark.asyncio
+    async def test_sweep_no_pending_bugfixes_exits(self) -> None:
+        """Sweep exits early when no pending bugfix tasks found."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_session_resp = AsyncMock()
+        mock_session_resp.json.return_value = [{"id": "sess-1"}]
+
+        mock_tasks_resp = AsyncMock()
+        mock_tasks_resp.json.return_value = [
+            {"id": "t-1", "plugin_name": "coding", "status": "completed"},
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=[mock_session_resp, mock_tasks_resp])
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await d._run_bugfix_sweep(result)
+
+        assert len(result.completed) == 0
+
+    @pytest.mark.asyncio
+    async def test_sweep_handles_http_error(self) -> None:
+        """Sweep handles network errors gracefully."""
+        d = Dispatcher(handler=_success_handler, state_url="http://localhost:8420")
+        from claw_forge.orchestrator.dispatcher import DispatchResult
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
+
+        result = DispatchResult()
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await d._run_bugfix_sweep(result)
+
+        assert len(result.completed) == 0
+        assert len(result.failed) == 0

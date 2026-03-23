@@ -7,14 +7,50 @@ from pathlib import Path
 from typing import Any
 
 _GITIGNORE_ENTRIES = [
-    ".claw-forge/state.log",
-    ".claw-forge/state.db",
-    ".claw-forge/state.db-journal",
-    ".claw-forge/state.db-wal",
-    ".claw-forge/state.db-shm",
-    ".claw-forge/worktrees/",
+    # ── claw-forge runtime ────────────────────────────────────────
+    ".claw-forge/",
+    # ── Python ────────────────────────────────────────────────────
     "__pycache__/",
-    "*.pyc",
+    "*.py[cod]",
+    "*.pyo",
+    ".venv/",
+    "venv/",
+    "env/",
+    ".env",
+    "*.egg-info/",
+    "*.egg",
+    "dist/",
+    "build/",
+    ".eggs/",
+    "*.whl",
+    # ── Node / JS / TS ────────────────────────────────────────────
+    "node_modules/",
+    ".next/",
+    ".nuxt/",
+    # ── Rust ──────────────────────────────────────────────────────
+    "target/",
+    # ── Go ────────────────────────────────────────────────────────
+    "vendor/",
+    # ── IDE / editor ──────────────────────────────────────────────
+    ".idea/",
+    ".vscode/",
+    "*.swp",
+    "*.swo",
+    "*~",
+    ".DS_Store",
+    "Thumbs.db",
+    # ── Testing / coverage ────────────────────────────────────────
+    ".coverage",
+    "htmlcov/",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+    "coverage/",
+    # ── Misc ──────────────────────────────────────────────────────
+    "*.log",
+    "*.bak",
+    "*.tmp",
+    "*.orig",
 ]
 
 

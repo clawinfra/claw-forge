@@ -25,15 +25,15 @@ class TestInitOrDetect:
         gitignore = tmp_path / ".gitignore"
         assert gitignore.exists()
         content = gitignore.read_text()
-        assert ".claw-forge/state.log" in content
+        assert ".claw-forge/" in content
 
     def test_preserves_existing_gitignore(self, tmp_path: Path) -> None:
         gitignore = tmp_path / ".gitignore"
-        gitignore.write_text("node_modules/\n")
+        gitignore.write_text("custom-entry\n")
         init_or_detect(tmp_path)
         content = gitignore.read_text()
-        assert "node_modules/" in content
-        assert ".claw-forge/state.log" in content
+        assert "custom-entry" in content
+        assert ".claw-forge/" in content
 
     def test_returns_main_branch_name(self, tmp_path: Path) -> None:
         result = init_or_detect(tmp_path)
@@ -46,25 +46,37 @@ class TestEnsureGitignore:
         assert (tmp_path / ".gitignore").exists()
 
     def test_appends_missing_entries(self, tmp_path: Path) -> None:
-        (tmp_path / ".gitignore").write_text("*.pyc\n")
+        (tmp_path / ".gitignore").write_text("custom-entry\n")
         ensure_gitignore(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
-        assert "*.pyc" in content
-        assert ".claw-forge/state.log" in content
+        assert "custom-entry" in content
+        assert ".claw-forge/" in content
+        assert "__pycache__/" in content
+        assert "node_modules/" in content
+        assert ".DS_Store" in content
 
     def test_no_duplicates_on_rerun(self, tmp_path: Path) -> None:
         ensure_gitignore(tmp_path)
         ensure_gitignore(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
-        assert content.count(".claw-forge/state.log") == 1
+        assert content.count(".claw-forge/") == 1
 
     def test_appends_newline_when_missing(self, tmp_path: Path) -> None:
         """When existing .gitignore doesn't end with newline, one is prepended."""
-        (tmp_path / ".gitignore").write_text("*.pyc")  # no trailing \n
+        (tmp_path / ".gitignore").write_text("custom-entry")  # no trailing \n
         ensure_gitignore(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
-        assert content.startswith("*.pyc\n")
-        assert ".claw-forge/state.log" in content
+        assert content.startswith("custom-entry\n")
+        assert ".claw-forge/" in content
+
+    def test_skips_entries_already_present(self, tmp_path: Path) -> None:
+        """Entries already in .gitignore are not duplicated."""
+        (tmp_path / ".gitignore").write_text("node_modules/\n__pycache__/\n")
+        ensure_gitignore(tmp_path)
+        content = (tmp_path / ".gitignore").read_text()
+        assert content.count("node_modules/") == 1
+        assert content.count("__pycache__/") == 1
+        assert ".claw-forge/" in content
 
 
 class TestDetectDefaultBranch:
