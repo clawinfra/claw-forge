@@ -80,6 +80,51 @@ class TestSessionInit:
         assert orphan["status"] == "pending"
         assert data.get("orphans_reset", 0) == 1
 
+    async def test_adopts_orphaned_tasks(
+        self, app_client: AsyncClient,
+    ) -> None:
+        """Tasks whose session_id doesn't exist should be adopted."""
+        # Create a valid session
+        sess = await app_client.post(
+            "/sessions", json={"project_path": "/my/project"}
+        )
+        sid = sess.json()["id"]
+
+        # Insert a task with a non-existent session_id (simulates DB recovery
+        # where the session row was lost but task rows survived).
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from claw_forge.state.models import Task
+
+        # Access the engine through the service's internal state
+        resp = await app_client.get("/info")
+        db_url = resp.json()["database_url"]
+        engine = create_async_engine(db_url, echo=False)
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        async with async_session() as db:
+            orphan_task = Task(
+                session_id="nonexistent-session-id",
+                plugin_name="coding",
+                description="Orphaned task",
+                status="completed",
+            )
+            db.add(orphan_task)
+            await db.commit()
+            orphan_id = orphan_task.id
+        await engine.dispose()
+
+        # Call init — should adopt the orphaned task
+        resp = await app_client.post(
+            "/sessions/init", json={"project_path": "/my/project"}
+        )
+        data = resp.json()
+        assert data["tasks_adopted"] == 1
+
+        # Verify the orphan is now visible via the session's task list
+        tasks_resp = await app_client.get(f"/sessions/{sid}/tasks")
+        task_ids = [t["id"] for t in tasks_resp.json()]
+        assert orphan_id in task_ids
+
     async def test_excludes_completed_tasks(
         self, app_client: AsyncClient,
     ) -> None:

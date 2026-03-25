@@ -506,12 +506,46 @@ class AgentStateService:
             ]:
                 with suppress(Exception):
                     await conn.execute(text(ddl))
+            # Sanitize empty-string datetime columns left by DB corruption
+            # recovery — SQLAlchemy's datetime processor raises ValueError
+            # on '' (expects NULL or valid ISO format).
+            # created_at has a NOT NULL constraint so it gets a sentinel value.
+            await conn.execute(text(
+                "UPDATE tasks SET created_at = '1970-01-01 00:00:00' "
+                "WHERE created_at = ''"
+            ))
+            for col in ("started_at", "completed_at"):
+                await conn.execute(text(
+                    f"UPDATE tasks SET {col} = NULL WHERE {col} = ''"  # noqa: S608
+                ))
+
             # Reset tasks orphaned in 'running' state by a previously crashed runner;
             # also clear any project_paused flag so the dispatcher isn't permanently blocked.
             await conn.execute(
                 text("UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'")
             )
             await conn.execute(text("UPDATE sessions SET project_paused=0"))
+
+            # Adopt tasks whose session_id no longer exists in the sessions
+            # table (can happen after DB corruption recovery where the session
+            # row was lost but task rows survived).  Re-parent them to the
+            # most recent session for this project so the UI can display them.
+            if self._project_path is not None:
+                row = (await conn.execute(text(
+                    "SELECT id FROM sessions WHERE project_path = :pp "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ), {"pp": str(self._project_path)})).first()
+                if row is not None:
+                    target_sid = row[0]
+                    result = await conn.execute(text(
+                        "UPDATE tasks SET session_id = :sid "
+                        "WHERE session_id NOT IN (SELECT id FROM sessions)"
+                    ), {"sid": target_sid})
+                    if result.rowcount:  # type: ignore[union-attr]
+                        logger.info(
+                            "Adopted %d orphaned task(s) into session %s",
+                            result.rowcount, target_sid,
+                        )
 
     async def dispose(self) -> None:
         """Dispose the async engine, closing all pooled connections.
@@ -651,6 +685,27 @@ class AgentStateService:
                     await db.commit()
                     await db.refresh(session)
 
+                # Adopt orphaned tasks whose session_id no longer exists
+                # (can happen after DB corruption recovery where the session
+                # row was lost but task rows survived).
+                orphan_sub = select(Session.id)
+                adopted = await db.execute(
+                    select(Task).where(
+                        Task.session_id.notin_(orphan_sub)
+                    )
+                )
+                adopted_tasks: Sequence[Task] = adopted.scalars().all()  # type: ignore[assignment]
+                tasks_adopted = 0
+                for t in adopted_tasks:
+                    t.session_id = session.id
+                    tasks_adopted += 1
+                if tasks_adopted:
+                    await db.commit()
+                    logger.info(
+                        "Adopted %d orphaned task(s) into session %s",
+                        tasks_adopted, session.id,
+                    )
+
                 # Fetch actionable tasks (pending, failed, running/orphaned)
                 result = await db.execute(
                     select(Task)
@@ -676,6 +731,7 @@ class AgentStateService:
                 return {
                     "session_id": session.id,
                     "orphans_reset": orphans_reset,
+                    "tasks_adopted": tasks_adopted,
                     "tasks": [_task_summary(t) for t in tasks],
                 }
 

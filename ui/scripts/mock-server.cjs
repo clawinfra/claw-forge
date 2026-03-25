@@ -7,52 +7,53 @@
 const http = require('http');
 
 const MOCK_FEATURES = [
-  { id: 1, name: "User authentication", status: "completed", agent_type: "coding", cost_usd: 0.042, duration_ms: 45000 },
-  { id: 2, name: "JWT token refresh", status: "completed", agent_type: "coding", cost_usd: 0.031, duration_ms: 32000 },
-  { id: 3, name: "Password reset flow", status: "completed", agent_type: "coding", cost_usd: 0.055, duration_ms: 58000 },
-  { id: 4, name: "User profile CRUD", status: "completed", agent_type: "coding", cost_usd: 0.038, duration_ms: 41000 },
-  { id: 5, name: "File upload endpoint", status: "completed", agent_type: "coding", cost_usd: 0.029, duration_ms: 28000 },
-  { id: 6, name: "Stripe payment integration", status: "running", agent_type: "coding", cost_usd: 0.011, duration_ms: null },
-  { id: 7, name: "Email notification service", status: "running", agent_type: "coding", cost_usd: 0.008, duration_ms: null },
-  { id: 8, name: "Admin dashboard", status: "pending", agent_type: "coding", cost_usd: 0, duration_ms: null },
-  { id: 9, name: "Analytics tracking", status: "pending", agent_type: "coding", cost_usd: 0, duration_ms: null },
-  { id: 10, name: "Rate limiting middleware", status: "failed", agent_type: "coding", cost_usd: 0.019, duration_ms: 22000 },
-  { id: 11, name: "WebSocket chat feature", status: "failed", agent_type: "coding", cost_usd: 0.024, duration_ms: 31000 },
-  { id: 12, name: "Two-factor authentication", status: "blocked", agent_type: "coding", cost_usd: 0, duration_ms: null },
+  { id: "f-001", name: "User authentication",       category: "Auth",       status: "completed", cost_usd: 0.042 },
+  { id: "f-002", name: "JWT token refresh",          category: "Auth",       status: "completed", cost_usd: 0.031 },
+  { id: "f-003", name: "Password reset flow",        category: "Auth",       status: "completed", cost_usd: 0.055 },
+  { id: "f-004", name: "User profile CRUD",          category: "Users",      status: "completed", cost_usd: 0.038 },
+  { id: "f-005", name: "File upload endpoint",       category: "Storage",    status: "completed", cost_usd: 0.029 },
+  { id: "f-006", name: "Stripe payment integration", category: "Payments",   status: "running",   cost_usd: 0.011 },
+  { id: "f-007", name: "Email notification service", category: "Messaging",  status: "running",   cost_usd: 0.008 },
+  { id: "f-008", name: "Admin dashboard",            category: "Admin",      status: "pending",   cost_usd: 0 },
+  { id: "f-009", name: "Analytics tracking",         category: "Analytics",  status: "pending",   cost_usd: 0 },
+  { id: "f-010", name: "Rate limiting middleware",   category: "API",        status: "failed",    cost_usd: 0.019 },
+  { id: "f-011", name: "WebSocket chat feature",     category: "Messaging",  status: "failed",    cost_usd: 0.024 },
+  { id: "f-012", name: "Two-factor authentication",  category: "Auth",       status: "blocked",   cost_usd: 0 },
+  { id: "f-013", name: "OAuth2 social login",        category: "Auth",       status: "completed", cost_usd: 0.036 },
+  { id: "f-014", name: "Role-based access control",  category: "Auth",       status: "completed", cost_usd: 0.041 },
+  { id: "f-015", name: "API rate limiter config",    category: "API",        status: "running",   cost_usd: 0.006 },
+  { id: "f-016", name: "Database migration system",  category: "Database",   status: "completed", cost_usd: 0.033 },
+  { id: "f-017", name: "Audit log tracking",         category: "Monitoring", status: "pending",   cost_usd: 0 },
+  { id: "f-018", name: "Health check endpoints",     category: "API",        status: "completed", cost_usd: 0.018 },
 ];
 
 const MOCK_SESSION = {
   id: "sess_demo_001",
-  name: "my-api v1.0",
-  project: "my-api",
+  project_path: "/home/user/my-api",
   status: "running",
   created_at: new Date(Date.now() - 3600000).toISOString(),
-  updated_at: new Date().toISOString(),
-  features: MOCK_FEATURES,
-  total_cost_usd: MOCK_FEATURES.reduce((sum, f) => sum + f.cost_usd, 0).toFixed(3),
-  completed: MOCK_FEATURES.filter(f => f.status === 'completed').length,
-  running: MOCK_FEATURES.filter(f => f.status === 'running').length,
-  pending: MOCK_FEATURES.filter(f => f.status === 'pending').length,
-  failed: MOCK_FEATURES.filter(f => f.status === 'failed').length,
-  blocked: MOCK_FEATURES.filter(f => f.status === 'blocked').length,
+  task_count: MOCK_FEATURES.length,
 };
 
 const MOCK_TASKS = MOCK_FEATURES.map((f, i) => ({
-  id: String(f.id),
+  id: f.id,
   name: f.name,
-  category: "backend",
+  plugin_name: "coding",
+  category: f.category,
+  description: `${f.name}: Full implementation of ${f.name.toLowerCase()}`,
   status: f.status,
-  priority: i + 1,
-  depends_on: i > 0 && f.status === 'blocked' ? [String(i)] : [],
+  priority: i,
+  depends_on: f.status === 'blocked' ? ["f-003"] : [],
+  steps: [],
   cost_usd: f.cost_usd,
-  input_tokens: Math.floor(f.cost_usd * 1000),
-  output_tokens: Math.floor(f.cost_usd * 500),
-  progress: f.status === 'completed' ? 100 : f.status === 'running' ? Math.floor(Math.random() * 80) + 10 : 0,
-  session_id: f.status === 'running' ? `agent_${f.id}` : undefined,
-  error_message: f.status === 'failed' ? 'Test assertion failed: expected 200 got 500' : undefined,
-  created_at: new Date(Date.now() - (12 - i) * 300000).toISOString(),
-  started_at: ['running', 'completed', 'failed'].includes(f.status) ? new Date(Date.now() - (12 - i) * 200000).toISOString() : undefined,
-  completed_at: f.status === 'completed' ? new Date(Date.now() - (12 - i) * 100000).toISOString() : undefined,
+  input_tokens: Math.floor(f.cost_usd * 30000),
+  output_tokens: Math.floor(f.cost_usd * 8000),
+  active_subagents: f.status === 'running' ? 1 : 0,
+  error_message: f.status === 'failed' ? 'Test assertion failed: expected 200 got 500' : null,
+  result_json: f.status === 'completed' ? { output: "Feature implemented successfully" } : null,
+  created_at: new Date(Date.now() - (18 - i) * 300000).toISOString(),
+  started_at: ['running', 'completed', 'failed'].includes(f.status) ? new Date(Date.now() - (18 - i) * 200000).toISOString() : null,
+  completed_at: f.status === 'completed' ? new Date(Date.now() - (18 - i) * 100000).toISOString() : null,
 }));
 
 const MOCK_POOL_STATUS = {
@@ -200,19 +201,24 @@ const server = http.createServer((req, res) => {
   }
 
   if (path === '/health') return sendJson(res, { status: 'ok' });
-  if (path === '/sessions') return sendJson(res, [MOCK_SESSION]);
+  if (path === '/sessions') return sendJson(res, [{
+    id: MOCK_SESSION.id,
+    project_path: MOCK_SESSION.project_path,
+    status: MOCK_SESSION.status,
+    created_at: MOCK_SESSION.created_at,
+  }]);
   if (path.match(/^\/sessions\/[^/]+$/) && !path.includes('/tasks') && !path.includes('/summary')) return sendJson(res, MOCK_SESSION);
   if (path.match(/^\/sessions\/[^/]+\/tasks$/)) return sendJson(res, MOCK_TASKS);
   if (path.match(/^\/sessions\/[^/]+\/summary$/)) return sendJson(res, {
     name: "my-api",
-    total_features: 12,
-    passing: 5,
-    failing: 2,
-    pending: 2,
-    in_progress: 2,
-    blocked: 1,
-    active_agents: 2,
-    total_cost_usd: 0.257,
+    total_features: MOCK_FEATURES.length,
+    passing: MOCK_FEATURES.filter(f => f.status === 'completed').length,
+    failing: MOCK_FEATURES.filter(f => f.status === 'failed').length,
+    pending: MOCK_FEATURES.filter(f => f.status === 'pending').length,
+    in_progress: MOCK_FEATURES.filter(f => f.status === 'running').length,
+    blocked: MOCK_FEATURES.filter(f => f.status === 'blocked').length,
+    active_agents: MOCK_FEATURES.filter(f => f.status === 'running').length,
+    total_cost_usd: MOCK_FEATURES.reduce((s, f) => s + f.cost_usd, 0),
   });
   if (path === '/pool/status') return sendJson(res, MOCK_POOL_STATUS);
   if (path === '/regression/status') return sendJson(res, MOCK_REGRESSION);

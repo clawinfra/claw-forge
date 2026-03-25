@@ -238,6 +238,247 @@ def test_plan_with_valid_spec(tmp_path: Path) -> None:
     assert "test-project" in result.output
 
 
+def _plan_spec_path(tmp_path: Path) -> Path:
+    spec_path = tmp_path / "spec.xml"
+    spec_path.write_text("<project/>")
+    return spec_path
+
+
+def _plan_mock_result(features: list[dict[str, Any]] | None = None) -> Mock:
+    m = Mock()
+    m.success = True
+    m.output = "done"
+    m.metadata = {
+        "feature_count": len(features) if features else 0,
+        "project_name": "test-project",
+        "category_counts": {"core": len(features) if features else 0},
+        "wave_count": 1,
+        "phases": [],
+        "features": features or [],
+    }
+    return m
+
+
+def test_plan_reconcile_shows_summary(tmp_path: Path) -> None:
+    """plan reconciles with existing session and prints summary."""
+    spec_path = _plan_spec_path(tmp_path)
+    cfg = _yaml_config(tmp_path)
+    features = [
+        {"index": i, "name": f"F{i}", "description": f"Desc {i}",
+         "category": "core", "steps": [], "depends_on_indices": []}
+        for i in range(3)
+    ]
+
+    # First call: plugin.execute → mock_result; second: _write_plan_to_db → real
+    first_result = _plan_mock_result(features)
+    call_count = 0
+    _real_run = __import__("asyncio").run
+
+    def _side_effect(coro: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            coro.close()
+            return first_result
+        return _real_run(coro)
+
+    with patch("claw_forge.cli.asyncio.run", side_effect=_side_effect):
+        runner.invoke(
+            app, ["plan", str(spec_path), "--config", str(cfg),
+                  "--project", str(tmp_path)]
+        )
+
+    # Second plan with extra features → reconcile output
+    features_v2 = features + [
+        {"index": 3, "name": "F3", "description": "Desc 3",
+         "category": "core", "steps": [], "depends_on_indices": []},
+    ]
+    second_result = _plan_mock_result(features_v2)
+    call_count = 0
+
+    def _side_effect2(coro: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            coro.close()
+            return second_result
+        return _real_run(coro)
+
+    with patch("claw_forge.cli.asyncio.run", side_effect=_side_effect2):
+        result = runner.invoke(
+            app, ["plan", str(spec_path), "--config", str(cfg),
+                  "--project", str(tmp_path)]
+        )
+    assert result.exit_code == 0
+    assert "Reconciled" in result.output
+    assert "3 pending" in result.output
+    assert "1 new" in result.output
+
+
+def test_plan_reconcile_with_completed_and_failed(tmp_path: Path) -> None:
+    """Reconciliation summary shows completed and failed counts."""
+    import asyncio as _aio
+
+    from claw_forge.cli import _write_plan_to_db
+
+    spec_path = _plan_spec_path(tmp_path)
+    cfg = _yaml_config(tmp_path)
+    features = [
+        {"index": i, "name": f"F{i}", "description": f"Desc {i}",
+         "category": "core", "steps": [], "depends_on_indices": []}
+        for i in range(3)
+    ]
+
+    # Seed tasks directly
+    _aio.run(_write_plan_to_db(tmp_path, "proj", features))
+
+    # Mark F0 completed, F1 failed via DB
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from claw_forge.state.models import Task
+
+    db_url = f"sqlite+aiosqlite:///{tmp_path / '.claw-forge' / 'state.db'}"
+
+    async def _mark() -> None:
+        engine = create_async_engine(db_url)
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            for t in (await db.execute(select(Task))).scalars():
+                if "F0:" in (t.description or ""):
+                    t.status = "completed"
+                elif "F1:" in (t.description or ""):
+                    t.status = "failed"
+            await db.commit()
+        await engine.dispose()
+
+    _aio.run(_mark())
+
+    # Plan with one extra feature
+    features_v2 = features + [
+        {"index": 3, "name": "F3", "description": "Desc 3",
+         "category": "core", "steps": [], "depends_on_indices": []},
+    ]
+    mock_result = _plan_mock_result(features_v2)
+    call_count = 0
+    _real_run = _aio.run
+
+    def _side_effect(coro: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            coro.close()
+            return mock_result
+        return _real_run(coro)
+
+    with patch("claw_forge.cli.asyncio.run", side_effect=_side_effect):
+        result = runner.invoke(
+            app, ["plan", str(spec_path), "--config", str(cfg),
+                  "--project", str(tmp_path)]
+        )
+    assert result.exit_code == 0
+    assert "Reconciled" in result.output
+    assert "1 completed" in result.output
+    assert "1 failed" in result.output
+    assert "1 pending" in result.output
+    assert "1 new" in result.output
+
+
+def test_plan_reconcile_other_status(tmp_path: Path) -> None:
+    """Reconciliation summary shows 'other' count for non-standard statuses."""
+    import asyncio as _aio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from claw_forge.cli import _write_plan_to_db
+    from claw_forge.state.models import Task
+
+    spec_path = _plan_spec_path(tmp_path)
+    cfg = _yaml_config(tmp_path)
+    features = [
+        {"index": 0, "name": "F0", "description": "Desc 0",
+         "category": "core", "steps": [], "depends_on_indices": []},
+    ]
+    _aio.run(_write_plan_to_db(tmp_path, "proj", features))
+
+    # Mark task as "blocked"
+    db_url = f"sqlite+aiosqlite:///{tmp_path / '.claw-forge' / 'state.db'}"
+
+    async def _mark() -> None:
+        engine = create_async_engine(db_url)
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            for t in (await db.execute(select(Task))).scalars():
+                t.status = "blocked"
+            await db.commit()
+        await engine.dispose()
+
+    _aio.run(_mark())
+
+    features_v2 = features + [
+        {"index": 1, "name": "F1", "description": "Desc 1",
+         "category": "core", "steps": [], "depends_on_indices": []},
+    ]
+    mock_result = _plan_mock_result(features_v2)
+    call_count = 0
+    _real_run = _aio.run
+
+    def _side_effect(coro: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            coro.close()
+            return mock_result
+        return _real_run(coro)
+
+    with patch("claw_forge.cli.asyncio.run", side_effect=_side_effect):
+        result = runner.invoke(
+            app, ["plan", str(spec_path), "--config", str(cfg),
+                  "--project", str(tmp_path)]
+        )
+    assert result.exit_code == 0
+    assert "Reconciled" in result.output
+    assert "1 other" in result.output
+    assert "1 new" in result.output
+
+
+def test_plan_fresh_flag(tmp_path: Path) -> None:
+    """--fresh creates a new session even when one exists."""
+    import asyncio as _aio
+
+    from claw_forge.cli import _write_plan_to_db
+
+    spec_path = _plan_spec_path(tmp_path)
+    cfg = _yaml_config(tmp_path)
+    features = [
+        {"index": 0, "name": "F0", "description": "Desc 0",
+         "category": "core", "steps": [], "depends_on_indices": []},
+    ]
+
+    # Seed tasks
+    _aio.run(_write_plan_to_db(tmp_path, "proj", features))
+
+    mock_result = _plan_mock_result(features)
+    call_count = 0
+    _real_run = _aio.run
+
+    def _side_effect(coro: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            coro.close()
+            return mock_result
+        return _real_run(coro)
+
+    with patch("claw_forge.cli.asyncio.run", side_effect=_side_effect):
+        result = runner.invoke(
+            app, ["plan", str(spec_path), "--config", str(cfg),
+                  "--project", str(tmp_path), "--fresh"]
+        )
+    assert result.exit_code == 0
+    # --fresh should NOT show reconciliation output
+    assert "Reconciled" not in result.output
+
+
 # ── pause / resume ────────────────────────────────────────────────────────────
 
 

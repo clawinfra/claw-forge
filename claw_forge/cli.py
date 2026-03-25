@@ -561,6 +561,11 @@ def run(
 
         session_id: str = init_data["session_id"]
 
+        if init_data.get("tasks_adopted", 0):
+            console.print(
+                f"[green]Adopted {init_data['tasks_adopted']} orphaned task(s) "
+                "into current session (recovered after DB repair)[/green]"
+            )
         if init_data.get("orphans_reset", 0):
             console.print(
                 f"[yellow]Reset {init_data['orphans_reset']} orphaned task(s) "
@@ -1454,11 +1459,25 @@ async def _migrate_schema(engine: Any) -> None:
 
 
 async def _write_plan_to_db(
-    project_path: Path, project_name: str, features: list[dict[str, Any]]
-) -> None:
-    """Create .claw-forge/state.db and persist parsed features as pending tasks."""
+    project_path: Path,
+    project_name: str,  # noqa: ARG001
+    features: list[dict[str, Any]],
+    *,
+    fresh: bool = False,
+) -> dict[str, int]:
+    """Persist parsed features as pending tasks, reconciling with existing state.
+
+    By default, finds the existing session for *project_path* and only inserts
+    features that don't already have a matching task (by description).  Existing
+    completed/failed/pending tasks are left untouched.
+
+    Pass ``fresh=True`` to force a brand-new session with all tasks from scratch.
+
+    Returns a summary dict: ``{existing_completed, existing_pending, …, new}``.
+    """
     import uuid
 
+    from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from claw_forge.state.models import Base, Task
@@ -1475,23 +1494,56 @@ async def _write_plan_to_db(
 
     async_session = async_sessionmaker(engine, expire_on_commit=False)
     async with async_session() as db:
-        # Create a session row
-        session_id = str(uuid.uuid4())
-        db_sess = DbSession(
-            id=session_id,
-            project_path=str(project_path),
-            status="pending",
-        )
-        db.add(db_sess)
-        await db.flush()
+        # ── Find or create session ────────────────────────────────────────
+        session_id: str | None = None
+        existing_by_desc: dict[str, Task] = {}
 
-        # Map feature index → task UUID for cross-feature dep wiring
+        if not fresh:
+            result = await db.execute(
+                select(DbSession)
+                .where(DbSession.project_path == str(project_path))
+                .where(DbSession.status.in_(["running", "pending"]))
+                .order_by(DbSession.created_at.desc())
+                .limit(1)
+            )
+            existing_session = result.scalar_one_or_none()
+            if existing_session is not None:
+                session_id = existing_session.id
+                # Load existing tasks keyed by description for matching
+                task_result = await db.execute(
+                    select(Task).where(Task.session_id == session_id)
+                )
+                for t in task_result.scalars():
+                    if t.description:
+                        existing_by_desc[t.description] = t
+
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            db_sess = DbSession(
+                id=session_id,
+                project_path=str(project_path),
+                status="pending",
+            )
+            db.add(db_sess)
+            await db.flush()
+
+        # ── Build index→UUID map (existing tasks reuse their UUID) ────────
         index_to_uuid: dict[int, str] = {}
-        for feat in features:
-            index_to_uuid[feat["index"]] = str(uuid.uuid4())
+        new_indices: set[int] = set()
 
-        # Create one coding task per feature with cross-feature deps wired
         for feat in features:
+            desc = f"{feat['name']}: {feat['description']}"
+            existing = existing_by_desc.get(desc)
+            if existing is not None:
+                index_to_uuid[feat["index"]] = existing.id
+            else:
+                index_to_uuid[feat["index"]] = str(uuid.uuid4())
+                new_indices.add(feat["index"])
+
+        # ── Create only the NEW tasks ─────────────────────────────────────
+        for feat in features:
+            if feat["index"] not in new_indices:
+                continue
             task_id = index_to_uuid[feat["index"]]
             cross_deps = [
                 index_to_uuid[i]
@@ -1513,6 +1565,20 @@ async def _write_plan_to_db(
         await db.commit()
 
     await engine.dispose()
+
+    # ── Build summary ─────────────────────────────────────────────────────
+    from collections import Counter
+    status_counts = Counter(t.status for t in existing_by_desc.values())
+    return {
+        "existing_completed": status_counts.get("completed", 0),
+        "existing_pending": status_counts.get("pending", 0),
+        "existing_failed": status_counts.get("failed", 0),
+        "existing_other": sum(
+            v for k, v in status_counts.items()
+            if k not in ("completed", "pending", "failed")
+        ),
+        "new": len(new_indices),
+    }
 
 
 @app.command()
@@ -1537,6 +1603,14 @@ def plan(
         "claw-forge.yaml", "--config", "-c",
         help="Path to claw-forge.yaml config file.",
     ),
+    fresh: bool = typer.Option(
+        False, "--fresh",
+        help=(
+            "Force a fresh session — ignore existing tasks and create all from scratch. "
+            "Without this flag, plan reconciles with the existing session: completed tasks "
+            "are kept, and only new/missing features are added."
+        ),
+    ),
 ) -> None:
     """Parse a spec file and generate the feature DAG in the state database.
 
@@ -1544,10 +1618,17 @@ def plan(
     atomic features, assigns dependencies, and writes the task graph to the DB.
     Uses Opus by default — errors in planning cascade through every agent run.
 
+    By default, reconciles with the existing session: completed tasks are preserved,
+    and only features missing from the DB are added as new pending tasks.  Use
+    ``--fresh`` to start a brand-new session with all tasks from scratch.
+
     Examples:
 
-        # Parse spec and build feature DAG
+        # Parse spec and build feature DAG (reconciles with existing)
         claw-forge plan app_spec.txt
+
+        # Force a clean slate
+        claw-forge plan app_spec.txt --fresh
 
         # Use Sonnet if cost matters more than planning quality
         claw-forge plan app_spec.txt --model claude-sonnet-4-5
@@ -1591,7 +1672,30 @@ def plan(
         # ── Write tasks to DB so `claw-forge run` can find them ──────────────
         features = meta.get("features", [])
         if features:
-            asyncio.run(_write_plan_to_db(project_path, meta["project_name"], features))
+            summary = asyncio.run(_write_plan_to_db(
+                project_path, meta["project_name"], features, fresh=fresh,
+            ))
+            _existing_keys = (
+                "existing_completed", "existing_pending",
+                "existing_failed", "existing_other",
+            )
+            _has_existing = any(summary.get(k, 0) for k in _existing_keys)
+            if summary.get("new", 0) > 0 and not fresh and _has_existing:
+                n_done = summary["existing_completed"]
+                n_pend = summary["existing_pending"]
+                n_fail = summary["existing_failed"]
+                n_other = summary.get("existing_other", 0)
+                n_new = summary["new"]
+                console.print("\n[bold]Reconciled with existing session:[/bold]")
+                if n_done:
+                    console.print(f"  [green]{n_done} completed[/green]  (kept)")
+                if n_pend:
+                    console.print(f"  [yellow]{n_pend} pending[/yellow]    (kept)")
+                if n_fail:
+                    console.print(f"  [red]{n_fail} failed[/red]     (kept)")
+                if n_other:
+                    console.print(f"  [dim]{n_other} other[/dim]      (kept)")
+                console.print(f"  [bold cyan]{n_new} new[/bold cyan]        (added)")
 
         if "feature_count" in meta:
             console.print(f"\n[bold green]✅ Spec parsed: {meta['project_name']}[/bold green]")

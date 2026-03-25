@@ -7,8 +7,11 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import DatabaseError as SADatabaseError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from claw_forge.state.models import Base, Session, Task
 from claw_forge.state.service import AgentStateService
 
 
@@ -19,6 +22,120 @@ class TestDbPath:
         db_path = tmp_path / "test.db"
         svc = AgentStateService(f"sqlite+aiosqlite:///{db_path}")
         assert svc._db_path() == db_path
+
+
+class TestOrphanAdoption:
+    """Tests for _init_db_inner adopting orphaned tasks."""
+
+    @pytest.mark.asyncio
+    async def test_adopts_orphaned_tasks_on_startup(self, tmp_path: Path) -> None:
+        """Tasks whose session_id doesn't exist are re-parented on startup."""
+        db_path = tmp_path / "state.db"
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+        project_path = tmp_path / "my_project"
+        project_path.mkdir()
+
+        # Create the DB with a valid session
+        engine = create_async_engine(db_url, echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        async with async_session() as db:
+            session = Session(project_path=str(project_path))
+            db.add(session)
+            await db.flush()
+            valid_sid = session.id
+
+            # Create a task with a non-existent session_id (orphan)
+            orphan = Task(
+                session_id="ghost-session-id",
+                plugin_name="coding",
+                description="Orphaned task",
+                status="completed",
+            )
+            db.add(orphan)
+            await db.commit()
+            orphan_id = orphan.id
+        await engine.dispose()
+
+        # Now start the service — _init_db_inner should adopt the orphan
+        svc = AgentStateService(db_url, project_path=project_path)
+        try:
+            await svc.init_db()
+
+            # Verify the orphan was adopted
+            engine2 = create_async_engine(db_url, echo=False)
+            async with async_sessionmaker(engine2, expire_on_commit=False)() as db:
+                result = await db.execute(
+                    text("SELECT session_id FROM tasks WHERE id = :tid"),
+                    {"tid": orphan_id},
+                )
+                row = result.first()
+                assert row is not None
+                assert row[0] == valid_sid
+            await engine2.dispose()
+        finally:
+            await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_empty_string_datetimes(self, tmp_path: Path) -> None:
+        """Empty string datetime columns from DB recovery are sanitized."""
+        db_path = tmp_path / "state.db"
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+        project_path = tmp_path / "my_project"
+        project_path.mkdir()
+
+        # Create DB with a task that has empty-string datetimes
+        engine = create_async_engine(db_url, echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            # Insert directly via SQL to bypass ORM validation
+            await conn.execute(text(
+                "INSERT INTO sessions (id, project_path, status, project_paused, created_at, updated_at) "
+                "VALUES ('s1', :pp, 'pending', 0, '2026-01-01', '2026-01-01')"
+            ), {"pp": str(project_path)})
+            await conn.execute(text(
+                "INSERT INTO tasks (id, session_id, plugin_name, status, priority, "
+                "depends_on, steps, created_at, started_at, completed_at, "
+                "input_tokens, output_tokens, cost_usd, active_subagents, bugfix_retry_count) "
+                "VALUES ('t1', 's1', 'coding', 'completed', 0, '[]', '[]', '', '', '', "
+                "0, 0, 0.0, 0, 0)"
+            ))
+        await engine.dispose()
+
+        # init_db should sanitize the empty strings without crashing
+        svc = AgentStateService(db_url, project_path=project_path)
+        try:
+            await svc.init_db()
+
+            # Verify the task is now readable via ORM
+            app = svc.create_app()
+            from httpx import ASGITransport, AsyncClient
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get("/sessions/s1/tasks")
+                assert resp.status_code == 200
+                tasks = resp.json()
+                assert len(tasks) == 1
+                assert tasks[0]["id"] == "t1"
+        finally:
+            await svc.dispose()
+
+    @pytest.mark.asyncio
+    async def test_no_adoption_without_orphans(self, tmp_path: Path) -> None:
+        """No errors when there are no orphaned tasks."""
+        db_path = tmp_path / "state.db"
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+        project_path = tmp_path / "my_project"
+        project_path.mkdir()
+
+        svc = AgentStateService(db_url, project_path=project_path)
+        try:
+            await svc.init_db()  # Should not raise
+        finally:
+            await svc.dispose()
 
 
 class TestInitDbRecovery:

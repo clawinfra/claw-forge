@@ -33,6 +33,7 @@ const SCREENSHOTS = [
     name: "feature-detail",
     description: "Feature detail drawer open",
     viewport: { width: 1440, height: 900 },
+    extraWait: 3000,
     actions: [{ click: '[data-testid="feature-card"]' }],
     path: resolve(SCREENSHOTS_DIR, 'feature-detail.png'),
   },
@@ -96,18 +97,21 @@ function spawnServer(cmd, args, opts = {}) {
 }
 
 async function runAction(page, action) {
-  if (action.click) {
+  if (action.waitFor) {
+    try {
+      await page.waitForSelector(action.waitFor, { timeout: 5000 });
+    } catch (e) {
+      console.log(`  ⚠️  Timeout waiting for: ${action.waitFor}`);
+    }
+  } else if (action.click) {
     const selectors = action.click.split(',').map(s => s.trim());
     let clicked = false;
     for (const sel of selectors) {
       try {
-        const el = await page.$(sel);
-        if (el) {
-          await el.click({ timeout: 2000 });
-          await page.waitForTimeout(800);
-          clicked = true;
-          break;
-        }
+        await page.click(sel, { timeout: 5000 });
+        await page.waitForTimeout(800);
+        clicked = true;
+        break;
       } catch (e) { }
     }
     if (!clicked) {
@@ -157,7 +161,7 @@ async function main() {
 
     try {
       await page.goto('http://localhost:5173/?session=sess_demo_001', { waitUntil: 'networkidle', timeout: 15000 });
-      await page.waitForTimeout(1500); // let data load
+      await page.waitForTimeout(shot.extraWait || 1500); // let data load
 
       for (const action of (shot.actions || [])) {
         await runAction(page, action);

@@ -7,7 +7,7 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
-[![Tests](https://img.shields.io/badge/tests-1584%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Tests](https://img.shields.io/badge/tests-2029%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![ClawHub](https://img.shields.io/badge/clawhub-claw--forge--cli-blue)](https://clawhub.com/skills/claw-forge-cli)
@@ -306,12 +306,14 @@ Paste a PRD, Notion export, or detailed README into Claude and ask:
 
 ### Adding features to a running project
 
+`claw-forge plan` **reconciles by default** — it matches spec features against existing tasks by description, keeps completed/pending/failed tasks untouched, and only inserts new features as pending tasks. Dependencies are wired correctly across old and new tasks.
+
 ```bash
 # Option A — /expand-project slash command in Claude Code
 /expand-project
 # Claude lists current features, asks what to add, POSTs them atomically
 
-# Option B — append to spec, re-init (only new features are created)
+# Option B — edit spec and re-plan (only new features are added)
 echo "
 4. Email reminders
    Description: Send due-date reminders 24h before via SendGrid.
@@ -322,6 +324,13 @@ echo "
    Depends on: 2
 " >> app_spec.txt
 claw-forge plan app_spec.txt --project my-api
+# Output:
+# Reconciled with existing session:
+#   3 completed  (kept)
+#   1 new        (added)
+
+# Use --fresh to ignore existing state and start from scratch
+claw-forge plan app_spec.txt --project my-api --fresh
 ```
 
 ---
@@ -516,7 +525,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | Command | Description | Key flags |
 |---------|-------------|-----------|
 | `claw-forge init` | Bootstrap project — scaffold `.claude/`, config, `app_spec.example.xml` | `--project`, `--config` |
-| `claw-forge plan` | Parse spec → feature DAG in state DB | `spec` (positional), `--model`, `--concurrency` |
+| `claw-forge plan` | Parse spec → feature DAG in state DB (reconciles with existing session by default) | `spec` (positional), `--model`, `--concurrency`, `--fresh` |
 | `claw-forge run` | Start agent pool, dispatch features in parallel | `--concurrency`, `--model`, `--yolo`, `--edit-mode`, `--loop-detect-threshold`, `--verify-on-exit` |
 | `claw-forge add` | Add features to existing project (single or brownfield spec) | `--spec`, `--branch/--no-branch` |
 | `claw-forge fix` | TDD bug-fix: write failing test → fix → regression suite | `--report`, `--branch/--no-branch` |
@@ -595,13 +604,13 @@ claw-forge status → /pool-status → /check-code
 
 ## Kanban UI
 
-Real-time board tracking feature progress across all agents.
+Real-time board tracking feature progress across all agents. Cards flow across five columns as agents work — with live provider health, cost tracking, and regression status in the header.
 
-![claw-forge Kanban board](website/assets/screenshots/kanban-overview.png)
+![claw-forge Kanban board — light mode with 18 features across Pending, In Progress, Passing, Failed, and Blocked columns](website/assets/screenshots/kanban-overview.png)
 
 ### Dark mode
 
-![Dark mode](website/assets/screenshots/kanban-dark.png)
+![claw-forge Kanban board — dark mode](website/assets/screenshots/kanban-dark.png)
 
 ```bash
 claw-forge dev               # API (:8420, hot-reload) + UI (:5173, HMR) in one command
@@ -612,9 +621,9 @@ claw-forge ui --dev          # http://localhost:5173/?session=<uuid>
 
 **Columns:** Pending · In Progress · Passing · Failed · Blocked
 
-**Header:** provider health dots · progress bar (X/Y passing) · live agent count · cost tracker
+**Header:** provider health dots (green/yellow/red per provider) · progress bar (X/Y passing) · live agent count · cost sparkline · regression health bar
 
-Live updates pushed over WebSocket: feature status changes, agent events, provider health, cost.
+**Real-time:** WebSocket pushes feature status changes, agent streaming logs, provider health, and cost updates. Drag-and-drop cards to retry failed tasks.
 
 ---
 
