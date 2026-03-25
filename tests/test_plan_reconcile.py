@@ -85,8 +85,8 @@ class TestPlanReconcile:
         from sqlalchemy import select
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-        from claw_forge.state.models import Task
         from claw_forge.state.models import Session as DbSession
+        from claw_forge.state.models import Task
 
         features = _make_features(["A", "B"])
         await _write_plan_to_db(tmp_path, "proj", features)

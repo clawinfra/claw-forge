@@ -92,8 +92,11 @@ class TestOrphanAdoption:
             await conn.run_sync(Base.metadata.create_all)
             # Insert directly via SQL to bypass ORM validation
             await conn.execute(text(
-                "INSERT INTO sessions (id, project_path, status, project_paused, created_at, updated_at) "
-                "VALUES ('s1', :pp, 'pending', 0, '2026-01-01', '2026-01-01')"
+                "INSERT INTO sessions "
+                "(id, project_path, status, project_paused, "
+                "created_at, updated_at) "
+                "VALUES ('s1', :pp, 'pending', 0, "
+                "'2026-01-01', '2026-01-01')"
             ), {"pp": str(project_path)})
             await conn.execute(text(
                 "INSERT INTO tasks (id, session_id, plugin_name, status, priority, "
