@@ -541,7 +541,7 @@ class AgentStateService:
                         "UPDATE tasks SET session_id = :sid "
                         "WHERE session_id NOT IN (SELECT id FROM sessions)"
                     ), {"sid": target_sid})
-                    if result.rowcount:  # type: ignore[union-attr]
+                    if result.rowcount:
                         logger.info(
                             "Adopted %d orphaned task(s) into session %s",
                             result.rowcount, target_sid,
@@ -694,7 +694,7 @@ class AgentStateService:
                         Task.session_id.notin_(orphan_sub)
                     )
                 )
-                adopted_tasks: Sequence[Task] = adopted.scalars().all()  # type: ignore[assignment]
+                adopted_tasks: Sequence[Task] = adopted.scalars().all()
                 tasks_adopted = 0
                 for t in adopted_tasks:
                     t.session_id = session.id
