@@ -6,6 +6,7 @@ the backend detection logic and SQLite-specific guards work correctly.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -59,10 +60,12 @@ class TestResolveUrl:
         assert url == "postgresql+asyncpg://env/db"
 
     def test_config_third(self, tmp_path: Path) -> None:
-        url = resolve_database_url(
-            config={"database_url": "postgresql+asyncpg://cfg/db"},
-            project_path=tmp_path,
-        )
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("CLAW_FORGE_DB_URL", None)
+            url = resolve_database_url(
+                config={"database_url": "postgresql+asyncpg://cfg/db"},
+                project_path=tmp_path,
+            )
         assert url == "postgresql+asyncpg://cfg/db"
 
     def test_default_sqlite(self, tmp_path: Path) -> None:

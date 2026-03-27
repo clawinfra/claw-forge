@@ -211,7 +211,9 @@ class TestBroadcastAgentLog:
 
 
 class TestCreateAppFromEnv:
-    def test_creates_app_with_defaults(self) -> None:
+    def test_creates_app_with_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CLAW_FORGE_DB_URL", raising=False)
+        monkeypatch.delenv("CLAW_FORGE_PROJECT_PATH", raising=False)
         from claw_forge.state.service import create_app_from_env
 
         app = create_app_from_env()
