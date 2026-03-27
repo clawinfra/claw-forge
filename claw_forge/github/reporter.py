@@ -61,7 +61,7 @@ class ProgressReporter:
         if self._worker_task is not None:
             try:
                 await asyncio.wait_for(self._worker_task, timeout=30.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._worker_task.cancel()
                 logger.warning("Progress reporter worker timed out during shutdown")
             self._worker_task = None
@@ -79,7 +79,7 @@ class ProgressReporter:
         while not self._stopped or not self._queue.empty():
             try:
                 comment = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             await self._post_safe(comment)
             self._queue.task_done()

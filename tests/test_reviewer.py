@@ -299,7 +299,7 @@ class TestRunTests:
         # Patch timeout to 0.1s for test speed
         with patch(
             "claw_forge.orchestrator.reviewer.asyncio.wait_for",
-            side_effect=asyncio.TimeoutError,
+            side_effect=TimeoutError,
         ):
             result = await reviewer._run_tests(3)
 
