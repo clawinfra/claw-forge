@@ -388,6 +388,14 @@ def run(
             "Skipped silently if remote doesn't exist. [default: disabled]"
         ),
     ),
+    github_mode: str | None = typer.Option(
+        None, "--github-mode",
+        help=(
+            "Read spec from a GitHub issue. Format: owner/repo#number.\n"
+            "Posts progress comments to the issue and opens a draft PR when complete.\n"
+            "Requires the GITHUB_TOKEN environment variable."
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -522,6 +530,87 @@ def run(
 
     claw_forge_dir = project_path / ".claw-forge"
     claw_forge_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── GitHub mode: validate + fetch issue spec ──────────────────────────
+    from claw_forge.github.models import GitHubContext as _GitHubContext
+
+    _github_ctx: _GitHubContext | None = None
+    _github_spec_path: Path | None = None  # temp spec file written from issue
+
+    if github_mode:
+        import tempfile
+
+        from claw_forge.github import GitHubClient as _GitHubClient
+        from claw_forge.github.models import IssueSpec as _IssueSpec
+
+        # Validate format: owner/repo#number
+        try:
+            if "/" not in github_mode or "#" not in github_mode:
+                raise ValueError()
+            _repo_part, _issue_part = github_mode.rsplit("#", 1)
+            _owner, _repo_name = _repo_part.split("/", 1)
+            _issue_number = int(_issue_part)
+        except (ValueError, IndexError):
+            console.print(
+                f"[red]Invalid --github-mode format: {github_mode!r}[/red]\n"
+                "[yellow]Expected: owner/repo#number "
+                "(e.g. clawinfra/claw-forge#15)[/yellow]"
+            )
+            raise typer.Exit(1) from None
+
+        _gh_token = os.environ.get("GITHUB_TOKEN")
+        if not _gh_token:
+            console.print(
+                "[red]GITHUB_TOKEN environment variable is not set.[/red]\n"
+                "[yellow]Required for --github-mode. "
+                "In GitHub Actions this is auto-provided.[/yellow]"
+            )
+            raise typer.Exit(1) from None
+
+        console.print(
+            f"[dim]Fetching issue {_owner}/{_repo_name}#{_issue_number}…[/dim]"
+        )
+
+        async def _fetch_issue() -> _IssueSpec:
+            async with _GitHubClient(_gh_token) as _gh:
+                _data = await _gh.read_issue(_owner, _repo_name, _issue_number)
+            return _IssueSpec(
+                title=_data["title"],
+                description=_data["body"],
+                comments=_data["comments"],
+                author=_data["user"]["login"],
+                number=_data["number"],
+                labels=_data["labels"],
+            )
+
+        _issue_spec: _IssueSpec = asyncio.run(_fetch_issue())
+
+        _branch_name = f"feat/github-{_issue_number}"
+        _github_ctx = _GitHubContext(
+            owner=_owner,
+            repo=_repo_name,
+            issue_number=_issue_number,
+            token=_gh_token,
+            branch_name=_branch_name,
+        )
+
+        # Write spec to a temp XML file so the existing plan→run pipeline
+        # can use it unchanged via `claw-forge plan <spec>`.
+        _spec_content = _issue_spec.to_xml()
+        _tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".xml", delete=False, dir=str(claw_forge_dir),
+            prefix=f"github-issue-{_issue_number}-",
+        )
+        _tmp.write(_spec_content)
+        _tmp.close()
+        _github_spec_path = Path(_tmp.name)
+
+        console.print(
+            f"[green]✓ Loaded issue spec:[/green] {_issue_spec.title}"
+        )
+        console.print(
+            f"[dim]  Spec written to: {_github_spec_path}[/dim]"
+        )
 
     # Auto-start state service (project-aware: restarts if serving a different project)
     _state_port = cfg.get("state", {}).get("port", 8420)
@@ -1190,6 +1279,73 @@ def run(
             current_nodes = _task_dicts_to_nodes(
                 [t for t in all_tasks if t["status"] in ("pending", "failed")]
             )
+
+        # ── GitHub mode: start reporter, then post summary + create draft PR ──
+        if _github_ctx is not None:
+            from claw_forge.github import GitHubClient as _GHClient
+            from claw_forge.github.reporter import ProgressReporter as _Reporter
+
+            _gh_completed = len(total_completed)
+            _gh_failed = len(total_failed)
+
+            async def _github_finalise() -> str | None:
+                async with _GHClient(_github_ctx.token) as _gh:
+                    _reporter = _Reporter(_gh, _github_ctx)
+                    await _reporter.start()
+
+                    # Post run-start comment
+                    await _reporter.report_start(_gh_completed + _gh_failed, task)
+
+                    _pr_url: str | None = None
+                    try:
+                        _pr = await _gh.create_draft_pr(
+                            owner=_github_ctx.owner,
+                            repo=_github_ctx.repo,
+                            head=_github_ctx.branch_name,
+                            base="main",
+                            title=f"[GHA] {github_mode}",
+                            body=(
+                                "Auto-generated by claw-forge\n\n"
+                                "## Changes\n\n"
+                                f"Implementation driven by issue "
+                                f"#{_github_ctx.issue_number}.\n\n"
+                                "---\n\n"
+                                "*This PR was created automatically by "
+                                "[claw-forge](https://github.com/clawinfra/claw-forge).*"
+                            ),
+                            issue_number=_github_ctx.issue_number,
+                        )
+                        _pr_url = _pr["html_url"]
+                        console.print(
+                            f"[green]✓ Draft PR created:[/green] {_pr_url}"
+                        )
+                    except Exception as _pr_exc:  # noqa: BLE001
+                        console.print(
+                            f"[yellow]⚠ Could not create draft PR: {_pr_exc}[/yellow]"
+                        )
+
+                    await _reporter.report_summary(
+                        completed=_gh_completed,
+                        failed=_gh_failed,
+                        pr_url=_pr_url,
+                    )
+                    await _reporter.stop()
+                return _pr_url
+
+            try:
+                _pr_url_result = asyncio.run(_github_finalise())
+                if _pr_url_result:
+                    console.print(
+                        f"[dim]GitHub PR:[/dim] {_pr_url_result}"
+                    )
+            except Exception as _gf_exc:  # noqa: BLE001
+                console.print(
+                    f"[yellow]⚠ GitHub finalisation error: {_gf_exc}[/yellow]"
+                )
+
+            # Clean up temp spec file
+            if _github_spec_path is not None and _github_spec_path.exists():
+                _github_spec_path.unlink(missing_ok=True)
 
         # Print summary
         completed = len(total_completed)
