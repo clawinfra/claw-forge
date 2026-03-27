@@ -125,6 +125,10 @@ a 4-wave dependency DAG, and registers them in the state DB.
   Next: claw-forge run --spec app_spec.txt --concurrency 5
 ```
 
+> **Re-running `claw-forge plan`:** By default, plan reconciles with the existing session —
+> completed tasks are preserved, and only new/missing features are added. Use `--fresh` to
+> start a clean session from scratch.
+
 ### Step 4: Run the agents
 
 ```bash
@@ -572,6 +576,16 @@ gh pr create --fill
 
 **Total time:** ~5 minutes. **Cost:** ~$0.12.
 
+#### Bugfix dispatch sweep
+
+After the main wave dispatch completes, the dispatcher runs an automatic bugfix sweep to
+pick up any pending bugfix tasks that were created during the run. This happens when:
+- A regression test fails after a feature lands
+- The reviewer flags an issue that needs a fix
+- A test-only failure triggers an automatic bugfix task
+
+The sweep ensures bugfix tasks are not left behind when the main feature queue empties.
+
 ---
 
 ## Workflow 4: Parallel Development — Multi-Agent Feature Sprint
@@ -761,6 +775,12 @@ claw-forge run --concurrency 5
   so the Kanban UI shows the correct state before agents re-execute them.
 - Features that had partial work are retried from scratch (agents are stateless).
 - The 28 passing features are NOT re-run.
+- **Orphan task adoption:** If the session row was lost (e.g. DB corruption recovery) but task
+  rows survived, the state service automatically re-parents orphaned tasks to the new session
+  on startup.
+- **Regression wait:** Before marking the session complete, the CLI waits up to 60 seconds for
+  any in-flight regression tests to finish (`has_pending_work` property on the reviewer). This
+  prevents premature "all done" signals when the final bugfix sweep is still running.
 - The remaining 17 pending features are queued as normal.
 
 **You see:**
@@ -840,6 +860,15 @@ Start here
   │
   ├── Resuming after break?
   │     └── claw-forge status → claw-forge run
+  │
+  ├── Pausing / resuming agents?
+  │     └── claw-forge pause <session> → claw-forge resume <session>
+  │
+  ├── Agent asking a question?
+  │     └── claw-forge input <session>
+  │
+  ├── Merging feature branches manually?
+  │     └── claw-forge merge feat/branch-name
   │
   └── Adding features mid-run?
         └── /expand-project (or: claw-forge add "feature description")

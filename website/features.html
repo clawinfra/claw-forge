@@ -100,6 +100,8 @@
           <tr><td>Session hydration</td><td class="win">✅</td><td><code>session_manifest.json</code> survives restarts and process crashes</td></tr>
           <tr><td>Plugin system</td><td class="win">✅</td><td><code>pyproject.toml</code> entry points — third-party plugins without forking core</td></tr>
           <tr><td>Dependency-aware scheduling</td><td class="win">✅</td><td>Kahn's algorithm + DFS cycle detection — features run in correct order</td></tr>
+          <tr><td>Orphan task adoption</td><td class="win">✅</td><td>Tasks from crashed sessions are automatically re-parented on startup — no manual recovery needed</td></tr>
+          <tr><td>Standalone state service</td><td class="win">✅</td><td><code>claw-forge state</code> — run the REST + WebSocket API independently with optional PostgreSQL backend</td></tr>
 
           <tr class="category-row"><td colspan="3">Security</td></tr>
           <tr><td>Bash security hook</td><td class="win">✅</td><td>Hierarchical allowlist: hardcoded blocklist → global defaults → project-specific</td></tr>
@@ -128,12 +130,16 @@
           <tr><td>Batch feature mode</td><td class="win">✅</td><td>Implement multiple features per session with <code>--batch-size</code></td></tr>
           <tr><td>Slash commands (.claude/)</td><td class="win">✅</td><td>create-spec, expand-project, check-code, checkpoint, review-pr, pool-status</td></tr>
           <tr><td>Session resume</td><td class="win">✅</td><td>Continue or fork any prior session by ID</td></tr>
+          <tr><td>Plan reconciliation</td><td class="win">✅</td><td>Re-running <code>claw-forge plan</code> preserves completed tasks — only missing features are added. Use <code>--fresh</code> for a clean slate.</td></tr>
+          <tr><td>Manual merge control</td><td class="win">✅</td><td><code>claw-forge merge</code> — squash-merge feature branches on your terms with <code>merge_strategy: manual</code></td></tr>
+          <tr><td>Bugfix dispatch sweep</td><td class="win">✅</td><td>Automatic sweep for pending bugfix tasks after main wave completes — regression fixes aren't left behind</td></tr>
           <tr><td>Rate limit handling</td><td class="win">✅</td><td>Parse retry-after headers, exponential backoff, auto-resume after cooldown</td></tr>
 
           <tr class="category-row"><td colspan="3">UI &amp; Monitoring</td></tr>
           <tr><td>Kanban board</td><td class="win">✅</td><td>5-column board: Pending / In Progress / Passing / Failed / Blocked</td></tr>
           <tr><td>Provider health dots</td><td class="win">✅</td><td>Green/amber/red per provider; click for RPM, latency, circuit state</td></tr>
           <tr><td>Real-time WebSocket updates</td><td class="win">✅</td><td>Feature status, agent events, cost — live, no polling</td></tr>
+          <tr><td>Regression health bar</td><td class="win">✅</td><td>Collapsible accordion showing trigger features, implicated features, and pass/fail status for regression suites</td></tr>
 
           <tr class="category-row"><td colspan="3">Documentation &amp; Quality</td></tr>
           <tr><td>Tutorial website</td><td class="win">✅</td><td>This site — quickstart, provider setup, plugin guide, skills reference</td></tr>

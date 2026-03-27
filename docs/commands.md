@@ -93,6 +93,7 @@ your spec and before `claw-forge run`.
 - After `/create-spec` produces `app_spec.txt`
 - After converting a PRD to `app_spec.txt` using `app_spec.example.xml` as reference
 - Re-running after editing the spec (only new features are added to the DB)
+- Re-running on an active project to reconcile — completed tasks are preserved, only new features are added (use `--fresh` to start clean)
 
 #### Usage
 ```bash
@@ -107,6 +108,12 @@ claw-forge plan app_spec.txt --model claude-sonnet-4-20250514
 
 # Point at a different project
 claw-forge plan app_spec.txt --project ~/projects/task-manager
+
+# Reconcile with existing session (default — keeps completed tasks)
+claw-forge plan app_spec.txt
+
+# Force a fresh session (wipe and recreate all tasks)
+claw-forge plan app_spec.txt --fresh
 ```
 
 #### Options
@@ -118,6 +125,7 @@ claw-forge plan app_spec.txt --project ~/projects/task-manager
 | `--model`, `-m` | string | `claude-opus-4-5` | Model for parsing (Opus recommended) |
 | `--concurrency`, `-n` | int | `5` | Used to estimate run time in summary |
 | `--config`, `-c` | path | `claw-forge.yaml` | Path to YAML config |
+| `--fresh` | flag | `False` | Force a fresh session — create all tasks from scratch. Without this flag, `plan` reconciles with the existing session: completed tasks are preserved, and only new/missing features are added. |
 
 #### What it does internally
 1. Validates the spec file exists and is valid XML.
@@ -149,8 +157,7 @@ claw-forge plan app_spec.txt --project ~/projects/task-manager
 #### Pro tips
 - **Always use Opus** for planning. It produces better DAGs and catches ambiguous features.
   Use `--model sonnet` only if you're iterating quickly and cost matters more than quality.
-- Re-running `plan` on an existing project is safe — it won't duplicate features already in
-  the state DB.
+- **Plan reconciliation** is the default behavior when re-running `plan` on an existing project. Completed tasks stay as-is, failed/pending tasks are retained, and only features missing from the DB are added as new pending tasks. Use `--fresh` to wipe and recreate all tasks from scratch.
 - `app_spec.example.xml` (created by `claw-forge init`) shows the full XML schema.
 
 #### Related commands
@@ -795,6 +802,255 @@ claw-forge dev --no-open
 - **Requires source checkout:** `ui/` directory must exist
 - **Alternative (production UI):** `claw-forge ui` (serves pre-built assets, no Node.js HMR)
 - **Agents only:** `claw-forge run` (no UI server)
+
+---
+
+### `claw-forge state`
+
+#### Purpose
+Start the AgentStateService REST + WebSocket API. The state service powers the Kanban UI
+and exposes REST endpoints for session, task, pool, regression, and command management.
+
+#### When to use
+- Running the state service standalone (instead of letting `claw-forge run` auto-start it)
+- Connecting a PostgreSQL database instead of the default SQLite
+- Development mode with hot-reload (`--reload`)
+- Running the state service on a custom port or host
+
+#### Usage
+```bash
+# Start on default port 8420
+claw-forge state
+
+# Start with hot-reload for development
+claw-forge state --reload
+
+# Start on a custom port, local-only
+claw-forge state --port 9000 --host 127.0.0.1
+
+# Start with PostgreSQL
+claw-forge state --database-url postgresql+asyncpg://user:pass@host/db
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--port` | int | `8420` | Port to bind the state service on |
+| `--host` | string | `0.0.0.0` | Host to bind (use `127.0.0.1` for local-only) |
+| `--project`, `-p` | path | `.` | Project directory |
+| `--config`, `-c` | path | `claw-forge.yaml` | Path to YAML config |
+| `--reload` | flag | `False` | Enable hot-reload — restart on Python file changes (dev only) |
+| `--database-url` | string | `None` | Database URL override (e.g. `postgresql+asyncpg://user:pass@host/db`). Default: SQLite in `.claw-forge/state.db` |
+
+#### What it does internally
+1. Loads `claw-forge.yaml` for project metadata and provider config.
+2. Starts a uvicorn server with the FastAPI state service app.
+3. Creates SQLite database at `.claw-forge/state.db` (or connects to the provided `--database-url`).
+4. Exposes REST endpoints for sessions, tasks, pool status, and regression.
+5. Opens WebSocket at `/ws` for real-time event broadcasting to the Kanban UI.
+6. With `--reload`, watches Python source files and restarts on changes.
+
+#### Related commands
+- **Uses:** `claw-forge ui` (connects to the state service for the Kanban board)
+- **Alternative:** `claw-forge dev` (starts state + UI + agents together)
+
+---
+
+### `claw-forge pause`
+
+#### Purpose
+Pause a running project in drain mode — in-flight agents complete their current task,
+but no new tasks are dispatched.
+
+#### When to use
+- You want to review generated code before more features are built
+- A provider is rate-limited and you want to wait before continuing
+- You're about to make manual changes and don't want agents conflicting
+
+#### Usage
+```bash
+# Pause by session ID
+claw-forge pause abc-123-def
+
+# Pause on a custom port
+claw-forge pause abc-123-def --port 9000
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `project` | positional | **required** | Session ID or project name to pause |
+| `--port` | int | `8420` | State service port |
+
+#### What it does internally
+1. Sends a pause request to the state service.
+2. In-flight agents finish their current task (drain mode).
+3. No new tasks are dispatched until `claw-forge resume` is called.
+4. The Kanban UI reflects the paused state.
+
+#### Related commands
+- **Resume:** `claw-forge resume`
+- **Status:** `claw-forge status` (check progress while paused)
+
+---
+
+### `claw-forge resume`
+
+#### Purpose
+Resume a paused project — the dispatcher starts accepting new tasks again.
+
+#### When to use
+- After `claw-forge pause` when you're ready to continue
+- After reviewing Wave 1 output and approving the approach
+
+#### Usage
+```bash
+# Resume by session ID
+claw-forge resume abc-123-def
+
+# Resume on a custom port
+claw-forge resume abc-123-def --port 9000
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `project` | positional | **required** | Session ID or project name to resume |
+| `--port` | int | `8420` | State service port |
+
+#### What it does internally
+1. Sends a resume request to the state service.
+2. The dispatcher immediately begins picking up pending tasks.
+3. Tasks queued during the pause are dispatched in dependency order.
+
+#### Related commands
+- **Pause:** `claw-forge pause`
+- **Monitor:** `claw-forge status`, `claw-forge ui`
+
+---
+
+### `claw-forge input`
+
+#### Purpose
+List pending human-input questions and answer them interactively. Agents that get stuck
+post a question to the state service; this command shows those questions and lets you
+respond, unblocking the agent.
+
+#### When to use
+- A feature moved to "Blocked" in the Kanban UI
+- An agent needs an API key name, design decision, or clarification
+- You see `needs_human` status on a task
+
+#### Usage
+```bash
+# Answer questions for a session
+claw-forge input abc-123-def
+
+# On a custom port
+claw-forge input abc-123-def --port 9000
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `project` | positional | **required** | Session ID or project name |
+| `--port` | int | `8420` | State service port |
+
+#### What it does internally
+1. Fetches all tasks with `needs_human` status from the state service.
+2. Displays each question with the task name and context.
+3. Prompts you for an answer interactively.
+4. POSTs your answer to `/sessions/{id}/tasks/{id}/human-input`.
+5. The task moves back to `pending` and the dispatcher retries it with your answer injected.
+
+#### Output example
+```
+🙋 1 pending question for 'taskflow-api':
+
+Task: Email reminders
+Q: What is the SendGrid API key env var name?
+Your answer: SENDGRID_API_KEY
+
+✅ Answer submitted — task moved to pending
+```
+
+#### Related commands
+- **YOLO mode:** `claw-forge run --yolo` skips human-input gates entirely
+- **Monitor:** `claw-forge status` (shows blocked features)
+
+---
+
+### `claw-forge merge`
+
+#### Purpose
+Squash-merge a feature branch to the target branch. Used with `merge_strategy: manual`
+in `claw-forge.yaml` to control when completed features land on main.
+
+#### When to use
+- You've set `merge_strategy: manual` and want to land a completed feature
+- You want to review each feature branch before merging
+- You need to merge into a branch other than `main` (e.g. `develop`)
+
+#### Usage
+```bash
+# List feature branches ready to merge
+claw-forge merge
+
+# Squash-merge a specific branch to main
+claw-forge merge feat/user-auth
+
+# Merge into a custom target branch
+claw-forge merge feat/user-auth --target develop
+
+# Specify project directory
+claw-forge merge feat/user-auth --project ~/projects/taskflow-api
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `branch` | positional | `None` | Branch to squash-merge. If omitted, lists available feature branches. |
+| `--project`, `-p` | path | `.` | Project directory |
+| `--target`, `-t` | string | `main` | Target branch to merge into |
+
+#### What it does internally
+1. If no branch is specified, lists branches matching the feature prefix (e.g. `feat/`).
+2. Checks out the target branch.
+3. Runs `git merge --squash <branch>` to squash all commits into one.
+4. Creates a semantic commit message with completed steps, task ID, and session trailers.
+5. Cleans up the feature branch and its git worktree (if one exists).
+
+#### Pro tips
+- With `merge_strategy: auto` (the default), features are squash-merged automatically on
+  passing — you don't need this command.
+- Use `merge_strategy: manual` when you want human review of each feature before landing.
+- Run `claw-forge merge` (no args) to see which branches are ready.
+
+#### Related commands
+- **Before:** `claw-forge run` (features must be passing)
+- **After:** `/check-code`, `git push`
+
+---
+
+### `claw-forge version`
+
+#### Purpose
+Print the installed claw-forge version.
+
+#### Usage
+```bash
+claw-forge version
+```
+
+#### Output example
+```
+claw-forge 0.2.0b1
+```
 
 ---
 

@@ -756,6 +756,9 @@ claw-forge run --concurrency 5
           <div class="callout tip">
             <strong>Result:</strong> 59 features, ~30 min, ~$3.12, ~3,400 lines of tested code.
           </div>
+          <div class="callout info">
+            <strong>Plan reconciliation:</strong> Re-running <code>claw-forge plan</code> on an existing project preserves completed tasks and only adds new features. Use <code>--fresh</code> to start a clean session.
+          </div>
         </div>
 
         <div id="wf-brownfield" class="tab-content">
@@ -864,6 +867,9 @@ claw-forge run --concurrency 5
           <div class="callout tip">
             <strong>Key:</strong> State persists to disk. Power loss, Ctrl+C, network drops — just <code>claw-forge run</code> again.
           </div>
+          <div class="callout info">
+            <strong>Regression safety:</strong> Before marking a session complete, the CLI waits up to 60s for in-flight regression tests to finish. Orphaned tasks from crashed sessions are automatically re-parented on restart.
+          </div>
         </div>
       </div>
     </div>
@@ -893,6 +899,18 @@ Start here
   │
   ├── Resuming after a break?
   │     └── claw-forge status → claw-forge run
+  │
+  ├── Pausing / resuming agents?
+  │     └── claw-forge pause &lt;session&gt; → claw-forge resume &lt;session&gt;
+  │
+  ├── Agent asking a question?
+  │     └── claw-forge input &lt;session&gt;
+  │
+  ├── Merging feature branches?
+  │     └── claw-forge merge feat/branch-name
+  │
+  ├── Starting state service standalone?
+  │     └── claw-forge state (--port, --database-url for PostgreSQL)
   │
   └── Adding features mid-run?
         └── /expand-project
