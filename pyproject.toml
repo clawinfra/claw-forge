@@ -128,5 +128,6 @@ required-environments = [
 
 [dependency-groups]
 dev = [
+    "respx>=0.22.0",
     "types-pyyaml>=6.0.12.20250915",
 ]
