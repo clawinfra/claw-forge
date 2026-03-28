@@ -120,6 +120,16 @@ class CodingPlugin(BasePlugin):
     async def execute(self, context: PluginContext) -> PluginResult:
         prompt = self._build_prompt(context)
         project_path = Path(context.project_path)
+
+        # Context reset support: load existing HANDOFF.md if present
+        # so the builder can resume from a previous context reset.
+        from claw_forge.harness.context_reset import ContextResetManager
+        threshold = int(context.config.get("context_reset_threshold", 80))
+        reset_mgr = ContextResetManager(project_path, threshold=threshold)
+        existing_handoff = reset_mgr.load_handoff()
+        if existing_handoff:
+            prompt = reset_mgr.build_reset_prompt(existing_handoff) + "\n\n" + prompt
+
         result = await collect_result(
             prompt,
             cwd=project_path,
@@ -132,12 +142,15 @@ class CodingPlugin(BasePlugin):
         if result:
             written_files = write_code_blocks(project_path, result)
 
+        metadata: dict[str, object] = {
+            "plugin": self.name,
+            "task_id": context.task_id,
+            "written_files": written_files,
+            "context_reset_status": reset_mgr.get_status(),
+        }
+
         return PluginResult(
             success=True,
             output=result or "Coding task completed",
-            metadata={
-                "plugin": self.name,
-                "task_id": context.task_id,
-                "written_files": written_files,
-            },
+            metadata=metadata,
         )
