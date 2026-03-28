@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -60,7 +61,7 @@ def _add_commit_in_worktree(worktree: Path, repo: Path, filename: str, message: 
     subprocess.run(
         ["git", "commit", "-m", message],
         cwd=worktree,
-        env={**__import__("os").environ, "GIT_AUTHOR_EMAIL": "test@example.com",
+        env={**os.environ, "GIT_AUTHOR_EMAIL": "test@example.com",
              "GIT_AUTHOR_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
              "GIT_COMMITTER_NAME": "Test"},
         capture_output=True,

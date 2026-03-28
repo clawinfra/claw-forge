@@ -85,13 +85,23 @@ class GitOps:
             )
 
     async def create_worktree(
-        self, task_id: str, slug: str, *, prefix: str = "feat"
+        self,
+        task_id: str,
+        slug: str,
+        *,
+        prefix: str = "feat",
+        base_branch: str = "main",
     ) -> tuple[str, Path] | None:
-        """Create an isolated worktree for a task — no lock needed."""
+        """Create (or resume) an isolated worktree for a task — no lock needed."""
         if not self.enabled:
             return None
         return await asyncio.to_thread(
-            create_worktree, self.project_dir, task_id, slug, prefix=prefix
+            create_worktree,
+            self.project_dir,
+            task_id,
+            slug,
+            prefix=prefix,
+            base_branch=base_branch,
         )
 
     async def remove_worktree(self, worktree_path: Path) -> None:

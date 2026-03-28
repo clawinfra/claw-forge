@@ -661,20 +661,26 @@ def run(
             )
 
         # Salvage any commits left on orphaned worktree branches from a
-        # killed/timed-out run.  This runs after the orphan-reset so the
-        # tasks are already back to pending — safe to merge their partial work.
-        if git_enabled and init_data.get("orphans_reset", 0):
+        # killed/timed-out run.  Runs after orphan-reset (tasks back to pending)
+        # and only when merge_strategy=auto — manual strategy means the user
+        # controls what lands on the target branch.
+        if (
+            git_enabled
+            and git_merge_strategy == "auto"
+            and init_data.get("orphans_reset", 0)
+        ):
             from claw_forge.git.branching import merge_orphaned_worktrees
 
+            _target_branch = git_cfg.get("target_branch", "main")
             salvaged = merge_orphaned_worktrees(
                 project_path,
                 prefix=git_branch_prefix,
-                target=git_cfg.get("target_branch", "main"),
+                target=_target_branch,
             )
             if salvaged:
                 console.print(
                     f"[green]Salvage-merged {len(salvaged)} orphaned worktree branch(es) "
-                    f"→ main: {', '.join(salvaged)}[/green]"
+                    f"→ {_target_branch}: {', '.join(salvaged)}[/green]"
                 )
 
         raw_tasks: list[dict[str, Any]] = init_data["tasks"]
@@ -891,7 +897,10 @@ def run(
                 if git_enabled:
                     try:
                         _wt_result = await git_ops.create_worktree(
-                            task_node.id, _slug, prefix=git_branch_prefix,
+                            task_node.id,
+                            _slug,
+                            prefix=git_branch_prefix,
+                            base_branch=git_cfg.get("target_branch", "main"),
                         )
                         if _wt_result:
                             _, _worktree_path = _wt_result

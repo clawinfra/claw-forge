@@ -94,8 +94,8 @@ def create_worktree(
     if branch_exists(project_dir, branch_name) and branch_has_commits_ahead(
         project_dir, branch_name, base_branch
     ):
-        if worktree_path.exists():
-            # Worktree still on disk — reuse as-is.
+        if worktree_path.exists() and (worktree_path / ".git").exists():
+            # Worktree still on disk and is a valid git worktree — reuse as-is.
             logger.info(
                 "Resuming worktree %s (branch %s has partial commits)",
                 worktree_path,
@@ -160,10 +160,12 @@ def merge_orphaned_worktrees(
 ) -> list[str]:
     """Scan for orphaned worktree branches with commits and squash-merge them.
 
-    Called at startup (before orphan task reset) so that any work a killed
-    agent committed to a feature branch is not lost on resume.
+    Called at startup after orphan task reset so that any work a killed agent
+    committed to a feature branch is not lost when those tasks are retried.
+    Only called when ``merge_strategy: auto``; manual-strategy callers control
+    their own merge timing.
 
-    Returns a list of branch names that were merged.
+    Returns a list of branch names that were successfully merged.
     """
     from claw_forge.git.merge import squash_merge  # local import to avoid cycles
 
@@ -204,9 +206,13 @@ def merge_orphaned_worktrees(
             merged.append(branch_name)
         else:
             logger.warning(
-                "Salvage-merge failed for %s: %s",
+                "Salvage-merge failed for %s: %s — "
+                "partial work preserved on branch; resolve manually with: "
+                "git -C %s merge --squash %s",
                 branch_name,
                 result.get("error", "unknown"),
+                project_dir,
+                branch_name,
             )
 
     return merged
