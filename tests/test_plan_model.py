@@ -12,13 +12,19 @@ Covers:
 
 from __future__ import annotations
 
+import re
+
 import yaml
 from typer.testing import CliRunner
 
 from claw_forge.cli import _DEFAULT_CONFIG_YAML, app
 from claw_forge.pool.model_resolver import resolve_model
 
-runner = CliRunner()
+runner = CliRunner(env={"COLUMNS": "200"})
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 class TestPlanModelHelp:
@@ -26,7 +32,7 @@ class TestPlanModelHelp:
 
     def test_run_plan_model_help_text(self) -> None:
         result = runner.invoke(app, ["run", "--help"])
-        assert "--plan-model" in result.output
+        assert "--plan-model" in _strip_ansi(result.output)
 
 
 class TestPlanModelAliasResolution:
