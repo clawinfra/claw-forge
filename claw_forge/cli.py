@@ -122,6 +122,7 @@ providers:
 
 agent:
   default_model: ${MODEL_DEFAULT:-claude-sonnet-4-6}
+  plan_model: null  # separate model for planning phase (e.g. claude-opus-4-6)
   max_tokens: 8192
   max_concurrent_agents: 5
 
@@ -339,6 +340,17 @@ def run(
             "Defaults to the value in claw-forge.yaml."
         ),
     ),
+    plan_model: str | None = typer.Option(
+        None, "--plan-model",
+        help=(
+            "Model for the planning phase (spec decomposition).\n"
+            "Defaults to --model when not set.\n"
+            "  claude-opus-4-6                      bare model\n"
+            "  anthropic-proxy-1/claude-opus-4-6    pin to provider\n"
+            "  opus                                 alias from config\n"
+            "Precedence: --plan-model flag → config agent.plan_model → --model."
+        ),
+    ),
     concurrency: int = typer.Option(
         5, "--concurrency", "-n",
         help="Max parallel coding agents (1–10). Higher = faster but more API spend.",
@@ -484,10 +496,33 @@ def run(
     if resolved.provider_hint:
         console.print(f"[dim]Provider pinned: {resolved.provider_hint}[/dim]")
     model = resolved.model_id
+
+    # Resolve plan_model: CLI flag → config agent.plan_model → fallback to model
+    effective_plan_model: str = model
+    if plan_model is not None:
+        plan_resolved = resolve_model(plan_model, cfg)
+        if plan_resolved.alias_resolved:
+            console.print(
+                f"[dim]Plan model alias '{plan_model}' → {plan_resolved.model_id}[/dim]"
+            )
+        effective_plan_model = plan_resolved.model_id
+    else:
+        _config_plan_model = cfg.get("agent", {}).get("plan_model")
+        if _config_plan_model:
+            plan_resolved = resolve_model(str(_config_plan_model), cfg)
+            if plan_resolved.alias_resolved:
+                console.print(
+                    f"[dim]Plan model from config: '{_config_plan_model}'"
+                    f" → {plan_resolved.model_id}[/dim]"
+                )
+            effective_plan_model = plan_resolved.model_id
+
     console.print(f"[bold]claw-forge[/bold] v{__version__}")
     console.print(f"Project: {project}")
     console.print(f"Task: {task}")
     console.print(f"Model: {model}")
+    if effective_plan_model != model:
+        console.print(f"Plan model: {effective_plan_model}")
     if edit_mode == "hashline":
         console.print(f"Edit mode: [cyan]{edit_mode}[/cyan]  (content-addressed line tagging)")
     console.print(f"Providers: {len(cfg.get('providers', {}))}")
@@ -996,8 +1031,14 @@ def run(
                             )
 
                             _agent_cwd = _worktree_path or project_path
+                            # Route model: initializer (planning) uses plan_model
+                            _effective_model = (
+                                effective_plan_model
+                                if task_node.plugin_name == "initializer"
+                                else model
+                            )
                             options = ClaudeAgentOptions(
-                                model=model,
+                                model=_effective_model,
                                 cwd=str(_agent_cwd),
                                 env=sdk_env,
                                 permission_mode="bypassPermissions",
@@ -1101,8 +1142,14 @@ def run(
                         task_complexity = _PLUGIN_COMPLEXITY.get(
                             task_node.plugin_name or "", "medium"
                         )
+                        # Route model: initializer uses plan_model
+                        _pool_model = (
+                            effective_plan_model
+                            if task_node.plugin_name == "initializer"
+                            else model
+                        )
                         response = await pool.execute(
-                            model=model,
+                            model=_pool_model,
                             messages=[{"role": "user", "content": prompt}],
                             system=system_prompt,
                             max_tokens=8192,

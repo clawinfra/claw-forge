@@ -1,0 +1,25 @@
+name: Agent Harness Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  agent-lint:
+    name: Agent architectural invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run agent lints
+        run: bash scripts/agent-lint.sh
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: make test
