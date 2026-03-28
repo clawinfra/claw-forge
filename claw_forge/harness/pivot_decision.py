@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 class PivotAction(Enum):
     """Strategic decision after evaluator feedback."""
 
-    REFINE = "refine"   # Continue current direction with improvements
-    PIVOT = "pivot"     # Abandon current approach, try something different
-    APPROVE = "approve" # Work meets quality bar, no changes needed
+    REFINE = "refine"  # Continue current direction with improvements
+    PIVOT = "pivot"  # Abandon current approach, try something different
+    APPROVE = "approve"  # Work meets quality bar, no changes needed
 
 
 @dataclass
@@ -162,14 +162,14 @@ class PivotTracker:
                 score=score,
                 score_trend=list(recent),
                 reasoning=(
-                    f"Score {score:.1f} meets approval threshold "
-                    f"({self._approval_threshold:.1f})"
+                    f"Score {score:.1f} meets approval threshold ({self._approval_threshold:.1f})"
                 ),
             )
             self._decisions.append(decision)
             logger.info(
                 "Pivot decision: APPROVE (score %.1f >= %.1f)",
-                score, self._approval_threshold,
+                score,
+                self._approval_threshold,
             )
             return decision
 
@@ -215,7 +215,8 @@ class PivotTracker:
         self._decisions.append(decision)
         logger.info(
             "Pivot decision: REFINE (score %.1f, trend: %s)",
-            score, trend_desc,
+            score,
+            trend_desc,
         )
         return decision
 
@@ -229,7 +230,7 @@ class PivotTracker:
             return False
 
         # Check the last N transitions (N = forced_pivot_streak)
-        tail = recent[-(self._forced_pivot_streak + 1):]
+        tail = recent[-(self._forced_pivot_streak + 1) :]
         return all(tail[i + 1] < tail[i] for i in range(len(tail) - 1))
 
     def log_to_plan(self, plan_path: str | Path) -> None:
@@ -262,7 +263,8 @@ class PivotTracker:
             path.write_text(content + "\n", encoding="utf-8")
             logger.info(
                 "Logged %d pivot decision(s) to %s",
-                len(new_entries), path,
+                len(new_entries),
+                path,
             )
 
     def get_status(self) -> dict[str, Any]:
@@ -271,11 +273,7 @@ class PivotTracker:
             "total_iterations": len(self._score_history),
             "score_history": [round(s, 2) for s in self._score_history],
             "pivot_count": self.pivot_count,
-            "latest_decision": (
-                self.latest_decision.to_dict()
-                if self.latest_decision
-                else None
-            ),
+            "latest_decision": (self.latest_decision.to_dict() if self.latest_decision else None),
             "forced_pivot_streak": self._forced_pivot_streak,
             "approval_threshold": self._approval_threshold,
         }

@@ -272,8 +272,7 @@ class AdversarialEvaluator:
         4. Enforce weighted scoring across explicit dimensions
         """
         dimension_desc = "\n".join(
-            f"- **{d.label.capitalize()}** (weight ×{d.weight}): "
-            for d in self._dimensions
+            f"- **{d.label.capitalize()}** (weight ×{d.weight}): " for d in self._dimensions
         )
 
         return textwrap.dedent(f"""\
@@ -375,16 +374,11 @@ class AdversarialEvaluator:
         )
 
         # Set verdict based on threshold
-        result.verdict = (
-            "approve" if result.overall_score >= self._threshold
-            else "request_changes"
-        )
+        result.verdict = "approve" if result.overall_score >= self._threshold else "request_changes"
 
         return result
 
-    def parse_llm_response(
-        self, response_text: str, iteration: int = 0
-    ) -> EvaluationResult:
+    def parse_llm_response(self, response_text: str, iteration: int = 0) -> EvaluationResult:
         """Parse an LLM's JSON response into an EvaluationResult.
 
         Handles common LLM output quirks: markdown code fences,
@@ -402,10 +396,7 @@ class AdversarialEvaluator:
         if text.startswith("```"):
             lines = text.split("\n")
             # Remove first and last lines (```json and ```)
-            lines = [
-                line for line in lines
-                if not line.strip().startswith("```")
-            ]
+            lines = [line for line in lines if not line.strip().startswith("```")]
             text = "\n".join(lines)
 
         try:

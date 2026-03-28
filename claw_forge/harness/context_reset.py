@@ -15,151 +15,20 @@ from __future__ import annotations
 
 import logging
 import textwrap
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Import HandoffArtifact from the standalone module.
+# It was originally defined here; the standalone module is now canonical.
+from claw_forge.harness.handoff import HandoffArtifact
+
 logger = logging.getLogger(__name__)
+
+# Re-export for backwards compatibility
+__all__ = ["ContextResetManager", "HandoffArtifact", "DEFAULT_TOOL_CALL_THRESHOLD"]
 
 # Default threshold for tool calls before triggering a context reset.
 DEFAULT_TOOL_CALL_THRESHOLD = 80
-
-
-@dataclass
-class HandoffArtifact:
-    """Structured artifact that carries state across context resets.
-
-    This is the bridge between agent sessions — it must contain enough
-    information for the next agent to pick up work cleanly without
-    having to rediscover state.
-
-    Schema modelled on Anthropic's harness design recommendations:
-    - What was completed (with evidence like commit hashes)
-    - Current state of the codebase
-    - Ordered next steps
-    - Decisions already made (to avoid revisiting)
-    - Quality bar (current score, what needs to improve)
-    """
-
-    completed: list[str] = field(default_factory=list)
-    state: list[str] = field(default_factory=list)
-    next_steps: list[str] = field(default_factory=list)
-    decisions_made: list[str] = field(default_factory=list)
-    quality_bar: str = ""
-    iteration_number: int = 0
-    total_tool_calls: int = 0
-
-    def to_markdown(self) -> str:
-        """Render the handoff artifact as a HANDOFF.md file."""
-        sections: list[str] = ["# HANDOFF.md — Builder Context Reset\n"]
-
-        sections.append(f"**Iteration:** {self.iteration_number}")
-        sections.append(f"**Total Tool Calls:** {self.total_tool_calls}\n")
-
-        sections.append("## Completed")
-        if self.completed:
-            for item in self.completed:
-                sections.append(f"- {item}")
-        else:
-            sections.append("- (none yet)")
-
-        sections.append("\n## State")
-        if self.state:
-            for item in self.state:
-                sections.append(f"- {item}")
-        else:
-            sections.append("- (initial state)")
-
-        sections.append("\n## Next Steps")
-        if self.next_steps:
-            for i, step in enumerate(self.next_steps, 1):
-                sections.append(f"{i}. {step}")
-        else:
-            sections.append("1. (review plan and begin implementation)")
-
-        sections.append("\n## Decisions Made")
-        if self.decisions_made:
-            for item in self.decisions_made:
-                sections.append(f"- {item}")
-        else:
-            sections.append("- (no decisions recorded yet)")
-
-        sections.append("\n## Quality Bar")
-        sections.append(self.quality_bar or "- Not yet evaluated")
-
-        return "\n".join(sections) + "\n"
-
-    @classmethod
-    def from_markdown(cls, text: str) -> HandoffArtifact:
-        """Parse a HANDOFF.md file back into a HandoffArtifact.
-
-        This is a best-effort parser — it looks for the known section
-        headers and extracts bullet items under each.
-        """
-        artifact = cls()
-
-        current_section: str | None = None
-        section_map: dict[str, str] = {
-            "## Completed": "completed",
-            "## State": "state",
-            "## Next Steps": "next_steps",
-            "## Decisions Made": "decisions_made",
-            "## Quality Bar": "quality_bar",
-        }
-
-        for line in text.splitlines():
-            stripped = line.strip()
-
-            # Parse iteration/tool call metadata.
-            # Lines look like: **Iteration:** 2
-            # We split on "** " after the colon to get the value.
-            if stripped.startswith("**Iteration:**"):
-                try:
-                    # Extract everything after "**Iteration:** "
-                    val = stripped.replace("**Iteration:**", "").strip()
-                    artifact.iteration_number = int(val)
-                except (ValueError, IndexError):
-                    pass
-                continue
-
-            if stripped.startswith("**Total Tool Calls:**"):
-                try:
-                    val = stripped.replace("**Total Tool Calls:**", "").strip()
-                    artifact.total_tool_calls = int(val)
-                except (ValueError, IndexError):
-                    pass
-                continue
-
-            # Detect section headers
-            matched_header = False
-            for header, field_name in section_map.items():
-                if stripped == header:
-                    current_section = field_name
-                    matched_header = True
-                    break
-
-            if not matched_header and current_section and stripped:
-                # Quality bar section: preserve raw text (may start with digits like "7/10")
-                if current_section == "quality_bar":
-                    content = stripped.lstrip("- ").strip()
-                    if content and content != "Not yet evaluated":
-                        artifact.quality_bar = (
-                            artifact.quality_bar + " " + content
-                        ).strip()
-                else:
-                    # Strip leading bullet/number markers for list sections
-                    import re as _re
-                    content = _re.sub(r"^[-*]\s*", "", stripped)
-                    content = _re.sub(r"^\d+\.\s*", "", content).strip()
-                    placeholder_values = {
-                        "(none yet)", "(initial state)",
-                        "(review plan and begin implementation)",
-                        "(no decisions recorded yet)",
-                    }
-                    if content and content not in placeholder_values:
-                        getattr(artifact, current_section).append(content)
-
-        return artifact
 
 
 class ContextResetManager:
