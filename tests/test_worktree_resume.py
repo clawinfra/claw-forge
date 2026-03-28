@@ -12,15 +12,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from claw_forge.git.branching import (
     branch_exists,
     branch_has_commits_ahead,
     create_worktree,
     merge_orphaned_worktrees,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
