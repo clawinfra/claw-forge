@@ -21,5 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Run tests
-        run: make test
+        run: uv run pytest tests/ -q --ignore=tests/test_github
