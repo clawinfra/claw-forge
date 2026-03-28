@@ -61,3 +61,12 @@ jobs:
       - name: Build UI
         run: npm --prefix ui run build
 
+      - name: Verify UI build output
+        run: |
+          if [ ! -d ui/dist ]; then
+            echo "ERROR: ui/dist not found after build"
+            exit 1
+          fi
+          FILE_COUNT=$(find ui/dist -type f | wc -l)
+          echo "UI build OK ($FILE_COUNT files in ui/dist)"
+

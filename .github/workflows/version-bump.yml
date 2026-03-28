@@ -1,0 +1,127 @@
+name: Version Bump & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+        default: patch
+      prerelease_tag:
+        description: "Pre-release suffix (e.g. a, b, rc) — only used when bump=prerelease"
+        required: false
+        default: "a"
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Calculate next version
+        id: version
+        run: |
+          # Get latest tag (strip leading 'v')
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT="${LATEST_TAG#v}"
+          echo "Current version: $CURRENT"
+
+          # Use a small Python script via uv to calculate the next version
+          NEXT=$(uv run python -c "
+          import re, sys
+
+          current = '$CURRENT'
+          bump = '${{ inputs.bump }}'
+          pre_tag = '${{ inputs.prerelease_tag }}'
+
+          # Parse: major.minor.patch[pre_tag pre_num]
+          m = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:([a-zA-Z]+)(\d+))?$', current)
+          if not m:
+              print(f'ERROR: cannot parse version: {current}', file=sys.stderr)
+              sys.exit(1)
+
+          major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+          cur_pre_tag = m.group(4)
+          cur_pre_num = int(m.group(5)) if m.group(5) else None
+
+          if bump == 'major':
+              print(f'{major+1}.0.0')
+          elif bump == 'minor':
+              print(f'{major}.{minor+1}.0')
+          elif bump == 'patch':
+              # If currently a prerelease of this patch, just drop the prerelease
+              if cur_pre_tag:
+                  print(f'{major}.{minor}.{patch}')
+              else:
+                  print(f'{major}.{minor}.{patch+1}')
+          elif bump == 'prerelease':
+              if cur_pre_tag == pre_tag:
+                  # Same pre tag — increment the number
+                  print(f'{major}.{minor}.{patch}{pre_tag}{cur_pre_num+1}')
+              elif cur_pre_tag:
+                  # Different pre tag on same version — start at 1
+                  print(f'{major}.{minor}.{patch}{pre_tag}1')
+              else:
+                  # No prerelease — bump patch and add pre tag
+                  print(f'{major}.{minor}.{patch+1}{pre_tag}1')
+          ")
+
+          echo "Next version: $NEXT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update version in pyproject.toml and commit
+        run: |
+          VERSION="${{ steps.version.outputs.next }}"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          git add pyproject.toml
+          git commit -m "chore: bump version to $VERSION"
+          git push
+
+      - name: Create tag and push
+        run: |
+          VERSION="${{ steps.version.outputs.next }}"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.next }}"
+          BUMP="${{ inputs.bump }}"
+
+          # Mark pre-releases appropriately
+          PRERELEASE_FLAG=""
+          if [ "$BUMP" = "prerelease" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            $PRERELEASE_FLAG

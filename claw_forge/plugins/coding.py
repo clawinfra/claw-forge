@@ -142,6 +142,19 @@ class CodingPlugin(BasePlugin):
         if result:
             written_files = write_code_blocks(project_path, result)
 
+        # Record a tool call for the completed execution and save a
+        # handoff artifact so the next invocation can resume cleanly.
+        from claw_forge.harness.handoff import HandoffArtifact
+        reset_mgr.record_tool_call()
+        handoff = HandoffArtifact(
+            completed=[f"Task {context.task_id}"],
+            state=[f"Files written: {written_files}"] if written_files else ["No files written"],
+            next_steps=["Continue with next task"],
+            decisions_made=[],
+            quality_bar="Pending review",
+        )
+        reset_mgr.save_handoff(handoff)
+
         metadata: dict[str, object] = {
             "plugin": self.name,
             "task_id": context.task_id,

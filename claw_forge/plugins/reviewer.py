@@ -128,6 +128,15 @@ class ReviewerPlugin(BasePlugin):
             metadata["adversarial_verdict"] = evaluation.verdict
             metadata["adversarial_score"] = evaluation.overall_score
 
+            # Pivot decision after each adversarial review
+            from claw_forge.harness.pivot_decision import PivotTracker
+            iteration = context.config.get("iteration", 1)
+            tracker = PivotTracker()
+            decision = tracker.decide(score=evaluation.overall_score, iteration=iteration)
+            metadata["pivot_decision"] = decision.to_dict()
+            if context.project_path:
+                tracker.log_to_plan(str(Path(context.project_path) / "PLAN.md"))
+
         return PluginResult(
             success=True,
             output=result or "Review task completed",

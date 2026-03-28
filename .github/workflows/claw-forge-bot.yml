@@ -34,12 +34,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install claw-forge
-        run: |
-          # Install from PyPI (use this once the package is published)
-          # uv pip install claw-forge
-
-          # Install from local checkout (for CI testing within this repo)
-          uv pip install -e .
+        run: uv pip install claw-forge
 
       - name: Configure Git
         run: |

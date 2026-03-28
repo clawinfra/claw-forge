@@ -408,6 +408,22 @@ def run(
             "Requires the GITHUB_TOKEN environment variable."
         ),
     ),
+    adversarial_review: bool = typer.Option(
+        False, "--adversarial-review/--no-adversarial-review",
+        help=(
+            "Enable adversarial review mode for the reviewer plugin.\n"
+            "Uses a GAN-inspired adversarial evaluator that grades code on\n"
+            "correctness, robustness, and maintainability. [default: disabled]"
+        ),
+    ),
+    reset_threshold: int = typer.Option(
+        80, "--reset-threshold",
+        help=(
+            "Number of tool calls before triggering a context reset.\n"
+            "Lower values keep working memory fresh but cost more tokens.\n"
+            "[default: 80]"
+        ),
+    ),
 ) -> None:
     """Run agents on a project until all features pass.
 
@@ -664,6 +680,18 @@ def run(
 
     agent_cfg = cfg.get("agent", {})
     max_subagents = agent_cfg.get("max_subagents_per_task", 5)
+
+    # adversarial_review: CLI flag takes priority; config fallback
+    _config_adversarial = agent_cfg.get("adversarial", False)
+    if not adversarial_review and _config_adversarial:
+        adversarial_review = bool(_config_adversarial)
+    agent_cfg["adversarial"] = adversarial_review
+
+    # reset_threshold: CLI flag takes priority; config fallback
+    _config_reset_threshold = agent_cfg.get("context_reset_threshold", 80)
+    if reset_threshold == 80 and _config_reset_threshold != 80:
+        reset_threshold = int(_config_reset_threshold)
+    agent_cfg["context_reset_threshold"] = reset_threshold
 
     async def main() -> None:
         # Bootstrap session + tasks via state service HTTP API
