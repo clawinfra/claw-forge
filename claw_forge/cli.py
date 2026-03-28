@@ -676,6 +676,9 @@ def run(
     git_merge_strategy = git_cfg.get("merge_strategy", "auto")
     git_branch_prefix = git_cfg.get("branch_prefix", "feat")
     git_commit_on_boundary = git_cfg.get("commit_on_plugin_boundary", True)
+    git_auto_checkpoint_secs: int = int(
+        git_cfg.get("auto_checkpoint_interval_seconds", 300)
+    )
     git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
 
     agent_cfg = cfg.get("agent", {})
@@ -724,27 +727,51 @@ def run(
             )
 
         # Salvage any commits left on orphaned worktree branches from a
-        # killed/timed-out run.  Runs after orphan-reset (tasks back to pending)
-        # and only when merge_strategy=auto — manual strategy means the user
-        # controls what lands on the target branch.
-        if (
-            git_enabled
-            and git_merge_strategy == "auto"
-            and init_data.get("orphans_reset", 0)
-        ):
-            from claw_forge.git.branching import merge_orphaned_worktrees
-
+        # killed/timed-out run.  Auto mode merges them; manual mode reports
+        # them so the user knows they exist and can act on them.
+        if git_enabled and init_data.get("orphans_reset", 0):
             _target_branch = git_cfg.get("target_branch", "main")
-            salvaged = merge_orphaned_worktrees(
-                project_path,
-                prefix=git_branch_prefix,
-                target=_target_branch,
-            )
-            if salvaged:
-                console.print(
-                    f"[green]Salvage-merged {len(salvaged)} orphaned worktree branch(es) "
-                    f"→ {_target_branch}: {', '.join(salvaged)}[/green]"
+            if git_merge_strategy == "auto":
+                from claw_forge.git.branching import merge_orphaned_worktrees
+
+                salvaged = merge_orphaned_worktrees(
+                    project_path,
+                    prefix=git_branch_prefix,
+                    target=_target_branch,
                 )
+                if salvaged:
+                    console.print(
+                        f"[green]Salvage-merged {len(salvaged)} orphaned worktree branch(es) "
+                        f"→ {_target_branch}: {', '.join(salvaged)}[/green]"
+                    )
+            else:
+                # Manual merge mode: scan and report orphaned branches
+                from claw_forge.git.branching import scan_orphaned_branches
+
+                _orphans = scan_orphaned_branches(
+                    project_path,
+                    prefix=git_branch_prefix,
+                    target=_target_branch,
+                )
+                if _orphans:
+                    console.print(
+                        f"\n[yellow]Found {len(_orphans)} orphaned branch(es) with "
+                        f"committed work (merge_strategy=manual):[/yellow]"
+                    )
+                    for _info in _orphans:
+                        console.print(
+                            f"  [bold]{_info['branch']}[/bold] — "
+                            f"{_info['commit_count']} commit(s)"
+                        )
+                        for _subj in _info["commit_subjects"][:3]:
+                            console.print(f"    • {_subj}")
+                        console.print(
+                            f"    [dim]git log {_info['branch']}[/dim]"
+                        )
+                        console.print(
+                            f"    [dim]git merge --squash {_info['branch']}[/dim]"
+                        )
+                    console.print()
 
         raw_tasks: list[dict[str, Any]] = init_data["tasks"]
         if not raw_tasks:
@@ -967,11 +994,100 @@ def run(
                         )
                         if _wt_result:
                             _, _worktree_path = _wt_result
+                            _active_worktrees[task_node.id] = _worktree_path
                     except Exception as _git_wt_err:
                         _logging.getLogger(__name__).warning(
                             "Git worktree creation failed for task %s (continuing): %s",
                             task_node.id, _git_wt_err,
                         )
+
+                # ── Periodic auto-checkpoint background task ──────────────
+                _checkpoint_task: asyncio.Task[None] | None = None
+
+                async def _periodic_checkpoint(
+                    wt_path: Path,
+                    t_id: str,
+                    t_plugin: str,
+                    sid: str,
+                    interval: int,
+                ) -> None:
+                    """Best-effort auto-save of dirty worktree files."""
+                    while True:
+                        await asyncio.sleep(interval)
+                        with suppress(Exception):
+                            await git_ops.checkpoint(
+                                message=f"auto-save: {t_plugin} in progress",
+                                task_id=t_id,
+                                plugin=t_plugin,
+                                phase="auto-save",
+                                session_id=sid,
+                                cwd=wt_path,
+                            )
+
+                if (
+                    git_enabled
+                    and _worktree_path
+                    and git_auto_checkpoint_secs > 0
+                ):
+                    _checkpoint_task = asyncio.create_task(
+                        _periodic_checkpoint(
+                            _worktree_path,
+                            task_node.id,
+                            task_node.plugin_name or "unknown",
+                            session_id,
+                            git_auto_checkpoint_secs,
+                        )
+                    )
+
+                # ── Resume context: inject prior-attempt info on retry ──
+                _error_msg = task_data.get("error_message")
+                if _error_msg and git_enabled:
+                    from claw_forge.git.commits import branch_commit_subjects
+
+                    _resume_branch = f"{git_branch_prefix}/{_slug}"
+                    _resume_target = git_cfg.get("target_branch", "main")
+                    _prior_subjects = branch_commit_subjects(
+                        project_path, _resume_branch, _resume_target
+                    )
+                    _handoff_path = (
+                        (_worktree_path or project_path) / "HANDOFF.md"
+                    )
+                    _handoff_text = ""
+                    if _handoff_path.exists():
+                        _handoff_text = _handoff_path.read_text(
+                            encoding="utf-8"
+                        )
+
+                    _resume_parts: list[str] = [
+                        "## Resume Context",
+                        "This task was previously attempted but failed.\n",
+                    ]
+                    if _prior_subjects:
+                        _resume_parts.append(
+                            "### Prior Work (preserved in this worktree)"
+                        )
+                        _resume_parts.extend(
+                            f"- {s}" for s in _prior_subjects
+                        )
+                        _resume_parts.append("")
+                    _resume_parts.extend([
+                        "### Previous Failure",
+                        _error_msg[:2000],
+                        "",
+                    ])
+                    if _handoff_text:
+                        _resume_parts.extend([
+                            "### Handoff from Prior Attempt",
+                            _handoff_text[:3000],
+                            "",
+                        ])
+                    _resume_parts.extend([
+                        "### Instructions",
+                        "- Review existing code in this worktree before making changes",
+                        "- Do NOT redo already-completed work",
+                        "- Focus on remaining steps and fixing the prior failure",
+                    ])
+                    prompt = "\n".join(_resume_parts) + "\n\n" + prompt
 
                 output = ""
                 success = False
@@ -1223,6 +1339,13 @@ def run(
                     success = False
 
                 finally:
+                    # Cancel periodic auto-checkpoint before any other cleanup
+                    if _checkpoint_task is not None:
+                        _checkpoint_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await _checkpoint_task
+                    _active_worktrees.pop(task_node.id, None)
+
                     if _cancelled:
                         # Reset racing tasks to pending via HTTP
                         with suppress(Exception):
@@ -1273,9 +1396,42 @@ def run(
                                     _merge_result.get("error", "unknown"),
                                 )
                     elif git_enabled and not success and _worktree_path:
-                        await git_ops.remove_worktree(_worktree_path)
+                        # Preserve worktree if branch has committed work
+                        # so the retry can resume from checkpoint commits.
+                        from claw_forge.git.branching import branch_has_commits_ahead
+
+                        _fail_branch = f"{git_branch_prefix}/{_slug}"
+                        _target = git_cfg.get("target_branch", "main")
+                        if not branch_has_commits_ahead(
+                            project_path, _fail_branch, _target
+                        ):
+                            await git_ops.remove_worktree(_worktree_path)
 
             return {"success": success, "output": output}
+
+        # ── Emergency commit signal handlers ──────────────────────────
+        # On SIGTERM/SIGINT, best-effort commit dirty worktree files
+        # before the process exits so partial work survives.
+        _active_worktrees: dict[str, Path] = {}  # task_id -> worktree_path
+
+        import signal as _signal
+
+        from claw_forge.git.commits import emergency_commit as _emergency_commit
+
+        _original_sigterm = _signal.getsignal(_signal.SIGTERM)
+        _original_sigint = _signal.getsignal(_signal.SIGINT)
+
+        def _emergency_save(signum: int, frame: Any) -> None:
+            for _tid, _wt in _active_worktrees.items():
+                _emergency_commit(_wt, task_id=_tid)
+            if signum == _signal.SIGTERM and callable(_original_sigterm):
+                _original_sigterm(signum, frame)  # type: ignore[misc]
+            elif signum == _signal.SIGINT:
+                raise KeyboardInterrupt
+
+        if git_enabled:
+            _signal.signal(_signal.SIGTERM, _emergency_save)
+            _signal.signal(_signal.SIGINT, _emergency_save)
 
         # Run dispatcher with pause/resume re-dispatch loop.
         # When Stop All pauses the dispatcher, we wait for Resume All,
@@ -1379,6 +1535,11 @@ def run(
             current_nodes = _task_dicts_to_nodes(
                 [t for t in all_tasks if t["status"] in ("pending", "failed")]
             )
+
+        # Restore original signal handlers after dispatcher loop
+        if git_enabled:
+            _signal.signal(_signal.SIGTERM, _original_sigterm)
+            _signal.signal(_signal.SIGINT, _original_sigint)
 
         # ── GitHub mode: start reporter, then post summary + create draft PR ──
         if _github_ctx is not None:

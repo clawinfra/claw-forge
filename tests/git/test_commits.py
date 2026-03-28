@@ -10,6 +10,7 @@ import pytest
 from claw_forge.git.commits import (
     branch_commit_subjects,
     commit_checkpoint,
+    emergency_commit,
     has_remote,
     push_to_remote,
     task_history,
@@ -274,3 +275,45 @@ class TestTaskHistoryEdgeCases:
         with patch("claw_forge.git.commits._run_git", return_value=mock_result):
             history = task_history(git_repo)
         assert history == []
+
+
+class TestEmergencyCommit:
+    def test_commits_dirty_files(self, git_repo: Path) -> None:
+        (git_repo / "dirty.py").write_text("x = 1\n")
+        result = emergency_commit(git_repo, task_id="task-99")
+        assert result is True
+        # Verify commit message
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        assert "emergency" in log.stdout
+        assert "task-99" in log.stdout
+
+    def test_returns_false_when_clean(self, git_repo: Path) -> None:
+        result = emergency_commit(git_repo)
+        assert result is False
+
+    def test_includes_task_id_in_message(self, git_repo: Path) -> None:
+        (git_repo / "file.txt").write_text("data\n")
+        emergency_commit(git_repo, task_id="abc-123")
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        assert "abc-123" in log.stdout
+
+    def test_returns_false_on_non_git_dir(self, tmp_path: Path) -> None:
+        non_git = tmp_path / "not-a-repo"
+        non_git.mkdir()
+        result = emergency_commit(non_git)
+        assert result is False
+
+    def test_default_task_id_is_unknown(self, git_repo: Path) -> None:
+        (git_repo / "new.txt").write_text("content\n")
+        emergency_commit(git_repo)
+        log = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=git_repo, capture_output=True, text=True, check=True,
+        )
+        assert "unknown" in log.stdout

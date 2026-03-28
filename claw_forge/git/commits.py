@@ -48,6 +48,32 @@ def commit_checkpoint(
     return {"commit_hash": short_hash, "branch": branch}
 
 
+def emergency_commit(project_dir: Path, *, task_id: str = "unknown") -> bool:
+    """Best-effort emergency commit of all dirty files.  Synchronous, fast.
+
+    Designed to be called from signal handlers (SIGTERM/SIGINT) where the
+    event loop may not be available.  Returns ``True`` if a commit was made.
+    """
+    try:
+        _run_git(["add", "-A"], project_dir)
+    except Exception:  # noqa: BLE001
+        return False
+    # Check if there are staged changes
+    try:
+        _run_git(["diff", "--cached", "--quiet"], project_dir)
+        return False  # nothing staged
+    except Exception:
+        pass  # staged changes exist — proceed
+    try:
+        _run_git(
+            ["commit", "-m", f"emergency: auto-save before shutdown (task {task_id})"],
+            project_dir,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def push_to_remote(
     project_dir: Path,
     *,

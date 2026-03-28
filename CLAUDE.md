@@ -122,6 +122,31 @@ Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees
 - **Post-merge** (`merge.py`): `squash_merge()` calls `remove_worktree()` then `delete_branch()` — disk reclaimed immediately after the feature lands
 - **Startup sweep** (`prune_worktrees()`): removes all directories under `.claw-forge/worktrees/` and runs `git worktree prune` — catches stale worktrees from crashed runs
 - **Pre-create guard** (`create_worktree()`): if the target path already exists, it is force-removed before creating the new worktree
+- **Failure preservation**: on task failure, the worktree is preserved if the branch has checkpoint commits so the retry can resume from partial work
+- **Orphan scan** (`scan_orphaned_branches()`): when `merge_strategy: manual`, lists orphaned branches with committed work and shows copy-pasteable git commands for manual resolution
+
+### Periodic Auto-Checkpoint (`cli.py` task_handler)
+
+A background `asyncio.Task` periodically commits dirty worktree files during agent execution to minimize data loss on crash:
+- **Config**: `git.auto_checkpoint_interval_seconds` in `claw-forge.yaml` (default `300` = 5 minutes, `0` to disable)
+- **Phase trailer**: commits use `Phase: auto-save` to distinguish from agent-initiated checkpoints
+- **Best-effort**: checkpoint errors are silently caught — never crashes the agent
+- **Lifecycle**: started after worktree creation, cancelled in the finally block on task completion/failure/cancel
+
+### Emergency Commit on Signals (`cli.py` + `commits.py`)
+
+SIGTERM and SIGINT signal handlers do a best-effort `git add -A && git commit` on all active worktrees before the process exits:
+- **`emergency_commit()`** (`commits.py`): synchronous, fast, catches all exceptions — safe to call from signal handlers
+- **`_active_worktrees` registry**: task handler registers/deregisters worktree paths so the signal handler knows what to commit
+- **Signal restoration**: original handlers are restored after the dispatcher loop completes
+
+### Resume Context on Retry (`cli.py` task_handler)
+
+When a task is retried after failure, the agent receives a structured resume preamble prepended to its prompt:
+- **Prior work**: commit subjects from the feature branch (via `branch_commit_subjects()`)
+- **Previous failure**: the `error_message` from the prior attempt (stored in the DB)
+- **Handoff artifact**: contents of `HANDOFF.md` if it exists in the worktree
+- **Instructions**: tells the agent not to redo completed work and to focus on fixing the prior failure
 
 ### SQLite Crash Safety
 

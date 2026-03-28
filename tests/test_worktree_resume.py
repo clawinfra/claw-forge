@@ -18,6 +18,7 @@ from claw_forge.git.branching import (
     branch_has_commits_ahead,
     create_worktree,
     merge_orphaned_worktrees,
+    scan_orphaned_branches,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -209,3 +210,43 @@ class TestMergeOrphanedWorktrees:
 
         salvaged = merge_orphaned_worktrees(repo, prefix="feat", target="main")
         assert len(salvaged) == 3
+
+
+# ── scan_orphaned_branches ───────────────────────────────────────────────────
+
+
+class TestScanOrphanedBranches:
+    def test_finds_branches_with_commits(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _, wt = create_worktree(repo, "task-1", "scan-task", base_branch="main")
+        _add_commit_in_worktree(wt, repo, "work.py", "feat: partial work")
+        _git(["checkout", "main"], repo)
+
+        results = scan_orphaned_branches(repo, prefix="feat", target="main")
+        assert len(results) == 1
+        assert results[0]["branch"] == "feat/scan-task"
+        assert results[0]["commit_count"] >= 1
+        assert any("partial work" in s for s in results[0]["commit_subjects"])
+
+    def test_skips_empty_branches(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        create_worktree(repo, "task-2", "empty-task", base_branch="main")
+        _git(["checkout", "main"], repo)
+
+        results = scan_orphaned_branches(repo, prefix="feat", target="main")
+        assert len(results) == 0
+
+    def test_returns_empty_when_no_worktrees_dir(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        results = scan_orphaned_branches(repo, prefix="feat", target="main")
+        assert results == []
+
+    def test_includes_worktree_path(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _, wt = create_worktree(repo, "task-3", "path-task", base_branch="main")
+        _add_commit_in_worktree(wt, repo, "file.txt", "feat: add file")
+        _git(["checkout", "main"], repo)
+
+        results = scan_orphaned_branches(repo, prefix="feat", target="main")
+        assert len(results) == 1
+        assert results[0]["worktree_path"] == str(wt)

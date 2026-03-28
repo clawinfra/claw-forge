@@ -6,6 +6,7 @@ import logging
 import shutil
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from claw_forge.git.repo import _run_git
 
@@ -216,6 +217,44 @@ def merge_orphaned_worktrees(
             )
 
     return merged
+
+
+def scan_orphaned_branches(
+    project_dir: Path,
+    *,
+    prefix: str = "feat",
+    target: str = "main",
+) -> list[dict[str, Any]]:
+    """Scan for orphaned worktree branches that have commits ahead of *target*.
+
+    Returns a list of dicts with keys: ``branch``, ``slug``, ``commit_count``,
+    ``commit_subjects``, ``worktree_path``.  Informational only — merges nothing.
+    """
+    from claw_forge.git.commits import branch_commit_subjects
+
+    worktrees_dir = project_dir / ".claw-forge" / "worktrees"
+    results: list[dict[str, Any]] = []
+    if not worktrees_dir.is_dir():
+        return results
+
+    for child in list(worktrees_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        slug = child.name
+        branch_name = f"{prefix}/{slug}"
+        if not branch_exists(project_dir, branch_name):
+            continue
+        if not branch_has_commits_ahead(project_dir, branch_name, target):
+            continue
+        subjects = branch_commit_subjects(project_dir, branch_name, target)
+        results.append({
+            "branch": branch_name,
+            "slug": slug,
+            "commit_count": len(subjects),
+            "commit_subjects": subjects,
+            "worktree_path": str(child),
+        })
+    return results
 
 
 def prune_worktrees(project_dir: Path) -> int:
