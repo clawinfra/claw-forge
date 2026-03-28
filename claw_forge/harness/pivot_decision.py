@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -66,7 +66,7 @@ class PivotDecision:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-friendly dictionary."""
@@ -230,10 +230,7 @@ class PivotTracker:
 
         # Check the last N transitions (N = forced_pivot_streak)
         tail = recent[-(self._forced_pivot_streak + 1):]
-        for i in range(len(tail) - 1):
-            if tail[i + 1] >= tail[i]:
-                return False
-        return True
+        return all(tail[i + 1] < tail[i] for i in range(len(tail) - 1))
 
     def log_to_plan(self, plan_path: str | Path) -> None:
         """Append all unlogged decisions to PLAN.md.
@@ -244,10 +241,7 @@ class PivotTracker:
         path = Path(plan_path)
 
         # Read existing content
-        if path.exists():
-            existing = path.read_text(encoding="utf-8")
-        else:
-            existing = "# PLAN.md\n\n"
+        existing = path.read_text(encoding="utf-8") if path.exists() else "# PLAN.md\n\n"
 
         # Add header section if missing
         header = "## Pivot Decision Log"

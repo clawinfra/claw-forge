@@ -6,7 +6,6 @@ import pytest
 
 from claw_forge.github.models import GitHubContext, IssueSpec
 
-
 # ── IssueSpec ─────────────────────────────────────────────────────────────────
 
 

@@ -597,13 +597,12 @@ def run(
         # Write spec to a temp XML file so the existing plan→run pipeline
         # can use it unchanged via `claw-forge plan <spec>`.
         _spec_content = _issue_spec.to_xml()
-        _tmp = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="w", suffix=".xml", delete=False, dir=str(claw_forge_dir),
             prefix=f"github-issue-{_issue_number}-",
-        )
-        _tmp.write(_spec_content)
-        _tmp.close()
-        _github_spec_path = Path(_tmp.name)
+        ) as _tmp:
+            _tmp.write(_spec_content)
+            _github_spec_path = Path(_tmp.name)
 
         console.print(
             f"[green]✓ Loaded issue spec:[/green] {_issue_spec.title}"

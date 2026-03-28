@@ -9,7 +9,12 @@ This module provides:
   status updates to the issue as agents work.
 """
 
-from claw_forge.github.client import GitHubAPIError, GitHubAuthError, GitHubClient, GitHubClientError
+from claw_forge.github.client import (
+    GitHubAPIError,
+    GitHubAuthError,
+    GitHubClient,
+    GitHubClientError,
+)
 from claw_forge.github.models import GitHubContext, IssueSpec
 from claw_forge.github.reporter import ProgressReporter
 

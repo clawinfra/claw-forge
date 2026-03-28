@@ -403,8 +403,8 @@ class AdversarialEvaluator:
             lines = text.split("\n")
             # Remove first and last lines (```json and ```)
             lines = [
-                l for l in lines
-                if not l.strip().startswith("```")
+                line for line in lines
+                if not line.strip().startswith("```")
             ]
             text = "\n".join(lines)
 
