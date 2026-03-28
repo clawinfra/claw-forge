@@ -58,6 +58,9 @@ def test_github_mode_missing_token(monkeypatch: pytest.MonkeyPatch, tmp_path) ->
 
 def test_github_mode_help_text() -> None:
     """--github-mode flag is visible in --help output."""
-    result = runner.invoke(app, ["run", "--help"])
+    import re
+    result = runner.invoke(app, ["run", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
-    assert "github-mode" in result.output
+    # Strip ANSI escape codes before asserting (CI terminals may wrap/truncate)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "github-mode" in plain
