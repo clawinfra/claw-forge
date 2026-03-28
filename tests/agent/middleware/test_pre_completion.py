@@ -344,6 +344,7 @@ class TestPreCompletionIntegrationWithGetDefaultHooks:
 
 class TestPreCompletionChecklistHookCLIIntegration:
     def test_verify_on_exit_flag_accepted(self) -> None:
+        import os
         import re
 
         from typer.testing import CliRunner
@@ -351,7 +352,9 @@ class TestPreCompletionChecklistHookCLIIntegration:
         from claw_forge.cli import app
 
         runner = CliRunner()
-        result = runner.invoke(app, ["run", "--help"])
+        # Wide terminal prevents Rich from truncating long flag names
+        env = {**os.environ, "COLUMNS": "200"}
+        result = runner.invoke(app, ["run", "--help"], env=env)
         # Strip ANSI escape sequences — rich splits flag names with colour codes
         clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
         assert "--verify-on-exit" in clean
