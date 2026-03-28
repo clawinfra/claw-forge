@@ -660,6 +660,23 @@ def run(
                 "from previous interrupted run[/yellow]"
             )
 
+        # Salvage any commits left on orphaned worktree branches from a
+        # killed/timed-out run.  This runs after the orphan-reset so the
+        # tasks are already back to pending — safe to merge their partial work.
+        if git_enabled and init_data.get("orphans_reset", 0):
+            from claw_forge.git.branching import merge_orphaned_worktrees
+
+            salvaged = merge_orphaned_worktrees(
+                project_path,
+                prefix=git_branch_prefix,
+                target=git_cfg.get("target_branch", "main"),
+            )
+            if salvaged:
+                console.print(
+                    f"[green]Salvage-merged {len(salvaged)} orphaned worktree branch(es) "
+                    f"→ main: {', '.join(salvaged)}[/green]"
+                )
+
         raw_tasks: list[dict[str, Any]] = init_data["tasks"]
         if not raw_tasks:
             console.print(
