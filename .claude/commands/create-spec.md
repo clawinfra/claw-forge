@@ -396,6 +396,7 @@ After writing files, show:
 Next steps:
   1. Review app_spec.txt — add/remove features as needed
   2. Run: claw-forge validate-spec app_spec.txt
+     → Issues found? Run /fix-spec, then re-run validate-spec until clean
   3. Run: claw-forge plan app_spec.txt
   4. Run: claw-forge run --concurrency 5
 

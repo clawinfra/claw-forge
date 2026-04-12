@@ -2260,6 +2260,10 @@ def validate_spec_cmd(
             f"[bold red]✗ Spec has {report.error_count} error(s) "
             f"— fix before running claw-forge plan[/bold red]"
         )
+        console.print(
+            f"\n  To fix: open Claude Code and run [bold]/fix-spec[/bold]\n"
+            f"  Then re-run: [bold]claw-forge validate-spec {spec}[/bold]"
+        )
         raise typer.Exit(1)
 
 
