@@ -652,7 +652,7 @@ def test_validate_spec_passed_property():
 # ---------------------------------------------------------------------------
 
 
-def test_validate_spec_cli_passes_on_template(tmp_path):
+def test_validate_spec_cli_passes_on_template():
     template = (
         _Path(__file__).parent.parent.parent
         / "claw_forge" / "spec" / "app_spec.template.xml"
