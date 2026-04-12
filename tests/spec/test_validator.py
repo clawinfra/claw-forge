@@ -384,3 +384,50 @@ def test_run_structural_checks_category_scores_keys_match_issue_categories() -> 
         assert cat in score_keys, (
             f"Issue category {cat!r} not found in category_scores keys: {score_keys}"
         )
+
+
+# ---------------------------------------------------------------------------
+# run_coverage_checks (Layer 3)
+# ---------------------------------------------------------------------------
+
+from claw_forge.spec.validator import run_coverage_checks  # noqa: E402
+
+
+def test_run_coverage_checks_no_gaps():
+    spec = _make_spec([
+        "User can POST /api/auth/register with email (returns 201)",
+        "User can view users table records (returns 200)",
+    ])
+    spec.api_endpoints = {"Auth": ["POST /api/auth/register - Register"]}
+    spec.database_tables = {"users": ["id UUID PRIMARY KEY"]}
+    report = run_coverage_checks(spec)
+    assert report.error_count == 0
+    assert len(report.layer_issues(3)) == 0
+
+
+def test_run_coverage_checks_missing_endpoint():
+    spec = _make_spec(["User can login (returns 200)"])
+    spec.api_endpoints = {"Payments": ["POST /api/payments/charge - Charge card"]}
+    spec.database_tables = {}
+    report = run_coverage_checks(spec)
+    l3 = report.layer_issues(3)
+    assert len(l3) >= 1
+    assert "/api/payments/charge" in l3[0].message
+
+
+def test_run_coverage_checks_missing_table():
+    spec = _make_spec(["User can login (returns 200)"])
+    spec.api_endpoints = {}
+    spec.database_tables = {"invoices": ["id UUID PRIMARY KEY", "amount NUMERIC NOT NULL"]}
+    report = run_coverage_checks(spec)
+    l3 = report.layer_issues(3)
+    assert len(l3) >= 1
+    assert "invoices" in l3[0].message
+
+
+def test_run_coverage_checks_empty_spec():
+    spec = _make_spec([])
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    report = run_coverage_checks(spec)
+    assert report.total_issues == 0

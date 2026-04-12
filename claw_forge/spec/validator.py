@@ -18,6 +18,7 @@ __all__ = [
     "check_is_atomic",
     "check_not_too_vague",
     "check_starts_with_action_verb",
+    "run_coverage_checks",
     "run_structural_checks",
 ]
 
@@ -259,6 +260,59 @@ def run_structural_checks(spec: ProjectSpec) -> ValidationReport:
         category_scores[cat] = passed / total if total > 0 else 1.0
 
     return ValidationReport(issues=issues, category_scores=category_scores)
+
+
+def _endpoint_path(endpoint_line: str) -> str:
+    """Extract the URL path from 'POST /api/auth/register - Register new user'."""
+    parts = endpoint_line.strip().split()
+    for part in parts:
+        if part.startswith("/"):
+            return part
+    return endpoint_line.strip()
+
+
+def run_coverage_checks(spec: ProjectSpec) -> ValidationReport:
+    """Layer 3: cross-reference endpoints and tables against feature bullets.
+
+    Every API endpoint in <api_endpoints_summary> must appear in at least one
+    feature bullet (path match). Every table in <database_schema> must be
+    referenced in at least one bullet. Missing coverage means the agent will
+    never implement that endpoint or table.
+    """
+    issues: list[ValidationIssue] = []
+    all_bullets = " ".join(feat.description.lower() for feat in spec.features)
+
+    for domain, endpoint_lines in spec.api_endpoints.items():
+        for endpoint_line in endpoint_lines:
+            path = _endpoint_path(endpoint_line)
+            path_clean = path.lstrip("/").replace("-", " ").replace("_", " ").lower()
+            if path.lower() not in all_bullets and path_clean not in all_bullets:
+                issues.append(
+                    ValidationIssue(
+                        severity=IssueSeverity.WARNING,
+                        layer=3,
+                        category=domain,
+                        bullet="",
+                        message=f"No feature bullet references endpoint {path}",
+                        suggestion=f"Add a bullet in '{domain}' covering {path}",
+                    )
+                )
+
+    for table_name in spec.database_tables:
+        table_clean = table_name.replace("_", " ").lower()
+        if table_name.lower() not in all_bullets and table_clean not in all_bullets:
+            issues.append(
+                ValidationIssue(
+                    severity=IssueSeverity.WARNING,
+                    layer=3,
+                    category="Database",
+                    bullet="",
+                    message=f"No feature bullet references table '{table_name}'",
+                    suggestion=f"Add CRUD bullets for the '{table_name}' table",
+                )
+            )
+
+    return ValidationReport(issues=issues, category_scores={})
 
 
 def _check_category(check: object) -> str:
