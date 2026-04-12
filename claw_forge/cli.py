@@ -2141,6 +2141,126 @@ def plan(
         raise typer.Exit(1) from None
 
 
+@app.command("validate-spec")
+def validate_spec_cmd(
+    spec: str = typer.Argument(..., help="Path to app_spec.txt or additions_spec.xml."),
+    no_llm: bool = typer.Option(
+        False, "--no-llm",
+        help="Skip Layer 2 adversarial LLM evaluation (Layer 1 + Layer 3 only).",
+    ),
+    threshold: float = typer.Option(
+        7.0, "--threshold", "-t",
+        help="Layer 2 LLM approval threshold (0-10). Default: 7.0.",
+    ),
+    model: str = typer.Option(
+        "claude-haiku-4-5-20251001", "--model", "-m",
+        help="Model for Layer 2 LLM evaluation.",
+    ),
+) -> None:
+    """Validate a spec file before planning.
+
+    Runs 3 validation layers and exits non-zero if errors are found:
+
+      Layer 1 — Structural: action verbs, measurable outcomes, atomicity, vagueness
+      Layer 2 — LLM:        adversarial per-category scoring (requires ANTHROPIC_API_KEY)
+      Layer 3 — Coverage:   cross-references endpoints and tables against bullets
+
+    Examples:
+
+        claw-forge validate-spec app_spec.txt
+        claw-forge validate-spec app_spec.txt --no-llm
+        claw-forge validate-spec app_spec.txt --threshold 8.0
+    """
+    from claw_forge.spec.parser import ProjectSpec
+    from claw_forge.spec.validator import IssueSeverity, validate_spec
+
+    spec_path = Path(spec)
+    if not spec_path.exists():
+        console.print(f"[red]Spec file not found: {spec_path}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        parsed = ProjectSpec.from_file(spec_path)
+    except Exception as exc:
+        console.print(f"[red]Failed to parse spec: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"\n[bold]Validating:[/bold] {spec_path.name}")
+    console.print(f"  Features:   {len(parsed.features)}")
+    console.print(f"  Categories: {len({f.category for f in parsed.features})}")
+    console.print(f"  Endpoints:  {sum(len(v) for v in parsed.api_endpoints.values())}")
+    console.print(f"  Tables:     {len(parsed.database_tables)}")
+    console.print()
+
+    run_llm = not no_llm
+    report = validate_spec(
+        parsed,
+        run_llm=run_llm,
+        approve_threshold=threshold,
+        llm_model=model,
+    )
+
+    # ── Layer 1 ──────────────────────────────────────────────────────────────
+    l1 = report.layer_issues(1)
+    l1_errors = [i for i in l1 if i.severity == IssueSeverity.ERROR]
+    l1_warnings = [i for i in l1 if i.severity == IssueSeverity.WARNING]
+    status_l1 = "[red]FAIL[/red]" if l1_errors else "[green]PASS[/green]"
+    console.print(
+        f"Layer 1 (Structural)  {status_l1}  "
+        f"{len(l1_errors)} errors, {len(l1_warnings)} warnings"
+    )
+    for issue in l1_errors:
+        console.print(f"  [red]✗[/red] [{issue.category}] {issue.message}")
+        if issue.suggestion:
+            console.print(f"    → {issue.suggestion}")
+        console.print(f'    Bullet: "{issue.bullet[:80]}"')
+    for issue in l1_warnings[:5]:
+        console.print(f"  [yellow]⚠[/yellow] [{issue.category}] {issue.message}")
+    if len(l1_warnings) > 5:
+        console.print(f"  [dim]... and {len(l1_warnings) - 5} more warnings[/dim]")
+
+    # ── Layer 2 ──────────────────────────────────────────────────────────────
+    l2 = report.layer_issues(2)
+    if not run_llm:
+        console.print("\nLayer 2 (LLM eval)    [dim]skipped (--no-llm)[/dim]")
+    elif any("skipped" in i.message.lower() or "ANTHROPIC_API_KEY" in i.message for i in l2):
+        for issue in l2:
+            console.print(f"\n  [dim]{issue.message}[/dim]")
+    else:
+        l2_fails = [i for i in l2 if i.category]
+        status_l2 = "[red]FAIL[/red]" if l2_fails else "[green]PASS[/green]"
+        console.print(f"\nLayer 2 (LLM eval)    {status_l2}")
+        for cat, score in report.category_scores.items():
+            mark = "[green]✓[/green]" if score >= threshold else "[yellow]⚠[/yellow]"
+            console.print(f"  {mark} {cat}: {score:.1f}/10")
+        for issue in l2_fails:
+            console.print(f"  [yellow]⚠[/yellow] {issue.message}")
+
+    # ── Layer 3 ──────────────────────────────────────────────────────────────
+    l3 = report.layer_issues(3)
+    status_l3 = "[yellow]GAPS[/yellow]" if l3 else "[green]PASS[/green]"
+    console.print(f"\nLayer 3 (Coverage)    {status_l3}  {len(l3)} gaps")
+    for issue in l3:
+        console.print(f"  [yellow]⚠[/yellow] {issue.message}")
+        if issue.suggestion:
+            console.print(f"    → {issue.suggestion}")
+
+    # ── Verdict ───────────────────────────────────────────────────────────────
+    console.print()
+    if report.passed:
+        console.print(
+            f"[bold green]✅ Spec passed validation[/bold green]  "
+            f"({report.warning_count} warnings)"
+        )
+        console.print(f"\n  Next: [bold]claw-forge plan {spec}[/bold]")
+    else:
+        console.print(
+            f"[bold red]✗ Spec has {report.error_count} error(s) "
+            f"— fix before running claw-forge plan[/bold red]"
+        )
+        raise typer.Exit(1)
+
+
 @app.command()
 def add(
     feature: str = typer.Argument(
