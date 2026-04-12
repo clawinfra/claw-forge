@@ -550,8 +550,14 @@ def run_llm_evaluation(
             parts.append(ts.backend_runtime)
         tech_stack = " + ".join(parts) if parts else ""
 
-    import anthropic  # optional dependency — imported after key check so missing install
-    # does not prevent the graceful skip path from returning cleanly.
+    try:
+        import anthropic
+    except ImportError:
+        issues.append(ValidationIssue(
+            severity=IssueSeverity.WARNING, layer=2, category="", bullet="",
+            message="Layer 2 LLM evaluation skipped: 'anthropic' package not installed.",
+        ))
+        return ValidationReport(issues=issues, category_scores=category_scores)
 
     evaluator = SpecEvaluator(approve_threshold=approve_threshold)
     client = anthropic.Anthropic(api_key=api_key)
