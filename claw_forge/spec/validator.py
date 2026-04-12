@@ -25,6 +25,7 @@ __all__ = [
     "SpecEvaluator",
     "SPEC_DIMENSIONS",
     "run_llm_evaluation",
+    "validate_spec",
 ]
 
 
@@ -608,3 +609,42 @@ def run_llm_evaluation(
             )
 
     return ValidationReport(issues=issues, category_scores=category_scores)
+
+
+def validate_spec(
+    spec: ProjectSpec,
+    run_llm: bool = True,
+    approve_threshold: float = 7.0,
+    llm_model: str = "claude-haiku-4-5-20251001",
+) -> ValidationReport:
+    """Run all three validation layers and return a merged ValidationReport.
+
+    Parameters
+    ----------
+    spec:
+        Parsed ProjectSpec (from ProjectSpec.from_file()).
+    run_llm:
+        Whether to run Layer 2 adversarial LLM evaluation.
+        Skipped automatically if ANTHROPIC_API_KEY is absent.
+    approve_threshold:
+        Minimum category score for Layer 2 APPROVE. Default: 7.0.
+    llm_model:
+        Model for Layer 2. Default: Haiku (fast + cheap).
+    """
+    merged = ValidationReport(issues=[], category_scores={})
+
+    # Layer 1 — structural checks
+    l1 = run_structural_checks(spec)
+    merged.issues.extend(l1.issues)
+
+    # Layer 2 — adversarial LLM (optional)
+    if run_llm:
+        l2 = run_llm_evaluation(spec, approve_threshold=approve_threshold, model=llm_model)
+        merged.issues.extend(l2.issues)
+        merged.category_scores.update(l2.category_scores)
+
+    # Layer 3 — coverage gaps
+    l3 = run_coverage_checks(spec)
+    merged.issues.extend(l3.issues)
+
+    return merged

@@ -566,3 +566,77 @@ def test_run_llm_evaluation_adds_issue_on_low_score():
     l2 = report.layer_issues(2)
     assert len(l2) >= 1
     assert report.category_scores["Core"] < 7.0
+
+
+# ---------------------------------------------------------------------------
+# validate_spec — unified 3-layer entry point
+# ---------------------------------------------------------------------------
+
+from claw_forge.spec.validator import validate_spec  # noqa: E402
+
+
+def test_validate_spec_no_llm_passes_on_good_bullets():
+    spec = _make_spec([
+        "User can register with email and password (returns 201 with user_id)",
+        "System returns 409 when email is already registered",
+        "User can login with valid credentials (returns 200 with JWT access_token)",
+    ])
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    report = validate_spec(spec, run_llm=False)
+    assert report.error_count == 0
+
+
+def test_validate_spec_catches_layer1_errors():
+    spec = _make_spec(["User can register and then login and redirect to dashboard"])
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    report = validate_spec(spec, run_llm=False)
+    assert report.error_count >= 1
+    assert all(i.layer == 1 for i in report.layer_issues(1))
+
+
+def test_validate_spec_catches_layer3_gaps():
+    spec = _make_spec(["User can login (returns 200)"])
+    spec.api_endpoints = {"Payments": ["POST /api/payments/charge - Charge card"]}
+    spec.database_tables = {}
+    report = validate_spec(spec, run_llm=False)
+    l3 = report.layer_issues(3)
+    assert len(l3) >= 1
+
+
+def test_validate_spec_skips_llm_when_run_llm_false():
+    spec = _make_spec(["User can login (returns 200 with JWT)"])
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    report = validate_spec(spec, run_llm=False)
+    assert len(report.layer_issues(2)) == 0
+
+
+def test_validate_spec_merges_category_scores():
+    spec = _make_spec(["User can login (returns 200 with JWT)"], category="Auth")
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text=(
+        "Testability: 9\nAtomicity: 9\nSpecificity: 8\nErrorCoverage: 8\n"
+        "Verdict: APPROVE\nFeedback: Good."
+    ))]
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.messages.create.return_value = mock_response
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            report = validate_spec(spec, run_llm=True)
+    assert "Auth" in report.category_scores
+
+
+def test_validate_spec_passed_property():
+    spec = _make_spec([
+        "User can register with email and password (returns 201)",
+        "System returns 409 on duplicate email",
+    ])
+    spec.api_endpoints = {}
+    spec.database_tables = {}
+    report = validate_spec(spec, run_llm=False)
+    assert report.passed  # no errors (warnings OK)
