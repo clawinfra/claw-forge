@@ -687,3 +687,26 @@ def test_validate_spec_cli_missing_file(tmp_path):
     result = runner.invoke(_cli_app, ["validate-spec", str(tmp_path / "nope.xml"), "--no-llm"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
+
+
+def test_validate_spec_cli_failure_shows_fix_spec_hint(tmp_path):
+    """Failure output must guide the user to /fix-spec."""
+    import textwrap
+    bad = textwrap.dedent("""\
+        <project_specification>
+          <project_name>bad</project_name>
+          <overview>test</overview>
+          <core_features>
+            <category name="Auth">
+              - register and then login and do everything
+            </category>
+          </core_features>
+        </project_specification>
+    """)
+    f = tmp_path / "bad.xml"
+    f.write_text(bad)
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(f), "--no-llm"])
+    assert result.exit_code == 1
+    assert "/fix-spec" in result.output
+    assert "validate-spec" in result.output

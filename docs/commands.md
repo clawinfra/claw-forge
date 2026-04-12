@@ -274,9 +274,13 @@ Layer 1 (Structural)  FAIL  1 errors, 2 warnings
     Bullet: "User can register and then login and receive a JWT token"
 
 ✗ Spec has 1 error(s) — fix before running claw-forge plan
+
+  To fix: open Claude Code and run /fix-spec
+  Then re-run: claw-forge validate-spec app_spec.txt
 ```
 
-Exit code 1, blocks `claw-forge plan`.
+Exit code 1, blocks `claw-forge plan`. Run `/fix-spec` in Claude Code to auto-repair the issues
+iteratively, then re-run `validate-spec` until clean.
 
 #### Pro tips
 - Run `--no-llm` in tight loops when iterating on the spec — it's instant and free.
@@ -286,6 +290,7 @@ Exit code 1, blocks `claw-forge plan`.
 
 #### Related commands
 - **Before:** `/create-spec`
+- **If issues found:** `/fix-spec` — auto-repairs issues and re-validates in a loop
 - **After:** `claw-forge plan`
 
 ---
