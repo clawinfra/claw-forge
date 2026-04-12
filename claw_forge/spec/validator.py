@@ -263,12 +263,29 @@ def run_structural_checks(spec: ProjectSpec) -> ValidationReport:
 
 
 def _endpoint_path(endpoint_line: str) -> str:
-    """Extract the URL path from 'POST /api/auth/register - Register new user'."""
+    """Extract the URL path from 'POST /api/auth/register - Register new user'.
+
+    Strips query strings (``?…``) so that ``/api/users?active=true`` is
+    normalised to ``/api/users`` before the coverage check.
+    """
     parts = endpoint_line.strip().split()
     for part in parts:
         if part.startswith("/"):
-            return part
+            # Drop any query string (e.g. /api/users?active=true → /api/users)
+            return part.split("?")[0]
     return endpoint_line.strip()
+
+
+def _term_in_bullets(term: str, all_bullets: str) -> bool:
+    """Return True if *term* appears as a whole token in *all_bullets*.
+
+    Uses a word-boundary regex so that ``/api/user`` does **not** match a
+    bullet that only mentions ``/api/users``, avoiding false-positive coverage.
+    Non-word characters at the boundaries of the term (``/``, ``-``, ``_``)
+    are treated as delimiters.
+    """
+    escaped = re.escape(term)
+    return bool(re.search(r"(?<!\w)" + escaped + r"(?!\w)", all_bullets))
 
 
 def run_coverage_checks(spec: ProjectSpec) -> ValidationReport:
@@ -285,8 +302,11 @@ def run_coverage_checks(spec: ProjectSpec) -> ValidationReport:
     for domain, endpoint_lines in spec.api_endpoints.items():
         for endpoint_line in endpoint_lines:
             path = _endpoint_path(endpoint_line)
+            path_lower = path.lower()
             path_clean = path.lstrip("/").replace("-", " ").replace("_", " ").lower()
-            if path.lower() not in all_bullets and path_clean not in all_bullets:
+            if not _term_in_bullets(path_lower, all_bullets) and not _term_in_bullets(
+                path_clean, all_bullets
+            ):
                 issues.append(
                     ValidationIssue(
                         severity=IssueSeverity.WARNING,
@@ -299,8 +319,11 @@ def run_coverage_checks(spec: ProjectSpec) -> ValidationReport:
                 )
 
     for table_name in spec.database_tables:
+        table_lower = table_name.lower()
         table_clean = table_name.replace("_", " ").lower()
-        if table_name.lower() not in all_bullets and table_clean not in all_bullets:
+        if not _term_in_bullets(table_lower, all_bullets) and not _term_in_bullets(
+            table_clean, all_bullets
+        ):
             issues.append(
                 ValidationIssue(
                     severity=IssueSeverity.WARNING,

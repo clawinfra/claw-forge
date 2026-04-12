@@ -431,3 +431,29 @@ def test_run_coverage_checks_empty_spec():
     spec.database_tables = {}
     report = run_coverage_checks(spec)
     assert report.total_issues == 0
+
+
+def test_run_coverage_checks_query_string_stripped():
+    """Endpoint paths with query strings should be normalised before matching."""
+    spec = _make_spec([
+        "User can list active /api/users returning 200",
+    ])
+    spec.api_endpoints = {"Users": ["GET /api/users?active=true - List active users"]}
+    spec.database_tables = {}
+    report = run_coverage_checks(spec)
+    # /api/users (after stripping ?active=true) is referenced → no warning
+    assert len(report.layer_issues(3)) == 0
+
+
+def test_run_coverage_checks_no_false_positive_path_prefix():
+    """/api/user must NOT match a bullet that only mentions /api/users."""
+    spec = _make_spec([
+        "User can list /api/users records returning 200",
+    ])
+    spec.api_endpoints = {"Users": ["GET /api/user - Get single user"]}
+    spec.database_tables = {}
+    report = run_coverage_checks(spec)
+    # /api/user is not in the bullets (only /api/users is) → warning expected
+    l3 = report.layer_issues(3)
+    assert len(l3) >= 1
+    assert "/api/user" in l3[0].message
