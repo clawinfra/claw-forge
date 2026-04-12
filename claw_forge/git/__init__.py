@@ -159,6 +159,84 @@ class GitOps:
                 worktree_path=worktree_path,
             )
 
+    async def apply_on_completion(
+        self,
+        *,
+        task_id: str,
+        slug: str,
+        description: str | None = None,
+        plugin_name: str | None = None,
+        steps: list[str] | None = None,
+        worktree_path: Path | None = None,
+        success: bool,
+        commit_on_boundary: bool = True,
+        merge_strategy: str = "auto",
+        branch_prefix: str = "feat",
+        target_branch: str = "main",
+        session_id: str = "",
+    ) -> dict[str, Any] | None:
+        """Apply git operations after a task completes or fails.
+
+        On success with ``commit_on_boundary=True``:
+        - Commits a checkpoint on the feature branch.
+        - If ``merge_strategy == "auto"``, squash-merges to ``target_branch``
+          and removes the worktree.
+        - If ``merge_strategy == "manual"``, leaves the branch and worktree
+          intact for the operator to merge manually.
+
+        On failure:
+        - Preserves the worktree if the feature branch has commits ahead of
+          ``target_branch`` so a retry agent can resume from saved work.
+        - Removes the worktree if no committed work exists (nothing to resume).
+
+        Returns the merge result dict when an auto-merge is attempted, or
+        ``None`` in all other cases (including when ``enabled=False``).
+        """
+        import logging as _logging
+
+        if not self.enabled:
+            return None
+
+        if success and commit_on_boundary:
+            message = description or f"{plugin_name or 'task'}({slug}): completed"
+            await self.checkpoint(
+                message=message,
+                task_id=task_id,
+                plugin=plugin_name or "unknown",
+                phase=plugin_name or "unknown",
+                session_id=session_id,
+                cwd=worktree_path,
+            )
+            if merge_strategy == "auto":
+                branch_name = f"{branch_prefix}/{slug}"
+                merge_result = await self.merge(
+                    branch_name,
+                    target_branch,
+                    title=description,
+                    steps=steps,
+                    task_id=task_id,
+                    session_id=session_id,
+                    worktree_path=worktree_path,
+                )
+                if merge_result and not merge_result.get("merged"):
+                    _logging.getLogger("claw_forge.git").warning(
+                        "Merge failed for %s: %s",
+                        branch_name,
+                        merge_result.get("error", "unknown"),
+                    )
+                return merge_result
+
+        elif not success and worktree_path is not None:
+            from claw_forge.git.branching import branch_has_commits_ahead
+
+            fail_branch = f"{branch_prefix}/{slug}"
+            if not branch_has_commits_ahead(
+                self.project_dir, fail_branch, target_branch
+            ):
+                await self.remove_worktree(worktree_path)
+
+        return None
+
     async def history(
         self, *, task_id: str | None = None, limit: int = 20, cwd: Path | None = None
     ) -> list[dict[str, Any]]:

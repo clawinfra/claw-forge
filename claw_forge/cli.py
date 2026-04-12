@@ -1363,49 +1363,21 @@ def run(
                     )
 
                     # Git: checkpoint + optional merge on success, cleanup on failure
-                    if git_enabled and success and git_commit_on_boundary:
-                        _desc = (
-                            task_node.description
-                            or f"{task_node.plugin_name}({_slug}): completed"
-                        )
-                        await git_ops.checkpoint(
-                            message=_desc,
+                    if git_enabled:
+                        await git_ops.apply_on_completion(
                             task_id=task_node.id,
-                            plugin=task_node.plugin_name,
-                            phase=task_node.plugin_name,
+                            slug=_slug,
+                            description=task_node.description or None,
+                            plugin_name=task_node.plugin_name,
+                            steps=task_node.steps or None,
+                            worktree_path=_worktree_path,
+                            success=success,
+                            commit_on_boundary=git_commit_on_boundary,
+                            merge_strategy=git_merge_strategy,
+                            branch_prefix=git_branch_prefix,
+                            target_branch=git_cfg.get("target_branch", "main"),
                             session_id=session_id,
-                            cwd=_worktree_path,
                         )
-                        if git_merge_strategy == "auto":
-                            _branch_name = f"{git_branch_prefix}/{_slug}"
-                            _merge_result = await git_ops.merge(
-                                _branch_name,
-                                title=task_node.description or None,
-                                steps=task_node.steps or None,
-                                task_id=task_node.id,
-                                session_id=session_id,
-                                worktree_path=_worktree_path,
-                            )
-                            if (
-                                _merge_result
-                                and not _merge_result.get("merged")
-                            ):
-                                logging.getLogger("claw_forge.cli").warning(
-                                    "Merge failed for %s: %s",
-                                    _branch_name,
-                                    _merge_result.get("error", "unknown"),
-                                )
-                    elif git_enabled and not success and _worktree_path:
-                        # Preserve worktree if branch has committed work
-                        # so the retry can resume from checkpoint commits.
-                        from claw_forge.git.branching import branch_has_commits_ahead
-
-                        _fail_branch = f"{git_branch_prefix}/{_slug}"
-                        _target = git_cfg.get("target_branch", "main")
-                        if not branch_has_commits_ahead(
-                            project_path, _fail_branch, _target
-                        ):
-                            await git_ops.remove_worktree(_worktree_path)
 
             return {"success": success, "output": output}
 
@@ -1425,7 +1397,7 @@ def run(
             for _tid, _wt in _active_worktrees.items():
                 _emergency_commit(_wt, task_id=_tid)
             if signum == _signal.SIGTERM and callable(_original_sigterm):
-                _original_sigterm(signum, frame)  # type: ignore[misc]
+                _original_sigterm(signum, frame)
             elif signum == _signal.SIGINT:
                 raise KeyboardInterrupt
 
