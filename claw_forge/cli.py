@@ -669,7 +669,8 @@ def run(
     console.print(f"[dim]State service on port {_state_port}[/dim]")
 
     # Set up git tracking
-    from claw_forge.git import GitOps, detect_default_branch as _detect_default_branch
+    from claw_forge.git import GitOps
+    from claw_forge.git import detect_default_branch as _detect_default_branch
 
     git_cfg = cfg.get("git", {})
     _default_branch = git_cfg.get("target_branch") or _detect_default_branch(project_path)
