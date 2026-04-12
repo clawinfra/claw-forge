@@ -64,12 +64,46 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _detect_default_branch(cwd: Path) -> str:
+def detect_default_branch(cwd: Path) -> str:
+    """Return the default branch name for the repository at *cwd*.
+
+    Detection order (first match wins):
+    1. Remote symbolic HEAD (``refs/remotes/origin/HEAD``) — reliable after clone.
+    2. First existing local branch among the common defaults: ``main``, ``master``.
+    3. Current branch (``symbolic-ref --short HEAD``).
+    4. Hard fallback: ``"main"``.
+    """
+    # 1. Remote's HEAD pointer
+    try:
+        result = _run_git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
+        ref = result.stdout.strip()  # e.g. "refs/remotes/origin/main"
+        if ref:
+            return ref.split("/")[-1]
+    except subprocess.CalledProcessError:
+        pass
+
+    # 2. Common local branch names
+    for candidate in ("main", "master"):
+        try:
+            _run_git(["rev-parse", "--verify", f"refs/heads/{candidate}"], cwd)
+            return candidate
+        except subprocess.CalledProcessError:
+            pass
+
+    # 3. Current branch
     try:
         result = _run_git(["symbolic-ref", "--short", "HEAD"], cwd)
-        return result.stdout.strip()
+        branch = result.stdout.strip()
+        if branch:
+            return branch
     except subprocess.CalledProcessError:
-        return "main"
+        pass
+
+    return "main"
+
+
+# Keep private alias for backward compatibility with internal callers
+_detect_default_branch = detect_default_branch
 
 
 def ensure_gitignore(project_dir: Path) -> None:

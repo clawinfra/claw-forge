@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claw_forge.git import GitOps
+from claw_forge.git import GitOps, detect_default_branch
 from claw_forge.git.branching import branch_exists, branch_has_commits_ahead, current_branch
 
 
@@ -30,6 +30,139 @@ def git_repo(tmp_path: Path) -> Path:
         cwd=tmp_path, check=True, capture_output=True,
     )
     return tmp_path
+
+
+class TestDetectDefaultBranch:
+    def test_detects_main(self, git_repo: Path) -> None:
+        assert detect_default_branch(git_repo) == "main"
+
+    def test_detects_master(self, tmp_path: Path) -> None:
+        subprocess.run(
+            ["git", "init", "-b", "master"], cwd=tmp_path, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
+        (tmp_path / "README.md").write_text("# test\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True
+        )
+        assert detect_default_branch(tmp_path) == "master"
+
+    def test_detects_custom_branch(self, tmp_path: Path) -> None:
+        subprocess.run(
+            ["git", "init", "-b", "trunk"], cwd=tmp_path, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
+        (tmp_path / "README.md").write_text("# test\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True
+        )
+        assert detect_default_branch(tmp_path) == "trunk"
+
+
+class TestApplyOnCompletionTargetBranch:
+    """Tests that apply_on_completion uses auto-detected target branch by default."""
+
+    def test_auto_detects_target_branch_when_not_specified(
+        self, tmp_path: Path
+    ) -> None:
+        # Init a repo using 'develop' as the default branch
+        subprocess.run(
+            ["git", "init", "-b", "develop"], cwd=tmp_path, check=True, capture_output=True
+        )
+        for cmd in (
+            ["git", "config", "user.email", "t@t.com"],
+            ["git", "config", "user.name", "T"],
+        ):
+            subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "README.md").write_text("# test\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True
+        )
+
+        ops = GitOps(project_dir=tmp_path, enabled=True)
+        result = asyncio.run(ops.create_worktree("t1", "feature-x", base_branch="develop"))
+        assert result is not None
+        _, wt_path = result
+        (wt_path / "x.py").write_text("x = 1\n")
+        asyncio.run(ops.checkpoint(
+            message="feat: add x", task_id="t1", plugin="coding",
+            phase="coding", session_id="s1", cwd=wt_path,
+        ))
+
+        # No target_branch passed — should auto-detect 'develop'
+        merge_result = asyncio.run(ops.apply_on_completion(
+            task_id="t1",
+            slug="feature-x",
+            description="Add feature x",
+            plugin_name="coding",
+            steps=None,
+            worktree_path=wt_path,
+            success=True,
+            commit_on_boundary=True,
+            merge_strategy="auto",
+            branch_prefix="feat",
+            session_id="s1",
+        ))
+
+        assert merge_result is not None
+        assert merge_result["merged"] is True
+        assert current_branch(tmp_path) == "develop"
+        assert (tmp_path / "x.py").exists()
+
+    def test_explicit_target_branch_overrides_detection(self, git_repo: Path) -> None:
+        # Create a second branch to merge into
+        subprocess.run(
+            ["git", "checkout", "-b", "staging"], cwd=git_repo, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "checkout", "main"], cwd=git_repo, check=True, capture_output=True
+        )
+
+        ops = GitOps(project_dir=git_repo, enabled=True)
+        result = asyncio.run(ops.create_worktree("t2", "hotfix"))
+        assert result is not None
+        _, wt_path = result
+        (wt_path / "fix.py").write_text("fix = 1\n")
+        asyncio.run(ops.checkpoint(
+            message="fix: hotfix", task_id="t2", plugin="coding",
+            phase="coding", session_id="s1", cwd=wt_path,
+        ))
+
+        merge_result = asyncio.run(ops.apply_on_completion(
+            task_id="t2",
+            slug="hotfix",
+            description="Apply hotfix",
+            plugin_name="coding",
+            steps=None,
+            worktree_path=wt_path,
+            success=True,
+            commit_on_boundary=True,
+            merge_strategy="auto",
+            branch_prefix="feat",
+            target_branch="staging",
+            session_id="s1",
+        ))
+
+        assert merge_result is not None
+        assert merge_result["merged"] is True
+        assert current_branch(git_repo) == "staging"
 
 
 class TestWorktreeLifecycle:

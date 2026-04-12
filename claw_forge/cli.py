@@ -669,9 +669,10 @@ def run(
     console.print(f"[dim]State service on port {_state_port}[/dim]")
 
     # Set up git tracking
-    from claw_forge.git import GitOps
+    from claw_forge.git import GitOps, detect_default_branch as _detect_default_branch
 
     git_cfg = cfg.get("git", {})
+    _default_branch = git_cfg.get("target_branch") or _detect_default_branch(project_path)
     git_enabled = git_cfg.get("enabled", True)
     git_merge_strategy = git_cfg.get("merge_strategy", "auto")
     git_branch_prefix = git_cfg.get("branch_prefix", "feat")
@@ -730,7 +731,7 @@ def run(
         # killed/timed-out run.  Auto mode merges them; manual mode reports
         # them so the user knows they exist and can act on them.
         if git_enabled and init_data.get("orphans_reset", 0):
-            _target_branch = git_cfg.get("target_branch", "main")
+            _target_branch = _default_branch
             if git_merge_strategy == "auto":
                 from claw_forge.git.branching import merge_orphaned_worktrees
 
@@ -990,7 +991,7 @@ def run(
                             task_node.id,
                             _slug,
                             prefix=git_branch_prefix,
-                            base_branch=git_cfg.get("target_branch", "main"),
+                            base_branch=_default_branch,
                         )
                         if _wt_result:
                             _, _worktree_path = _wt_result
@@ -1045,7 +1046,7 @@ def run(
                     from claw_forge.git.commits import branch_commit_subjects
 
                     _resume_branch = f"{git_branch_prefix}/{_slug}"
-                    _resume_target = git_cfg.get("target_branch", "main")
+                    _resume_target = _default_branch
                     _prior_subjects = branch_commit_subjects(
                         project_path, _resume_branch, _resume_target
                     )
@@ -1375,7 +1376,7 @@ def run(
                             commit_on_boundary=git_commit_on_boundary,
                             merge_strategy=git_merge_strategy,
                             branch_prefix=git_branch_prefix,
-                            target_branch=git_cfg.get("target_branch", "main"),
+                            target_branch=_default_branch,
                             session_id=session_id,
                         )
 

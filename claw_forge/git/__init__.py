@@ -26,7 +26,7 @@ from claw_forge.git.branching import (
 )
 from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
 from claw_forge.git.merge import squash_merge
-from claw_forge.git.repo import ensure_gitignore, init_or_detect
+from claw_forge.git.repo import detect_default_branch, ensure_gitignore, init_or_detect
 from claw_forge.git.slug import make_branch_name, make_slug
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "create_worktree",
     "current_branch",
     "delete_branch",
+    "detect_default_branch",
     "ensure_gitignore",
     "init_or_detect",
     "make_branch_name",
@@ -172,7 +173,7 @@ class GitOps:
         commit_on_boundary: bool = True,
         merge_strategy: str = "auto",
         branch_prefix: str = "feat",
-        target_branch: str = "main",
+        target_branch: str | None = None,
         session_id: str = "",
     ) -> dict[str, Any] | None:
         """Apply git operations after a task completes or fails.
@@ -189,6 +190,10 @@ class GitOps:
           ``target_branch`` so a retry agent can resume from saved work.
         - Removes the worktree if no committed work exists (nothing to resume).
 
+        ``target_branch`` defaults to ``None``, in which case the repo's
+        default branch is auto-detected (remote HEAD → main → master →
+        current branch).  Pass an explicit value to override.
+
         Returns the merge result dict when an auto-merge is attempted, or
         ``None`` in all other cases (including when ``enabled=False``).
         """
@@ -196,6 +201,8 @@ class GitOps:
 
         if not self.enabled:
             return None
+
+        _target: str = target_branch or detect_default_branch(self.project_dir)
 
         if success and commit_on_boundary:
             message = description or f"{plugin_name or 'task'}({slug}): completed"
@@ -211,7 +218,7 @@ class GitOps:
                 branch_name = f"{branch_prefix}/{slug}"
                 merge_result = await self.merge(
                     branch_name,
-                    target_branch,
+                    _target,
                     title=description,
                     steps=steps,
                     task_id=task_id,
@@ -231,7 +238,7 @@ class GitOps:
 
             fail_branch = f"{branch_prefix}/{slug}"
             if not branch_has_commits_ahead(
-                self.project_dir, fail_branch, target_branch
+                self.project_dir, fail_branch, _target
             ):
                 await self.remove_worktree(worktree_path)
 
