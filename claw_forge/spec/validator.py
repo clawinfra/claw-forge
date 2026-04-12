@@ -514,8 +514,6 @@ def run_llm_evaluation(
     Categories scoring < approve_threshold get a WARNING issue (layer=2).
     Any API error per category gets a WARNING issue (layer=2) and continues.
     """
-    import anthropic  # optional dependency — imported inside function
-
     issues: list[ValidationIssue] = []
     category_scores: dict[str, float] = {}
 
@@ -551,6 +549,9 @@ def run_llm_evaluation(
         if hasattr(ts, "backend_runtime") and ts.backend_runtime:
             parts.append(ts.backend_runtime)
         tech_stack = " + ".join(parts) if parts else ""
+
+    import anthropic  # optional dependency — imported after key check so missing install
+    # does not prevent the graceful skip path from returning cleanly.
 
     evaluator = SpecEvaluator(approve_threshold=approve_threshold)
     client = anthropic.Anthropic(api_key=api_key)
