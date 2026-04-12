@@ -9,7 +9,7 @@ For individual command details, see [docs/commands.md](commands.md).
 
 ## Workflow 1: Greenfield — Build a New App from Scratch
 
-**Pipeline:** `claw-forge init` → `/create-spec` → `claw-forge plan` → `claw-forge run` → `/check-code` →
+**Pipeline:** `claw-forge init` → `/create-spec` → `claw-forge validate-spec` → `claw-forge plan` → `claw-forge run` → `/check-code` →
 `/checkpoint` → `/review-pr`
 
 **Scenario:** You're building "TaskFlow API" — a FastAPI + SQLite REST API for personal
@@ -94,7 +94,50 @@ Task Management (22 bullets)
 - `app_spec.txt` — 59 features across 6 categories, 4 phases, full DB schema
 - `claw-forge.yaml` — provider config with `claude-oauth` enabled
 
-### Step 3: Initialize with spec
+### Step 3: Validate the spec
+
+```bash
+claw-forge validate-spec app_spec.txt
+```
+
+**What happens:** The 3-layer validator runs structural checks on all 59 bullets, then (if the
+`anthropic` package is installed) calls an adversarial LLM evaluator per category, and finally
+scans for coverage gaps against the DB schema and API endpoints.
+
+**You see (passing):**
+```
+Validating app_spec.txt…
+
+  Layer 1 — Structural  ✅  0 issues
+  Layer 2 — LLM         ✅  6 categories evaluated, all scored ≥ 7.0
+  Layer 3 — Coverage    ✅  0 gaps detected
+
+✅ Spec passes validation (0 issues)
+
+Next: claw-forge plan app_spec.txt
+```
+
+**If issues are found:**
+```
+  Layer 1 — Structural  ⚠  2 issues
+
+  WARNING  [task-management] "User can update things and create things" — appears compound
+           (contains "and"); split into one bullet per action.
+  WARNING  [auth] "Handle errors appropriately" — too vague; no measurable outcome.
+
+⚠  2 warnings — review before planning.
+```
+
+Fix the flagged bullets in `app_spec.txt`, then re-run until the spec is clean. The LLM layer
+is optional and costs a small amount (a few cents for a typical 60-feature spec); skip it with
+`--no-llm` if you prefer a free structural check only.
+
+> **Skip LLM for a free check:**
+> ```bash
+> claw-forge validate-spec app_spec.txt --no-llm
+> ```
+
+### Step 4: Initialize with spec
 
 ```bash
 claw-forge plan app_spec.txt --concurrency 5
@@ -129,7 +172,7 @@ a 4-wave dependency DAG, and registers them in the state DB.
 > completed tasks are preserved, and only new/missing features are added. Use `--fresh` to
 > start a clean session from scratch.
 
-### Step 4: Run the agents
+### Step 5: Run the agents
 
 ```bash
 # Option A — one command (state service + UI + agents together)
@@ -174,7 +217,7 @@ Progress: 59/59 passing · 0 in-flight · $3.12 spent
 ✅ All features complete!
 ```
 
-### Step 5: Verify code quality
+### Step 6: Verify code quality
 
 In Claude Code:
 ```
@@ -195,7 +238,7 @@ In Claude Code:
 Overall: ALL CLEAR ✅
 ```
 
-### Step 6: Checkpoint and review
+### Step 7: Checkpoint and review
 
 ```
 /checkpoint
@@ -842,7 +885,7 @@ network drops, accidental Ctrl+C — are handled automatically. Just `claw-forge
 Start here
   │
   ├── Building something new?
-  │     └── claw-forge init → /create-spec → claw-forge plan → claw-forge run
+  │     └── claw-forge init → /create-spec → claw-forge validate-spec → claw-forge plan → claw-forge run
   │
   ├── Adding features to existing code?
   │     └── claw-forge analyze → /create-spec → claw-forge add → claw-forge run

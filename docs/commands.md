@@ -166,6 +166,130 @@ claw-forge plan app_spec.txt --fresh
 
 ---
 
+### `claw-forge validate-spec`
+
+#### Purpose
+Validates a spec file across 3 layers before it seeds the task DAG. Catches bad bullets
+early so agents never receive vague, untestable, or incomplete work orders — the most
+common source of agent failure and rework.
+
+#### When to use
+- After `/create-spec` writes `app_spec.txt` and before `claw-forge plan`
+- After manually editing a spec to verify you haven't broken any bullets
+- In CI pipelines to gate `claw-forge plan` on spec quality
+
+#### Usage
+```bash
+# Full validation — all 3 layers (requires ANTHROPIC_API_KEY for Layer 2)
+claw-forge validate-spec app_spec.txt
+
+# Structural + coverage only — zero LLM cost, no API key required
+claw-forge validate-spec app_spec.txt --no-llm
+
+# Stricter LLM threshold (default is 7.0)
+claw-forge validate-spec app_spec.txt --threshold 8.0
+
+# Use a different model for Layer 2 (default: Haiku)
+claw-forge validate-spec app_spec.txt --model claude-sonnet-4-6
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `spec` | positional | **required** | Path to `app_spec.txt` or XML spec file |
+| `--no-llm` | flag | `False` | Skip Layer 2 adversarial LLM evaluation |
+| `--threshold`, `-t` | float | `7.0` | Layer 2 approval threshold (0–10) |
+| `--model`, `-m` | string | `claude-haiku-4-5-20251001` | Model for Layer 2 evaluation |
+
+#### The 3 layers
+
+**Layer 1 — Structural (deterministic, zero cost)**
+Every bullet is checked for:
+- **Action-verb prefix** — must start with `User can`, `System returns`, `API validates`, `UI displays`, etc.
+- **Measurable outcome** — must contain an observable result: HTTP status code, field name, UI element, redirect target, or event name
+- **Atomicity** — no compound connectors (`and then`, `and receive`, `and redirect`) that hide multiple behaviors in one bullet
+- **Non-vagueness** — minimum word count; no `etc`, `various`, `stuff`, `things`
+
+Layer 1 violations are **errors** (compound bullets) or **warnings** (missing outcome, vague phrasing).
+
+**Layer 2 — Adversarial LLM evaluation (per category, optional)**
+A separate model call grades each category's bullet set on 4 spec-specific dimensions:
+
+| Dimension | Weight | What it checks |
+|-----------|--------|----------------|
+| Testability | ×3 | Can you write a pass/fail test for every bullet? |
+| Atomicity | ×3 | Is each bullet one implementable unit? |
+| Specificity | ×2 | Does each bullet name concrete outcomes? |
+| ErrorCoverage | ×2 | Does the category cover error and edge cases? |
+
+Categories scoring below `--threshold` emit a WARNING with specific feedback.
+Skips gracefully if `ANTHROPIC_API_KEY` is not set.
+
+**Layer 3 — Coverage gap detection (deterministic, zero cost)**
+Cross-references `<api_endpoints_summary>` and `<database_schema>` against feature bullets.
+Every listed endpoint and table must appear in at least one bullet — otherwise agents will
+never implement it.
+
+#### What it does internally
+1. Parses the spec with `ProjectSpec.from_file()`.
+2. Runs Layer 1 structural rules on every bullet.
+3. Runs Layer 2 adversarial LLM evaluation per category (if `--no-llm` is not set).
+4. Runs Layer 3 coverage gap detection against endpoints and tables.
+5. Prints a layered report and exits non-zero if any **errors** are found.
+
+#### Output example
+```
+Validating: app_spec.txt
+  Features:   59
+  Categories: 6
+  Endpoints:  24
+  Tables:     5
+
+Layer 1 (Structural)  PASS  0 errors, 3 warnings
+  ⚠ [Task Management] Bullet has no measurable outcome.
+    → Add a concrete result: HTTP status code, UI element name, field name.
+    Bullet: "User can search tasks"
+  ⚠ [API Layer] Bullet is too short (4 words). Minimum is 6.
+  ⚠ [UI / UX] Bullet contains vague filler: ['etc'].
+
+Layer 2 (LLM eval)    PASS
+  ✓ Authentication & User Management: 8.9/10
+  ✓ Task Management: 7.8/10
+  ✓ API Layer: 8.2/10
+  ✓ UI / UX: 7.1/10
+
+Layer 3 (Coverage)    PASS  0 gaps
+
+✅ Spec passed validation  (3 warnings)
+
+  Next: claw-forge plan app_spec.txt
+```
+
+#### Failing example
+```
+Layer 1 (Structural)  FAIL  1 errors, 2 warnings
+  ✗ [Authentication] Compound bullet detected ('and then'). Split into two bullets.
+    → Each bullet must be one atomic behavior.
+    Bullet: "User can register and then login and receive a JWT token"
+
+✗ Spec has 1 error(s) — fix before running claw-forge plan
+```
+
+Exit code 1, blocks `claw-forge plan`.
+
+#### Pro tips
+- Run `--no-llm` in tight loops when iterating on the spec — it's instant and free.
+- Use `--threshold 8.0` for mission-critical apps where you want highly specific bullets.
+- In CI, add `claw-forge validate-spec app_spec.txt --no-llm` as a gate before `claw-forge plan`.
+- The Layer 3 gap report is the most actionable output — each gap is a feature the agents will silently never implement.
+
+#### Related commands
+- **Before:** `/create-spec`
+- **After:** `claw-forge plan`
+
+---
+
 ### `claw-forge run`
 
 #### Purpose
