@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from claw_forge.spec.parser import FeatureItem, ProjectSpec
@@ -20,6 +22,9 @@ __all__ = [
     "check_starts_with_action_verb",
     "run_coverage_checks",
     "run_structural_checks",
+    "SpecEvaluator",
+    "SPEC_DIMENSIONS",
+    "run_llm_evaluation",
 ]
 
 
@@ -347,3 +352,251 @@ def _check_category(check: object) -> str:
     """
     name = getattr(check, "__name__", str(check))
     return _CHECK_CATEGORIES.get(name, name)
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: adversarial LLM evaluation per category
+# ---------------------------------------------------------------------------
+
+SPEC_DIMENSIONS: list[tuple[str, int, str]] = [
+    (
+        "Testability",
+        3,
+        "Can you write a pass/fail test for every bullet?"
+        " Each bullet must have a verifiable outcome.",
+    ),
+    (
+        "Atomicity",
+        3,
+        "Is each bullet one implementable unit?"
+        " No compound sequences. No 'and then' chains.",
+    ),
+    (
+        "Specificity",
+        2,
+        "Does each bullet name concrete things:"
+        " HTTP status, field names, UI elements, error messages?",
+    ),
+    (
+        "ErrorCoverage",
+        2,
+        "Does the category cover error and edge cases, not just the happy path?",
+    ),
+]
+_TOTAL_WEIGHT = sum(w for _, w, _ in SPEC_DIMENSIONS)
+
+_STRONG_EXAMPLE = """\
+Authentication bullets (score ≈8.5):
+- User can login with email + password (POST /api/auth/login returns 200 with JWT)
+- System returns 401 with {"error": "invalid_credentials"} on wrong password
+- System returns 400 with field errors when email is malformed
+- User can logout (DELETE /api/auth/session returns 204, clears HttpOnly cookie)
+"""
+
+_WEAK_EXAMPLE = """\
+Core bullets (score ≈3.5):
+- User can manage things
+- System handles errors
+- App does login stuff and then redirects user somewhere
+"""
+
+
+class SpecEvaluator:
+    """Adversarial evaluator for spec category bullets."""
+
+    def __init__(self, approve_threshold: float = 7.0) -> None:
+        self.approve_threshold = approve_threshold
+
+    def grade(
+        self,
+        bullets: str,
+        category: str,
+        dimension_scores: dict[str, float],
+        feedback: str = "",
+    ) -> dict[str, Any]:
+        """Compute weighted score across SPEC_DIMENSIONS and return grading result."""
+        total_weight = _TOTAL_WEIGHT
+        weighted_sum = 0.0
+        breakdown: dict[str, float] = {}
+        for dim_name, weight, _ in SPEC_DIMENSIONS:
+            score = float(dimension_scores.get(dim_name, 0.0))
+            breakdown[dim_name] = score
+            weighted_sum += score * weight
+
+        score = (weighted_sum / (total_weight * 10)) * 10 if total_weight > 0 else 0.0
+        verdict = "APPROVE" if score >= self.approve_threshold else "REQUEST_CHANGES"
+        return {
+            "score": score,
+            "verdict": verdict,
+            "breakdown": breakdown,
+            "feedback": feedback,
+            "category": category,
+        }
+
+    def build_evaluator_prompt(
+        self,
+        bullets: str,
+        category: str,
+        tech_stack: str = "",
+    ) -> str:
+        """Return adversarial evaluator prompt for the given bullets."""
+        dimensions_block = "\n".join(
+            f"- {name} (weight {weight}): {desc}"
+            for name, weight, desc in SPEC_DIMENSIONS
+        )
+        tech_line = f"Tech stack: {tech_stack}\n" if tech_stack else ""
+        prompt = f"""\
+ADVERSARIAL SPEC EVALUATOR
+
+You are an adversarial evaluator grading feature spec bullets for implementability.
+Be strict. Real projects fail when specs are vague or non-testable.
+
+{tech_line}Category: {category}
+
+## Grading Dimensions
+{dimensions_block}
+
+Score each dimension 1-10 (10 = perfect).
+
+## Calibration Examples
+
+{_STRONG_EXAMPLE}
+{_WEAK_EXAMPLE}
+
+## Bullets to Evaluate
+
+{bullets}
+
+## Required Output Format
+Output exactly these lines (no extra text before them):
+Testability: <score>
+Atomicity: <score>
+Specificity: <score>
+ErrorCoverage: <score>
+Verdict: APPROVE or REQUEST_CHANGES
+Feedback: <one or two sentences>
+"""
+        return prompt
+
+    def parse_llm_response(self, text: str) -> tuple[dict[str, float], str]:
+        """Parse dimension scores and feedback from LLM response text."""
+        scores: dict[str, float] = {}
+        feedback = ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.lower().startswith("feedback:"):
+                feedback = line[len("feedback:"):].strip()
+                continue
+            for dim_name, _, _ in SPEC_DIMENSIONS:
+                prefix = f"{dim_name}:"
+                if line.startswith(prefix):
+                    value_str = line[len(prefix):].strip().split()[0]
+                    with contextlib.suppress(ValueError):
+                        scores[dim_name] = float(value_str)
+                    break
+        return scores, feedback
+
+
+def run_llm_evaluation(
+    spec: ProjectSpec,
+    approve_threshold: float = 7.0,
+    model: str = "claude-haiku-4-5-20251001",
+) -> ValidationReport:
+    """Layer 2: adversarial LLM evaluation per category.
+
+    Requires ANTHROPIC_API_KEY. If absent, returns empty report with one
+    WARNING issue explaining the skip — never raises.
+    Uses Haiku by default (structured prompt, cheap model sufficient).
+    Groups features by category, calls API once per category.
+    Scores stored in report.category_scores[category_name].
+    Categories scoring < approve_threshold get a WARNING issue (layer=2).
+    Any API error per category gets a WARNING issue (layer=2) and continues.
+    """
+    import anthropic  # optional dependency — imported inside function
+
+    issues: list[ValidationIssue] = []
+    category_scores: dict[str, float] = {}
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        issues.append(
+            ValidationIssue(
+                severity=IssueSeverity.WARNING,
+                layer=2,
+                category="llm_evaluation",
+                bullet="",
+                message=(
+                    "Layer 2 LLM evaluation skipped: ANTHROPIC_API_KEY is not set."
+                ),
+                suggestion="Set ANTHROPIC_API_KEY to enable adversarial LLM evaluation.",
+            )
+        )
+        return ValidationReport(issues=issues, category_scores=category_scores)
+
+    # Group features by category
+    categories: dict[str, list[str]] = {}
+    for feat in spec.features:
+        categories.setdefault(feat.category, []).append(feat.description)
+
+    # Build tech_stack string
+    ts = spec.tech_stack
+    if hasattr(ts, "raw") and ts.raw:
+        tech_stack = ts.raw
+    else:
+        parts = []
+        if hasattr(ts, "frontend_framework") and ts.frontend_framework:
+            parts.append(ts.frontend_framework)
+        if hasattr(ts, "backend_runtime") and ts.backend_runtime:
+            parts.append(ts.backend_runtime)
+        tech_stack = " + ".join(parts) if parts else ""
+
+    evaluator = SpecEvaluator(approve_threshold=approve_threshold)
+    client = anthropic.Anthropic(api_key=api_key)
+
+    for category, bullets in categories.items():
+        bullet_block = "\n".join(f"- {b}" for b in bullets)
+        prompt = evaluator.build_evaluator_prompt(bullet_block, category, tech_stack)
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=512,
+                system="You are an adversarial spec evaluator. Grade ruthlessly.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.content[0].text
+            dimension_scores, feedback = evaluator.parse_llm_response(response_text)
+            result = evaluator.grade(bullet_block, category, dimension_scores, feedback)
+            score = result["score"]
+            category_scores[category] = score
+            if result["verdict"] == "REQUEST_CHANGES":
+                issues.append(
+                    ValidationIssue(
+                        severity=IssueSeverity.WARNING,
+                        layer=2,
+                        category=category,
+                        bullet="",
+                        message=(
+                            f"Category '{category}' scored {score:.1f}/10 "
+                            f"(threshold {approve_threshold}). {feedback}"
+                        ),
+                        suggestion=(
+                            "Improve bullet specificity, testability, atomicity, "
+                            "and error coverage."
+                        ),
+                    )
+                )
+        except Exception as exc:
+            issues.append(
+                ValidationIssue(
+                    severity=IssueSeverity.WARNING,
+                    layer=2,
+                    category=category,
+                    bullet="",
+                    message=f"LLM evaluation failed for category '{category}': {exc}",
+                    suggestion="Check API key and model name, then retry.",
+                )
+            )
+
+    return ValidationReport(issues=issues, category_scores=category_scores)

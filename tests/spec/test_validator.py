@@ -457,3 +457,112 @@ def test_run_coverage_checks_no_false_positive_path_prefix():
     l3 = report.layer_issues(3)
     assert len(l3) >= 1
     assert "/api/user" in l3[0].message
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: adversarial LLM evaluation
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from claw_forge.spec.validator import SpecEvaluator, run_llm_evaluation  # noqa: E402
+
+
+def test_spec_evaluator_approve():
+    ev = SpecEvaluator(approve_threshold=7.0)
+    result = ev.grade(
+        bullets="User can login (returns 200 with JWT)\nSystem returns 401 on bad credentials",
+        category="Authentication",
+        dimension_scores={"Testability": 9, "Atomicity": 9, "Specificity": 8, "ErrorCoverage": 8},
+        feedback="Strong category.",
+    )
+    assert result["verdict"] == "APPROVE"
+    assert result["score"] >= 7.0
+
+
+def test_spec_evaluator_request_changes():
+    ev = SpecEvaluator(approve_threshold=7.0)
+    result = ev.grade(
+        bullets="User can manage things",
+        category="Core",
+        dimension_scores={"Testability": 3, "Atomicity": 5, "Specificity": 2, "ErrorCoverage": 2},
+        feedback="Too vague.",
+    )
+    assert result["verdict"] == "REQUEST_CHANGES"
+    assert result["score"] < 7.0
+
+
+def test_spec_evaluator_builds_prompt():
+    ev = SpecEvaluator()
+    prompt = ev.build_evaluator_prompt(
+        bullets="User can login (returns 200)\nSystem returns 401 on failure",
+        category="Authentication",
+        tech_stack="FastAPI + React",
+    )
+    assert "ADVERSARIAL" in prompt
+    assert "Authentication" in prompt
+    assert "Testability" in prompt
+    assert "FastAPI" in prompt
+
+
+def test_spec_evaluator_parse_llm_response():
+    ev = SpecEvaluator()
+    text = (
+        "Testability: 9\nAtomicity: 8\nSpecificity: 7\nErrorCoverage: 8\n"
+        "Verdict: APPROVE\nFeedback: Good coverage of error cases."
+    )
+    scores, feedback = ev.parse_llm_response(text)
+    assert scores == {
+        "Testability": 9.0, "Atomicity": 8.0, "Specificity": 7.0, "ErrorCoverage": 8.0
+    }
+    assert "Good coverage" in feedback
+
+
+def test_run_llm_evaluation_skips_without_key():
+    spec = _make_spec(["User can login (returns 200)"])
+    with patch.dict("os.environ", {}, clear=True):
+        report = run_llm_evaluation(spec)
+    assert isinstance(report, ValidationReport)
+    skipped = [
+        i for i in report.issues
+        if "skipped" in i.message.lower() or "ANTHROPIC_API_KEY" in i.message
+    ]
+    assert len(skipped) == 1
+
+
+def test_run_llm_evaluation_calls_api_per_category():
+    spec = _make_spec([
+        "User can login (returns 200 with JWT)",
+        "System returns 401 on invalid credentials",
+    ], category="Authentication")
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text=(
+        "Testability: 9\nAtomicity: 9\nSpecificity: 8\nErrorCoverage: 8\n"
+        "Verdict: APPROVE\nFeedback: Good category."
+    ))]
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.messages.create.return_value = mock_response
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            report = run_llm_evaluation(spec)
+    assert "Authentication" in report.category_scores
+    assert report.category_scores["Authentication"] >= 7.0
+
+
+def test_run_llm_evaluation_adds_issue_on_low_score():
+    spec = _make_spec(["User can manage things"], category="Core")
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text=(
+        "Testability: 2\nAtomicity: 4\nSpecificity: 2\nErrorCoverage: 1\n"
+        "Verdict: REQUEST_CHANGES\nFeedback: Too vague, no error cases."
+    ))]
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.messages.create.return_value = mock_response
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            report = run_llm_evaluation(spec)
+    l2 = report.layer_issues(2)
+    assert len(l2) >= 1
+    assert report.category_scores["Core"] < 7.0
