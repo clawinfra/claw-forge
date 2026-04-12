@@ -49,7 +49,10 @@ echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
 #     "Convert this PRD to claw-forge XML. Use app_spec.example.xml as the template.
 #      Write the result to app_spec.txt."
 
-# 5. Parse spec → feature DAG (uses Opus for accurate planning)
+# 5. Validate spec quality (structural + LLM checks)
+claw-forge validate-spec app_spec.txt
+
+# 6. Parse spec → feature DAG (uses Opus for accurate planning)
 claw-forge plan app_spec.txt
 # Output:
 # ✅ Spec parsed: my-api

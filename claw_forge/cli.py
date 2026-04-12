@@ -1819,12 +1819,14 @@ def init(
             '    "Convert this PRD to claw-forge XML spec format.\n'
             "     Use app_spec.example.xml in this directory as the template.\n"
             '     Write the result to app_spec.txt."\n\n'
+            "  Then run: [bold]claw-forge validate-spec app_spec.txt[/bold]\n"
             "  Then run: [bold]claw-forge plan app_spec.txt[/bold]"
         )
     else:
         found = spec_file if spec_file.exists() else xml_spec_file
         console.print(
             f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
+            f"  Run: [bold]claw-forge validate-spec {found.name}[/bold]\n"
             f"  Run: [bold]claw-forge plan {found.name}[/bold]"
         )
 

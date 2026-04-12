@@ -395,8 +395,9 @@ After writing files, show:
 
 Next steps:
   1. Review app_spec.txt — add/remove features as needed
-  2. Run: claw-forge plan app_spec.txt
-  3. Run: claw-forge run --concurrency 5
+  2. Run: claw-forge validate-spec app_spec.txt
+  3. Run: claw-forge plan app_spec.txt
+  4. Run: claw-forge run --concurrency 5
 
 💡 Tip: Each feature bullet = one agent task. More specific bullets = better agent output.
    Aim for 100-300 bullets for a full application.
