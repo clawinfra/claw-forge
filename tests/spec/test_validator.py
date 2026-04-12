@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path as _Path
+
+from typer.testing import CliRunner as _CliRunner
+
+from claw_forge.cli import app as _cli_app
 from claw_forge.spec.parser import FeatureItem, ProjectSpec
 from claw_forge.spec.validator import (
     IssueSeverity,
@@ -640,3 +645,45 @@ def test_validate_spec_passed_property():
     spec.database_tables = {}
     report = validate_spec(spec, run_llm=False)
     assert report.passed  # no errors (warnings OK)
+
+
+# ---------------------------------------------------------------------------
+# CLI tests
+# ---------------------------------------------------------------------------
+
+
+def test_validate_spec_cli_passes_on_template(tmp_path):
+    template = (
+        _Path(__file__).parent.parent.parent
+        / "claw_forge" / "spec" / "app_spec.template.xml"
+    )
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(template), "--no-llm"])
+    assert result.exit_code == 0, result.output
+    assert "Layer 1" in result.output
+
+def test_validate_spec_cli_fails_on_compound_bullet(tmp_path):
+    import textwrap
+    bad = textwrap.dedent("""\
+        <project_specification>
+          <project_name>bad</project_name>
+          <overview>test</overview>
+          <core_features>
+            <category name="Auth">
+              - register and then login and do everything
+            </category>
+          </core_features>
+        </project_specification>
+    """)
+    f = tmp_path / "bad.xml"
+    f.write_text(bad)
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(f), "--no-llm"])
+    assert result.exit_code == 1
+    assert "error" in result.output.lower() or "FAIL" in result.output
+
+def test_validate_spec_cli_missing_file(tmp_path):
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(tmp_path / "nope.xml"), "--no-llm"])
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()

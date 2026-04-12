@@ -65,10 +65,10 @@
       - User can register with email and password (returns 201 with user_id)
       - System validates email format and rejects duplicates with 409 error
       - System hashes passwords using bcrypt before storing in database
-      - User can login and receive JWT access_token (15 min) and refresh_token (7 day)
+      - User can login with email and password (returns JWT access_token expiring in 15 min and refresh_token expiring in 7 days)
       - System returns 401 with "Invalid credentials" on failed login
       - User can logout and system invalidates refresh_token
-      - System auto-refreshes access_token using refresh_token when it expires
+      - System refreshes access_token automatically using a valid refresh_token (returns new access_token)
       - System returns 401 on all protected endpoints when token is missing or expired
       - User can view their profile: display name, email, account creation date
       - User can update their display name from the profile settings page
@@ -95,7 +95,7 @@
 
     <category name="API Layer">
       - API returns consistent JSON envelope: { "data": ..., "error": null, "status": 200 }
-      - API validates all request bodies with Pydantic v2 and returns 400 with field-level errors
+      - API validates all request bodies with Pydantic v2 (returns 400 with field-level errors on invalid input)
       - API requires valid JWT for all protected routes (returns 401 if missing or expired)
       - API returns paginated results: { "items": [...], "total": N, "page": 1, "per_page": 20, "has_next": true }
       - API returns 403 if authenticated user attempts to access another user's resource
