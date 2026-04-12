@@ -565,7 +565,8 @@ def run_llm_evaluation(
                 system="You are an adversarial spec evaluator. Grade ruthlessly.",
                 messages=[{"role": "user", "content": prompt}],
             )
-            response_text = response.content[0].text
+            raw_text = getattr(response.content[0], "text", None)
+            response_text = raw_text if isinstance(raw_text, str) else ""
             dimension_scores, feedback = evaluator.parse_llm_response(response_text)
             result = evaluator.grade(bullet_block, category, dimension_scores, feedback)
             score = result["score"]
