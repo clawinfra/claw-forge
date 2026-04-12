@@ -365,3 +365,22 @@ def test_run_structural_checks_layer_issues_filter() -> None:
     layer2 = report.layer_issues(2)
     assert len(layer1) > 0
     assert len(layer2) == 0
+
+
+def test_run_structural_checks_category_scores_keys_match_issue_categories() -> None:
+    """category_scores keys must match the ValidationIssue.category values they track."""
+    spec = _make_spec(
+        [
+            "JWT is issued on login",  # missing verb prefix → action_verb issue
+            "User can do etc",  # vague → vague issue
+            "User can login and then register and receive a JWT",  # compound → atomic issue
+        ]
+    )
+    report = run_structural_checks(spec)
+    issue_categories = {i.category for i in report.issues}
+    score_keys = set(report.category_scores.keys())
+    # Every issue category must appear in category_scores
+    for cat in issue_categories:
+        assert cat in score_keys, (
+            f"Issue category {cat!r} not found in category_scores keys: {score_keys}"
+        )

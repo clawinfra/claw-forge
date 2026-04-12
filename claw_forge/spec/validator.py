@@ -10,6 +10,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from claw_forge.spec.parser import FeatureItem, ProjectSpec
 
+__all__ = [
+    "IssueSeverity",
+    "ValidationIssue",
+    "ValidationReport",
+    "check_has_measurable_outcome",
+    "check_is_atomic",
+    "check_not_too_vague",
+    "check_starts_with_action_verb",
+    "run_structural_checks",
+]
+
 
 class IssueSeverity(Enum):
     ERROR = "error"
@@ -215,6 +226,16 @@ _CHECKS = [
     check_not_too_vague,
 ]
 
+# Maps each check function to the canonical category string used in ValidationIssue.category.
+# Keeping this explicit avoids fragile name-mangling and ensures category_scores keys
+# are always consistent with the issue categories reported.
+_CHECK_CATEGORIES: dict[str, str] = {
+    "check_starts_with_action_verb": "action_verb",
+    "check_has_measurable_outcome": "measurable_outcome",
+    "check_is_atomic": "atomic",
+    "check_not_too_vague": "vague",
+}
+
 
 def run_structural_checks(spec: ProjectSpec) -> ValidationReport:
     """Run all Layer-1 structural checks on every feature in the spec."""
@@ -241,9 +262,11 @@ def run_structural_checks(spec: ProjectSpec) -> ValidationReport:
 
 
 def _check_category(check: object) -> str:
-    """Derive a category label from the check function name."""
+    """Return the canonical category label for a check function.
+
+    Uses the explicit ``_CHECK_CATEGORIES`` mapping so that keys in
+    ``ValidationReport.category_scores`` always match ``ValidationIssue.category``
+    values emitted by the same check.
+    """
     name = getattr(check, "__name__", str(check))
-    # strip leading "check_"
-    if name.startswith("check_"):
-        name = name[len("check_"):]
-    return name
+    return _CHECK_CATEGORIES.get(name, name)
