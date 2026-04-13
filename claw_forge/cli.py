@@ -2250,11 +2250,18 @@ def validate_spec_cmd(
     # ── Verdict ───────────────────────────────────────────────────────────────
     console.print()
     if report.passed:
-        console.print(
-            f"[bold green]✅ Spec passed validation[/bold green]  "
-            f"({report.warning_count} warnings)"
-        )
-        console.print(f"\n  Next: [bold]claw-forge plan {spec}[/bold]")
+        if report.warning_count:
+            console.print(
+                f"[bold yellow]⚠ Spec passed validation with {report.warning_count} warning(s)[/bold yellow]"
+            )
+            console.print(
+                f"\n  To clean up warnings: open Claude Code and run [bold]/fix-spec[/bold]\n"
+                f"  Then re-run: [bold]claw-forge validate-spec {spec}[/bold]\n"
+                f"\n  Or skip straight to: [bold]claw-forge plan {spec}[/bold]"
+            )
+        else:
+            console.print("[bold green]✅ Spec passed validation — no issues[/bold green]")
+            console.print(f"\n  Next: [bold]claw-forge plan {spec}[/bold]")
     else:
         console.print(
             f"[bold red]✗ Spec has {report.error_count} error(s) "

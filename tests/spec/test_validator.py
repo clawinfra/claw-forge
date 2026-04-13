@@ -689,6 +689,56 @@ def test_validate_spec_cli_missing_file(tmp_path):
     assert "not found" in result.output.lower()
 
 
+def test_validate_spec_cli_warnings_only_shows_fix_spec_hint(tmp_path):
+    """Exit 0 with warnings must show /fix-spec hint, not 'Next: plan'."""
+    import textwrap
+    warn_only = textwrap.dedent("""\
+        <project_specification>
+          <project_name>warn-test</project_name>
+          <overview>test</overview>
+          <core_features>
+            <category name="Auth">
+              - password reset link in email
+            </category>
+          </core_features>
+        </project_specification>
+    """)
+    f = tmp_path / "warn.xml"
+    f.write_text(warn_only)
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(f), "--no-llm"])
+    assert result.exit_code == 0
+    assert "/fix-spec" in result.output
+    assert "warning" in result.output.lower()
+    # Must NOT show the clean "Next: claw-forge plan" line alone
+    assert "no issues" not in result.output
+
+
+def test_validate_spec_cli_clean_spec_shows_no_issues(tmp_path):
+    """A spec with zero errors and zero warnings shows the clean success message."""
+    import textwrap
+    clean = textwrap.dedent("""\
+        <project_specification>
+          <project_name>clean-test</project_name>
+          <overview>test</overview>
+          <core_features>
+            <category name="Auth">
+              - User can register with email and password (returns 201 with user_id)
+              - User can login with valid credentials (returns 200 with JWT access token)
+              - API returns 401 when login credentials are invalid
+            </category>
+          </core_features>
+        </project_specification>
+    """)
+    f = tmp_path / "clean.xml"
+    f.write_text(clean)
+    runner = _CliRunner()
+    result = runner.invoke(_cli_app, ["validate-spec", str(f), "--no-llm"])
+    assert result.exit_code == 0
+    assert "no issues" in result.output
+    assert "/fix-spec" not in result.output
+
+
 def test_validate_spec_cli_failure_shows_fix_spec_hint(tmp_path):
     """Failure output must guide the user to /fix-spec."""
     import textwrap

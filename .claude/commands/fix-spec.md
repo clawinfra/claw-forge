@@ -19,19 +19,15 @@ If none found, ask the user: "Which spec file should I fix?"
 
 ```bash
 claw-forge validate-spec <spec-file> 2>&1
-VALIDATE_EXIT=$?
 ```
 
-Capture the full output. Count errors **and** warnings from the output.
+Capture the full output. **Do not use the exit code to decide whether to stop** — exit 0
+only means no errors, but warnings are still present and worth fixing.
 
-If the output shows 0 errors and 0 warnings, report:
-```
-✅ <spec-file> is fully clean — nothing to fix.
-```
-and stop.
-
-If the output shows only warnings (exit 0 but warnings present), continue — warnings are
-quality issues worth fixing even though they don't block `claw-forge plan`.
+Instead, read the summary line at the bottom of the output:
+- `✅ Spec passed validation — no issues` → fully clean, nothing to fix. Report and stop.
+- `⚠ Spec passed validation with N warning(s)` → warnings present. Continue to Step 3.
+- `✗ Spec has N error(s)` → errors present. Continue to Step 3.
 
 ## Step 3: Parse the issues
 
@@ -126,9 +122,8 @@ Write the full corrected spec back to the same file. Preserve:
 claw-forge validate-spec <spec-file> 2>&1
 ```
 
-Count errors and warnings in the output.
-
-If both are zero: report success (see output format below).
+Read the summary line (same as Step 2):
+- `✅ Spec passed validation — no issues` → fully clean. Report success (see output format below).
 
 If issues remain: go back to Step 4 for another pass. Repeat up to **3 times total**.
 
