@@ -1,0 +1,4 @@
+Issue key,Summary,Description,Epic Link
+TT-1,User Registration,User submits email and password to register.,Authentication
+TT-2,User Login,User submits credentials to receive JWT tokens.,Authentication
+TT-3,Create Task,Authenticated user creates a task with a title.,Task Management

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="0.92">
+  <channel>
+    <title>TaskTracker</title>
+    <item>
+      <summary>User Registration</summary>
+      <description>User submits email and password to register.</description>
+      <customfields>
+        <customfield id="customfield_10014" key="com.pyxis.greenhopper.jira:gh-epic-link">
+          <customfieldname>Epic Link</customfieldname>
+          <customfieldvalues>
+            <customfieldvalue>Authentication</customfieldvalue>
+          </customfieldvalues>
+        </customfield>
+      </customfields>
+    </item>
+    <item>
+      <summary>Create Task</summary>
+      <description>Authenticated user creates a new task with a title.</description>
+      <customfields>
+        <customfield id="customfield_10014" key="com.pyxis.greenhopper.jira:gh-epic-link">
+          <customfieldname>Epic Link</customfieldname>
+          <customfieldvalues>
+            <customfieldvalue>Task Management</customfieldvalue>
+          </customfieldvalues>
+        </customfield>
+      </customfields>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,36 @@
+{
+  "project": {
+    "name": "TaskTracker",
+    "description": "A task management app for small teams."
+  },
+  "issues": [
+    {
+      "identifier": "TT-1",
+      "title": "User Registration",
+      "description": "Given a visitor, when they submit email and password, then system creates account and returns 201.",
+      "state": "Todo",
+      "labels": ["Authentication"]
+    },
+    {
+      "identifier": "TT-2",
+      "title": "User Login",
+      "description": "Given a registered user, when they submit valid credentials, then system returns JWT tokens.",
+      "state": "Todo",
+      "labels": ["Authentication"]
+    },
+    {
+      "identifier": "TT-3",
+      "title": "Create Task",
+      "description": "Given an authenticated user, when they POST a task title, then system creates task and returns 201.",
+      "state": "Todo",
+      "labels": ["Task Management"]
+    },
+    {
+      "identifier": "TT-4",
+      "title": "Unlabelled story",
+      "description": "Some story with no label assigned.",
+      "state": "Todo",
+      "labels": []
+    }
+  ]
+}
