@@ -106,3 +106,14 @@ def test_csv_phase_hint():
 def test_csv_source_format():
     spec = extract_jira(_make_result(CSV_FIXTURE))
     assert spec.source_format == "jira"
+
+
+def test_csv_project_name_from_column(tmp_path: Path):
+    csv_file = tmp_path / "export.csv"
+    csv_file.write_text(
+        "Issue key,Summary,Description,Epic Link,Project\n"
+        "TT-1,A story,Some criteria,Authentication,MyProject\n",
+        encoding="utf-8",
+    )
+    spec = extract_jira(_make_result(csv_file))
+    assert spec.project_name == "MyProject"

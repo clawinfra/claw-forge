@@ -106,11 +106,17 @@ def _get_epic_link_xml(item: ET.Element) -> str:
 def _extract_csv(csv_path: Path) -> ExtractedSpec:
     """Parse a Jira CSV export file."""
     epic_map: dict[str, list[Story]] = {}
+    project_name = "Unnamed Project"
 
     try:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             reader = csv.DictReader(fh)
+            first_row = True
             for row in reader:
+                if first_row:
+                    project_name = (row.get("Project") or "").strip() or "Unnamed Project"
+                    first_row = False
+
                 title = (row.get("Summary") or "").strip()
                 description = (row.get("Description") or "").strip()
                 epic_name = (row.get("Epic Link") or "").strip() or "General"
@@ -127,7 +133,7 @@ def _extract_csv(csv_path: Path) -> ExtractedSpec:
     story_count = sum(len(e.stories) for e in epics)
 
     return ExtractedSpec(
-        project_name="Unnamed Project",
+        project_name=project_name,
         overview="",
         epics=epics,
         tech_stack_raw="",
