@@ -154,11 +154,8 @@ class TestConvertRetryOnFailure:
         ]
 
         with patch("claw_forge.importer.converter.anthropic.Anthropic", return_value=mock_client):
-            import importlib
-
-            from claw_forge.importer import converter
-            importlib.reload(converter)
-            result = converter.convert(spec, api_key="test-key")
+            from claw_forge.importer.converter import convert
+            result = convert(spec, api_key="test-key")
 
         # 2 calls for call-1 (retry) + 1 for db/api + 1 for steps = 4 total
         assert mock_client.messages.create.call_count == 4
@@ -183,11 +180,8 @@ class TestCoreFeaturesAccumulation:
         mock_client.messages.create.side_effect = call_responses
 
         with patch("claw_forge.importer.converter.anthropic.Anthropic", return_value=mock_client):
-            import importlib
-
-            from claw_forge.importer import converter
-            importlib.reload(converter)
-            result = converter.convert(spec, api_key="test-key")
+            from claw_forge.importer.converter import convert
+            result = convert(spec, api_key="test-key")
 
         assert "Authentication" in result.core_features
         assert "Dashboard" in result.core_features
@@ -209,11 +203,8 @@ class TestConvertEmptyEpics:
         mock_client.messages.create.side_effect = call_responses
 
         with patch("claw_forge.importer.converter.anthropic.Anthropic", return_value=mock_client):
-            import importlib
-
-            from claw_forge.importer import converter
-            importlib.reload(converter)
-            result = converter.convert(spec, api_key="test-key")
+            from claw_forge.importer.converter import convert
+            result = convert(spec, api_key="test-key")
 
         assert result.core_features == ""
         assert result.overview

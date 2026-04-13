@@ -36,8 +36,8 @@ def _call_claude(
             messages=[{"role": "user", "content": user}],
         )
         return getattr(response.content[0], "text", "") or ""
-    except Exception:
-        # One retry
+    except anthropic.APIError:
+        # One retry on transient API errors
         response = client.messages.create(
             model=model,
             max_tokens=2048,
