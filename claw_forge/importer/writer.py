@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 from claw_forge.importer.converter import ConvertedSections
 from claw_forge.importer.extractors.base import ExtractedSpec
@@ -60,13 +61,13 @@ def _assemble_greenfield(sections: ConvertedSections, spec: ExtractedSpec) -> st
 
 def _assemble_brownfield(sections: ConvertedSections, spec: ExtractedSpec) -> str:
     existing_context_xml = "\n    ".join(
-        f"<{key}>{value}</{key}>" for key, value in spec.existing_context.items()
+        f"<{key}>{_xml_escape(value)}</{key}>" for key, value in spec.existing_context.items()
     )
     integration_points_xml = "\n    ".join(
-        f"<point>{item}</point>" for item in spec.integration_points
+        f"<point>{_xml_escape(item)}</point>" for item in spec.integration_points
     )
     constraints_xml = "\n    ".join(
-        f"<constraint>{item}</constraint>" for item in spec.constraints
+        f"<constraint>{_xml_escape(item)}</constraint>" for item in spec.constraints
     )
 
     return (

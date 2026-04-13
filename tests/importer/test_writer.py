@@ -196,6 +196,23 @@ def test_empty_brownfield_collections(tmp_path: Path) -> None:
     assert "<existing_context>" in content
 
 
+def test_brownfield_xml_escaping(tmp_path: Path) -> None:
+    """Special characters in ExtractedSpec fields are XML-escaped."""
+    from claw_forge.importer.writer import write_spec
+
+    (tmp_path / "brownfield_manifest.json").write_text("{}")
+    spec = make_brownfield_spec()
+    spec.existing_context = {"stack": "Django & DRF"}
+    spec.integration_points = ["Auth service <v2>"]
+    spec.constraints = ["Must support Python >= 3.11"]
+    result = write_spec(make_sections(), spec, tmp_path)
+    content = result.read_text(encoding="utf-8")
+
+    assert "Django &amp; DRF" in content
+    assert "Auth service &lt;v2&gt;" in content
+    assert "Python &gt;= 3.11" in content
+
+
 def test_overwrite_existing_file(tmp_path: Path) -> None:
     """Writer overwrites an existing file without error."""
     from claw_forge.importer.writer import write_spec
