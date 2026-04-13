@@ -2251,8 +2251,9 @@ def validate_spec_cmd(
     console.print()
     if report.passed:
         if report.warning_count:
+            w = report.warning_count
             console.print(
-                f"[bold yellow]⚠ Spec passed validation with {report.warning_count} warning(s)[/bold yellow]"
+                f"[bold yellow]⚠ Spec passed validation with {w} warning(s)[/bold yellow]"
             )
             console.print(
                 f"\n  To clean up warnings: open Claude Code and run [bold]/fix-spec[/bold]\n"
