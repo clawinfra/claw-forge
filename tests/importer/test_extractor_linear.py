@@ -101,6 +101,16 @@ def test_missing_project_key():
     assert spec.overview == ""
 
 
+def test_corrupt_json_file(tmp_path):
+    """Corrupt JSON file falls back to empty spec."""
+    bad_json = tmp_path / "issues.json"
+    bad_json.write_text("not valid json", encoding="utf-8")
+    result = FormatResult(format="linear", confidence="high", artifacts=[bad_json])
+    spec = extract_linear(result)
+    assert spec.project_name == "Unnamed Project"
+    assert spec.story_count == 0
+
+
 def test_no_labels_goes_to_general():
     spec = extract_linear(_make_result(FIXTURE))
     epic_names = [e.name for e in spec.epics]
