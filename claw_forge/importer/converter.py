@@ -123,7 +123,10 @@ def convert(
     # -------------------------------------------------------------------------
     call4_system = "Output only the three XML sections requested."
     epic_summary = "\n".join(
-        f"- {epic.name} ({len(epic.stories)} stories)" for epic in spec.epics
+        f"- {epic.name} (phase: {epic.stories[0].phase_hint}, {len(epic.stories)} stories)"
+        if epic.stories
+        else f"- {epic.name}"
+        for epic in spec.epics
     )
     call4_user = (
         f"Project name: {spec.project_name}\n\n"
