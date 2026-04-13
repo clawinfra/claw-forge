@@ -21,7 +21,7 @@ def extract_jira(result: FormatResult) -> ExtractedSpec:
         return _extract_xml(artifact)
     if suffix == ".csv":
         return _extract_csv(artifact)
-    # Fallback: try XML first, then CSV
+    # Unknown extension — return empty spec
     return _empty_spec(artifact.parent)
 
 
@@ -56,6 +56,8 @@ def _extract_xml(xml_path: Path) -> ExtractedSpec:
         desc_el = item.find("description")
 
         title = summary_el.text.strip() if summary_el is not None and summary_el.text else ""
+        if not title:
+            continue
         description = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
 
         epic_name = _get_epic_link_xml(item)
