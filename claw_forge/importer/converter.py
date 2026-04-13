@@ -35,7 +35,7 @@ def _call_claude(
             system=system,
             messages=[{"role": "user", "content": user}],
         )
-        return response.content[0].text
+        return getattr(response.content[0], "text", "") or ""
     except Exception:
         # One retry
         response = client.messages.create(
@@ -44,7 +44,7 @@ def _call_claude(
             system=system,
             messages=[{"role": "user", "content": user}],
         )
-        return response.content[0].text
+        return getattr(response.content[0], "text", "") or ""
 
 
 def convert(
