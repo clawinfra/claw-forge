@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from claw_forge.importer.detector import detect
+from claw_forge.importer.detector import FormatResult, detect
 from claw_forge.importer.extractors.bmad import extract_bmad
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bmad"
@@ -76,3 +76,40 @@ def test_extract_bmad_source_format():
     result = detect(FIXTURE)
     spec = extract_bmad(result)
     assert spec.source_format == "bmad"
+
+
+def test_extract_bmad_missing_prd():
+    result = detect(FIXTURE)
+    # Filter out prd.md, keep only architecture.md and story files
+    artifacts = [p for p in result.artifacts if p.name != "prd.md"]
+    no_prd_result = FormatResult(
+        format="bmad",
+        confidence="high",
+        artifacts=artifacts,
+    )
+    spec = extract_bmad(no_prd_result)
+    assert spec.project_name == "Unnamed Project"
+    assert spec.overview == ""
+
+
+def test_extract_bmad_missing_arch():
+    result = detect(FIXTURE)
+    # Filter out architecture.md, keep only prd.md and story files
+    artifacts = [p for p in result.artifacts if p.name != "architecture.md"]
+    no_arch_result = FormatResult(
+        format="bmad",
+        confidence="high",
+        artifacts=artifacts,
+    )
+    spec = extract_bmad(no_arch_result)
+    assert spec.tech_stack_raw == ""
+    assert spec.database_tables_raw == ""
+    assert spec.api_endpoints_raw == ""
+
+
+def test_extract_bmad_phase_hint():
+    result = detect(FIXTURE)
+    spec = extract_bmad(result)
+    all_stories = [story for epic in spec.epics for story in epic.stories]
+    assert all(story.phase_hint != "" for story in all_stories)
+    assert any(story.phase_hint == "Authentication" for story in all_stories)
