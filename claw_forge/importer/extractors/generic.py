@@ -214,6 +214,7 @@ def _parse_md_file(
             # depth >= 4 inside a story → treat as story body line
             elif current_story_title is not None:
                 current_story_lines.append(line)
+            # else: depth >= 4 with no open story — intentionally ignored (contract is H1/H2/H3)
         else:
             # Non-heading line
             if current_section_type is not None:

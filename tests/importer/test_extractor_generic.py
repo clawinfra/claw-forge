@@ -64,7 +64,8 @@ def test_phase_hint(spec):
 def test_tech_stack_extracted():
     spec = extract_generic(_make_result([FIXTURE]))
     assert spec.tech_stack_raw != ""
-    assert "Python" in spec.tech_stack_raw or "FastAPI" in spec.tech_stack_raw
+    assert "Python" in spec.tech_stack_raw
+    assert "FastAPI" in spec.tech_stack_raw
 
 
 def test_source_format():
