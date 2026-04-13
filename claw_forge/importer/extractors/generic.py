@@ -11,7 +11,7 @@ from claw_forge.importer.extractors.base import Epic, ExtractedSpec, Story
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 
 # Tech/arch section names (case-insensitive match against heading text)
-_TECH_STACK_NAMES = {"tech stack", "technology stack", "stack"}
+_TECH_STACK_NAMES = {"tech stack", "technology stack", "stack", "architecture"}
 _DATABASE_NAMES = {"database schema", "database", "schema"}
 _API_NAMES = {"api endpoints", "api", "endpoints"}
 

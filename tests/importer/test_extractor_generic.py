@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from claw_forge.importer.detector import FormatResult
 from claw_forge.importer.extractors.generic import extract_generic
 
@@ -14,6 +16,11 @@ def _make_result(paths: list[Path]) -> FormatResult:
         confidence="low",
         artifacts=paths,
     )
+
+
+@pytest.fixture
+def spec():
+    return extract_generic(_make_result([FIXTURE]))
 
 
 def test_project_name():
@@ -47,12 +54,11 @@ def test_stories_in_epic():
     assert len(auth_epic.stories) == 2
 
 
-def test_phase_hint():
-    spec = extract_generic(_make_result([FIXTURE]))
-    all_stories = [s for e in spec.epics for s in e.stories]
-    assert all(s.phase_hint != "" for s in all_stories)
+def test_phase_hint(spec):
     epic_names = {e.name for e in spec.epics}
-    assert any(s.phase_hint in epic_names for s in all_stories)
+    all_stories = [s for e in spec.epics for s in e.stories]
+    assert all_stories, "expected at least one story"
+    assert all(s.phase_hint in epic_names for s in all_stories)
 
 
 def test_tech_stack_extracted():
