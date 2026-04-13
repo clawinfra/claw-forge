@@ -1,3 +1,3 @@
-from .parser import FeatureItem, ProjectSpec, TechStack
+from .parser import FeatureItem, ProjectSpec, TechStack, generate_brownfield_manifest
 
-__all__ = ["ProjectSpec", "FeatureItem", "TechStack"]
+__all__ = ["ProjectSpec", "FeatureItem", "TechStack", "generate_brownfield_manifest"]

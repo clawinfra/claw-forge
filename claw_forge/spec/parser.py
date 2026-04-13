@@ -537,3 +537,62 @@ def _parse_key_value_el(el: ET.Element) -> dict[str, Any]:
         items = [line[2:].strip() for line in text.splitlines() if line.strip().startswith("- ")]
         result[child.tag] = items if items else text
     return result
+
+
+def generate_brownfield_manifest(
+    spec: ProjectSpec,
+    completed_tasks: int,
+    project_path: Path,
+) -> dict[str, str]:
+    """Build a brownfield manifest dict from a completed greenfield run.
+
+    Args:
+        spec: The parsed project spec.
+        completed_tasks: Number of tasks that completed successfully.
+        project_path: Root of the target project (used to detect conventions).
+
+    Returns:
+        A dict with ``stack``, ``test_baseline``, and ``conventions`` keys.
+    """
+    # ── stack ──────────────────────────────────────────────────────────
+    ts = spec.tech_stack
+    parts: list[str] = []
+    if ts.backend_runtime:
+        parts.append(ts.backend_runtime)
+    if ts.frontend_framework:
+        parts.append(ts.frontend_framework)
+    if ts.backend_db:
+        parts.append(ts.backend_db)
+    stack = " / ".join(parts) if parts else (ts.raw.strip() or "unknown")
+
+    # ── test_baseline ─────────────────────────────────────────────────
+    test_baseline = f"{completed_tasks} features completed"
+
+    # ── conventions (detect from project config files) ────────────────
+    conventions: list[str] = []
+    if (project_path / "pyproject.toml").exists():
+        _pyproject = (project_path / "pyproject.toml").read_text(encoding="utf-8")
+        if "ruff" in _pyproject:
+            conventions.append("ruff")
+        if "mypy" in _pyproject:
+            conventions.append("mypy")
+        if "pytest" in _pyproject:
+            conventions.append("pytest")
+    if (project_path / ".eslintrc.json").exists() or (
+        project_path / ".eslintrc.js"
+    ).exists() or (project_path / "eslint.config.js").exists():
+        conventions.append("eslint")
+    if (project_path / "biome.json").exists():
+        conventions.append("biome")
+    if (project_path / "tsconfig.json").exists():
+        conventions.append("typescript")
+    if (project_path / "tailwind.config.js").exists() or (
+        project_path / "tailwind.config.ts"
+    ).exists():
+        conventions.append("tailwind")
+
+    return {
+        "stack": stack,
+        "test_baseline": test_baseline,
+        "conventions": ", ".join(conventions) if conventions else "see project config",
+    }

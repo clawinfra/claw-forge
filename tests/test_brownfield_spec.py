@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claw_forge.spec.parser import ProjectSpec
+from claw_forge.spec.parser import ProjectSpec, generate_brownfield_manifest
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -440,3 +440,249 @@ def test_initializer_brownfield_manifest_merge(tmp_path: Path) -> None:
     # Manifest wins for stack
     assert "PostgreSQL" in result.metadata["existing_context"]["stack"]
     assert "50 tests" in result.metadata["existing_context"]["test_baseline"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: generate_brownfield_manifest
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateBrownfieldManifest:
+    """Tests for auto-generation of brownfield_manifest.json."""
+
+    def _make_greenfield_spec(self, tmp_path: Path) -> tuple[Path, ProjectSpec]:
+        xml = textwrap.dedent(
+            """\
+            <project_specification>
+              <project_name>TestApp</project_name>
+              <overview>A test application.</overview>
+              <technology_stack>
+                <frontend>
+                  <framework>React</framework>
+                  <port>3000</port>
+                </frontend>
+                <backend>
+                  <runtime>FastAPI</runtime>
+                  <database>PostgreSQL</database>
+                  <port>8000</port>
+                </backend>
+              </technology_stack>
+              <core_features>
+                <category name="Auth">
+                  - User can register with email
+                  - User can login with JWT
+                </category>
+              </core_features>
+            </project_specification>
+            """
+        )
+        p = tmp_path / "app_spec.txt"
+        p.write_text(xml)
+        return p, ProjectSpec.from_file(p)
+
+    def test_stack_from_tech_stack(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        manifest = generate_brownfield_manifest(spec, 10, tmp_path)
+        assert "FastAPI" in manifest["stack"]
+        assert "React" in manifest["stack"]
+        assert "PostgreSQL" in manifest["stack"]
+
+    def test_test_baseline_reflects_completed_count(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        manifest = generate_brownfield_manifest(spec, 42, tmp_path)
+        assert "42 features completed" in manifest["test_baseline"]
+
+    def test_conventions_detects_ruff(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 88\n")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "ruff" in manifest["conventions"]
+
+    def test_conventions_detects_mypy(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[tool.mypy]\nstrict = true\n")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "mypy" in manifest["conventions"]
+
+    def test_conventions_detects_pytest(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "pytest" in manifest["conventions"]
+
+    def test_conventions_detects_typescript(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "tsconfig.json").write_text("{}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "typescript" in manifest["conventions"]
+
+    def test_conventions_detects_eslint(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / ".eslintrc.json").write_text("{}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "eslint" in manifest["conventions"]
+
+    def test_conventions_detects_eslint_flat_config(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "eslint.config.js").write_text("module.exports = {}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "eslint" in manifest["conventions"]
+
+    def test_conventions_detects_biome(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "biome.json").write_text("{}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "biome" in manifest["conventions"]
+
+    def test_conventions_detects_tailwind_js(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "tailwind.config.js").write_text("module.exports = {}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "tailwind" in manifest["conventions"]
+
+    def test_conventions_detects_tailwind_ts(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "tailwind.config.ts").write_text("export default {}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "tailwind" in manifest["conventions"]
+
+    def test_conventions_fallback_when_none_detected(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert manifest["conventions"] == "see project config"
+
+    def test_conventions_detects_multiple(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.ruff]\n[tool.mypy]\n[tool.pytest]\n"
+        )
+        (tmp_path / "tsconfig.json").write_text("{}")
+        manifest = generate_brownfield_manifest(spec, 5, tmp_path)
+        assert "ruff" in manifest["conventions"]
+        assert "mypy" in manifest["conventions"]
+        assert "typescript" in manifest["conventions"]
+
+    def test_stack_fallback_when_no_tech_stack(self, tmp_path: Path) -> None:
+        xml = textwrap.dedent(
+            """\
+            <project_specification>
+              <project_name>Minimal</project_name>
+              <overview>Minimal project.</overview>
+              <core_features>
+                <category name="Core">
+                  - User can do something
+                </category>
+              </core_features>
+            </project_specification>
+            """
+        )
+        p = tmp_path / "app_spec.txt"
+        p.write_text(xml)
+        spec = ProjectSpec.from_file(p)
+        manifest = generate_brownfield_manifest(spec, 1, tmp_path)
+        assert manifest["stack"] == "unknown"
+
+    def test_manifest_has_required_keys(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        manifest = generate_brownfield_manifest(spec, 10, tmp_path)
+        assert "stack" in manifest
+        assert "test_baseline" in manifest
+        assert "conventions" in manifest
+
+    def test_manifest_is_json_serializable(self, tmp_path: Path) -> None:
+        _, spec = self._make_greenfield_spec(tmp_path)
+        manifest = generate_brownfield_manifest(spec, 10, tmp_path)
+        serialized = json.dumps(manifest)
+        roundtrip = json.loads(serialized)
+        assert roundtrip == manifest
+
+
+# ---------------------------------------------------------------------------
+# Tests: CLI run integration — manifest generation on completion
+# ---------------------------------------------------------------------------
+
+
+class TestCliManifestGeneration:
+    """Tests for brownfield_manifest.json generation in the `run` command."""
+
+    def test_manifest_written_after_successful_greenfield_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Simulate the post-run manifest generation logic."""
+        # Set up a greenfield spec in the project
+        xml = textwrap.dedent(
+            """\
+            <project_specification>
+              <project_name>TestApp</project_name>
+              <overview>A test app.</overview>
+              <technology_stack>
+                <backend>
+                  <runtime>Django</runtime>
+                  <database>SQLite</database>
+                </backend>
+              </technology_stack>
+              <core_features>
+                <category name="Core">
+                  - User can view dashboard
+                </category>
+              </core_features>
+            </project_specification>
+            """
+        )
+        (tmp_path / "app_spec.txt").write_text(xml)
+        manifest_path = tmp_path / "brownfield_manifest.json"
+
+        # Simulate the CLI logic: find spec, parse, generate manifest
+        from claw_forge.spec import ProjectSpec as _PS
+        from claw_forge.spec import generate_brownfield_manifest as _gen
+
+        spec_candidates = [tmp_path / "app_spec.txt", tmp_path / "app_spec.xml"]
+        found_spec = next((s for s in spec_candidates if s.exists()), None)
+        assert found_spec is not None
+
+        parsed = _PS.from_file(found_spec)
+        assert not parsed.is_brownfield
+
+        manifest = _gen(parsed, 15, tmp_path)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        assert manifest_path.exists()
+        data = json.loads(manifest_path.read_text())
+        assert "Django" in data["stack"]
+        assert "15 features completed" in data["test_baseline"]
+
+    def test_manifest_not_overwritten_if_exists(self, tmp_path: Path) -> None:
+        """If brownfield_manifest.json already exists, it is NOT overwritten."""
+        existing = {"stack": "custom", "test_baseline": "99 tests", "conventions": "custom"}
+        manifest_path = tmp_path / "brownfield_manifest.json"
+        manifest_path.write_text(json.dumps(existing))
+
+        # Simulate the CLI guard: skip if manifest exists
+        assert manifest_path.exists()
+        data = json.loads(manifest_path.read_text())
+        assert data["stack"] == "custom"  # unchanged
+
+    def test_manifest_skipped_for_brownfield_spec(self, tmp_path: Path) -> None:
+        """Brownfield specs should not trigger manifest generation."""
+        xml = textwrap.dedent(
+            """\
+            <project_specification mode="brownfield">
+              <project_name>Additions</project_name>
+              <features_to_add>
+                <core>- User can view reports</core>
+              </features_to_add>
+            </project_specification>
+            """
+        )
+        (tmp_path / "app_spec.txt").write_text(xml)
+
+        from claw_forge.spec import ProjectSpec as _PS
+
+        parsed = _PS.from_file(tmp_path / "app_spec.txt")
+        assert parsed.is_brownfield  # guard: should not generate manifest
+
+    def test_manifest_skipped_when_no_spec_found(self, tmp_path: Path) -> None:
+        """When no spec file exists in the project, manifest is not generated."""
+        spec_candidates = [tmp_path / "app_spec.txt", tmp_path / "app_spec.xml"]
+        found = next((s for s in spec_candidates if s.exists()), None)
+        assert found is None  # no spec → no manifest

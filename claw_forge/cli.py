@@ -1608,6 +1608,41 @@ def run(
         else:
             console.print("  🎉 All tasks succeeded!")
 
+            # Generate brownfield_manifest.json for future additions
+            _manifest_path = project_path / "brownfield_manifest.json"
+            if not _manifest_path.exists():
+                _spec_candidates = [
+                    project_path / "app_spec.txt",
+                    project_path / "app_spec.xml",
+                ]
+                _found_spec: Path | None = None
+                for _sc in _spec_candidates:
+                    if _sc.exists():
+                        _found_spec = _sc
+                        break
+                if _found_spec is not None:
+                    try:
+                        from claw_forge.spec import ProjectSpec, generate_brownfield_manifest
+
+                        _parsed_spec = ProjectSpec.from_file(_found_spec)
+                        if not _parsed_spec.is_brownfield:
+                            _manifest = generate_brownfield_manifest(
+                                _parsed_spec, completed, project_path,
+                            )
+                            _manifest_path.write_text(
+                                json.dumps(_manifest, indent=2) + "\n",
+                                encoding="utf-8",
+                            )
+                            console.print(
+                                "  [dim]✓ Generated brownfield_manifest.json "
+                                "for future additions[/dim]"
+                            )
+                    except Exception as _mf_exc:  # noqa: BLE001
+                        console.print(
+                            f"  [dim]⚠ Could not generate brownfield manifest: "
+                            f"{_mf_exc}[/dim]"
+                        )
+
     # Pop CLAUDECODE once for the entire run — prevents the claude CLI
     # from refusing to start (it detects nesting via this env var).
     # Restored in finally so the parent session is unaffected.
