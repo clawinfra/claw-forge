@@ -1,7 +1,8 @@
 # Fix Spec Issues
 
 Run `claw-forge validate-spec` on the project spec, then iteratively fix all reported issues
-until the spec passes clean. Rewrites only the offending bullets — never restructures the spec.
+— errors **and** warnings — until the spec is fully clean. Rewrites only the offending bullets;
+never restructures the spec.
 
 ## Step 1: Find the spec file
 
@@ -18,22 +19,31 @@ If none found, ask the user: "Which spec file should I fix?"
 
 ```bash
 claw-forge validate-spec <spec-file> 2>&1
+VALIDATE_EXIT=$?
 ```
 
-Capture the full output. If the spec already passes (exit 0), report:
+Capture the full output. Count errors **and** warnings from the output.
+
+If the output shows 0 errors and 0 warnings, report:
 ```
-✅ <spec-file> already passes validation — nothing to fix.
+✅ <spec-file> is fully clean — nothing to fix.
 ```
 and stop.
+
+If the output shows only warnings (exit 0 but warnings present), continue — warnings are
+quality issues worth fixing even though they don't block `claw-forge plan`.
 
 ## Step 3: Parse the issues
 
 From the validator output, extract every reported issue. For each one note:
+- **Severity** (ERROR `✗` or WARNING `⚠`)
 - **Layer** (1 = structural, 2 = LLM eval, 3 = coverage gap)
 - **Category** (e.g. `task-management`, `auth`)
 - **Message** (what's wrong)
 - **Suggestion** (the → line, if present)
 - **Bullet** (the exact quoted bullet text, if present)
+
+Fix errors first (they block planning), then warnings.
 
 ## Step 4: Fix the issues
 
@@ -42,17 +52,17 @@ Do not reorder bullets, add new categories, or remove bullets that weren't flagg
 
 ### Layer 1 fixes
 
-| Issue type | Rule |
-|---|---|
-| Compound bullet (`contains "and"`) | Split into two separate bullets on consecutive lines |
-| Vague / no measurable outcome | Add a concrete, testable outcome (status code, field name, count) |
-| Not starting with action verb | Rewrite to start with: User can / System / API / Admin |
-| Too long (> ~25 words) | Trim to the essential behaviour; move detail to a parenthetical |
+| Issue type | Severity | Rule |
+|---|---|---|
+| Compound bullet (`contains "and"`) | ERROR | Split into two separate bullets on consecutive lines |
+| Vague / no measurable outcome | WARNING | Add a concrete, testable outcome (status code, field name, count) |
+| Not starting with action verb | WARNING | Rewrite to start with: User can / System / API / Admin |
+| Too long (> ~25 words) | WARNING | Trim to the essential behaviour; move detail to a parenthetical |
 
 **Examples:**
 
 ```
-# BEFORE (compound):
+# BEFORE (compound — ERROR):
 - User can create and edit a task
 
 # AFTER (split):
@@ -61,15 +71,15 @@ Do not reorder bullets, add new categories, or remove bullets that weren't flagg
 ```
 
 ```
-# BEFORE (vague):
+# BEFORE (vague — WARNING):
 - Handle errors appropriately
 
-# AFTER (specific):
+# AFTER:
 - API returns 422 with a field-level errors array when request validation fails
 ```
 
 ```
-# BEFORE (no verb):
+# BEFORE (no verb — WARNING):
 - Password reset link in email
 
 # AFTER:
@@ -116,11 +126,13 @@ Write the full corrected spec back to the same file. Preserve:
 claw-forge validate-spec <spec-file> 2>&1
 ```
 
-If it passes: report success (see output format below).
+Count errors and warnings in the output.
+
+If both are zero: report success (see output format below).
 
 If issues remain: go back to Step 4 for another pass. Repeat up to **3 times total**.
 
-If still failing after 3 passes, list the remaining issues and ask the user:
+If issues still remain after 3 passes, list them and ask the user:
 "These issues may require domain knowledge to resolve — should I attempt another pass,
 or would you like to fix them manually?"
 
@@ -130,14 +142,16 @@ On success:
 ```
 ✅ Spec fixed: <spec-file>
 
-  Pass 1: 4 issues → 1 remaining
-  Pass 2: 1 issue  → 0 remaining
+  Pass 1: 6 issues (3 errors, 3 warnings) → 2 remaining
+  Pass 2: 2 issues (0 errors, 2 warnings) → 0 remaining
 
   Fixed:
-    ✓ [task-management] Split compound bullet "User can create and edit a task"
-    ✓ [auth] Added measurable outcome to "Handle errors appropriately"
-    ✓ [notifications] Added 3 bullets for uncovered "notifications" table
-    ✓ [auth] Rewrote vague bullet "Password reset link in email"
+    ✗ [task-management] Split compound bullet "User can create and edit a task"
+    ✗ [auth] Rewrote compound bullet "User can register and then login"
+    ✗ [api] Added action verb to "Error responses from the API"
+    ⚠ [auth] Added measurable outcome to "Handle errors appropriately"
+    ⚠ [notifications] Added 3 bullets for uncovered "notifications" table
+    ⚠ [auth] Rewrote vague bullet "Password reset link in email"
 
 Next: claw-forge plan <spec-file>
 ```
@@ -146,10 +160,10 @@ On partial fix (issues remain after 3 passes):
 ```
 ⚠ 2 issues remain after 3 fix passes:
 
-  [auth] Score 6.5 on Specificity — some bullets still use vague language
+  ⚠ [auth] Score 6.5 on Specificity — some bullets still use vague language
     → Consider adding exact field names, status codes, or error messages
 
-  [notifications] Coverage gap: endpoint POST /api/notifications/bulk-read
+  ⚠ [notifications] Coverage gap: endpoint POST /api/notifications/bulk-read
     → Add: "User can mark multiple notifications as read in one request (accepts array of ids)"
 
 Fix these manually in <spec-file>, then re-run: claw-forge validate-spec <spec-file>
