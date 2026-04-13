@@ -3387,5 +3387,119 @@ def fix(
         raise typer.Exit(1) from None
 
 
+@app.command("import")
+def import_spec_cmd(
+    path: str = typer.Argument(..., help="Path to harness output folder or file."),
+    project: str = typer.Option(".", "--project", "-p", help="Project directory."),
+    model: str = typer.Option("claude-opus-4-6", "--model", "-m", help="Model for conversion."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    config: str = typer.Option("claw-forge.yaml", "--config", "-c", help="Config file."),
+    out: str = typer.Option("", "--out", "-o", help="Output filename (default: auto)."),
+) -> None:
+    """Import a 3rd-party harness export and convert it to app_spec.txt.
+
+    Supports BMAD, Linear, Jira, and generic markdown exports.
+
+    Examples:
+
+        claw-forge import ./bmad-output --project .
+        claw-forge import issues.json --project . --yes
+        claw-forge import ./bmad-output --out my_spec.xml
+    """
+    from claw_forge.importer import extract
+    from claw_forge.importer.converter import convert
+    from claw_forge.importer.detector import detect
+    from claw_forge.importer.writer import write_spec
+
+    input_path = Path(path)
+    project_dir = Path(project).resolve()
+
+    if not input_path.exists():
+        console.print(f"[red]Path not found: {input_path}[/red]")
+        raise typer.Exit(1) from None
+
+    # ── Detect ───────────────────────────────────────────────────────────────
+    console.print(f"\n[dim]Scanning {path}...[/dim]")
+    result = detect(input_path)
+    fmt_label = result.format.upper()
+    console.print(f"[bold green]✓ Detected:[/bold green] {fmt_label} — {result.summary}")
+    console.print(f"  Confidence: {result.confidence}")
+
+    # ── Confirm ──────────────────────────────────────────────────────────────
+    if not yes:
+        answer = typer.prompt("\nProceed with import? [Y/n]", default="Y")
+        if answer.strip().lower() == "n":
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(0) from None
+
+    # ── Extract ──────────────────────────────────────────────────────────────
+    console.print("\n[dim]Extracting structure...[/dim]  ", end="")
+    spec = extract(result)
+    console.print(
+        f"[bold green]✓[/bold green]  {spec.epic_count} epic(s), {spec.story_count} story/stories"
+    )
+
+    if spec.story_count == 0:
+        console.print("[red]No features extracted — check export contains stories/issues[/red]")
+        raise typer.Exit(1) from None
+
+    # ── Get api_key from config ───────────────────────────────────────────────
+    _config_path = Path(config)
+    if not _config_path.is_absolute() and not _config_path.exists():
+        _project_config = project_dir / config
+        if _project_config.exists():
+            config = str(_project_config)
+
+    cfg = _load_config(config)
+    configs = load_configs_from_yaml(cfg)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key and configs:
+        first = configs[0]
+        api_key = getattr(first, "api_key", "") or ""
+
+    if not api_key:
+        console.print("[red]No API key found — set ANTHROPIC_API_KEY or configure a provider[/red]")
+        raise typer.Exit(1) from None
+
+    # ── Resolve model alias ───────────────────────────────────────────────────
+    resolved = resolve_model(model, cfg)
+    if resolved.alias_resolved:
+        console.print(f"[dim]Model alias '{model}' → {resolved.model_id}[/dim]")
+    model = resolved.model_id
+
+    # ── Convert ──────────────────────────────────────────────────────────────
+    console.print("[dim]Converting to spec via Claude...[/dim]  ", end="")
+    sections = convert(spec, api_key=api_key, model=model)
+    console.print("[bold green]✓[/bold green]")
+
+    is_brownfield = (project_dir / "brownfield_manifest.json").exists()
+    mode = "brownfield" if is_brownfield else "greenfield"
+    if not is_brownfield:
+        console.print("[dim]Auto-detected: greenfield (no brownfield_manifest.json found)[/dim]")
+    else:
+        console.print("[dim]Auto-detected: brownfield (brownfield_manifest.json found)[/dim]")
+
+    # ── Write ────────────────────────────────────────────────────────────────
+    out_path = write_spec(sections, spec, project_dir, out=out)
+    rel_path = (
+        out_path.relative_to(project_dir) if out_path.is_relative_to(project_dir) else out_path
+    )
+
+    console.print(f"\n[bold green]✓ Written:[/bold green] {rel_path}")
+    # Count feature bullets in core_features
+    bullet_count = sections.core_features.count("<item>") or sections.core_features.count("\n-")
+    console.print(f"  Features: {bullet_count} bullets across {spec.epic_count} categories")
+    console.print(f"  Epics:    {spec.epic_count} implementation phases")
+
+    # ── Next steps ───────────────────────────────────────────────────────────
+    console.print("\n[bold]Next steps:[/bold]")
+    console.print(f"  1. Review {rel_path}")
+    console.print(f"  2. claw-forge validate-spec {rel_path}")
+    console.print(f"  3. claw-forge plan {rel_path}")
+
+    _ = mode  # suppress unused variable warning
+
+
 if __name__ == "__main__":
     app()
