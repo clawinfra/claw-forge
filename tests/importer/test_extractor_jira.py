@@ -117,3 +117,79 @@ def test_csv_project_name_from_column(tmp_path: Path):
     )
     spec = extract_jira(_make_result(csv_file))
     assert spec.project_name == "MyProject"
+
+
+def test_no_artifacts():
+    """extract_jira with no artifacts returns an empty spec."""
+    result = FormatResult(format="jira", confidence="high", artifacts=[])
+    spec = extract_jira(result)
+    assert spec.project_name == "Unnamed Project"
+    assert spec.story_count == 0
+
+
+def test_unknown_extension(tmp_path: Path):
+    """extract_jira with a .txt artifact returns an empty spec."""
+    txt_file = tmp_path / "export.txt"
+    txt_file.write_text("something")
+    spec = extract_jira(_make_result(txt_file))
+    assert spec.story_count == 0
+
+
+def test_xml_no_channel(tmp_path: Path):
+    """XML without a <channel> element returns an empty spec."""
+    xml_file = tmp_path / "export.xml"
+    xml_file.write_text('<rss version="0.92"></rss>', encoding="utf-8")
+    spec = extract_jira(_make_result(xml_file))
+    assert spec.story_count == 0
+    assert spec.project_name == "Unnamed Project"
+
+
+def test_xml_item_empty_title_skipped(tmp_path: Path):
+    """Items with empty title are silently skipped."""
+    xml_file = tmp_path / "export.xml"
+    xml_file.write_text(
+        '<?xml version="1.0"?>'
+        "<rss><channel><title>Proj</title>"
+        "<item><summary>  </summary><description>desc</description></item>"
+        "<item><summary>Real Story</summary><description>d</description></item>"
+        "</channel></rss>",
+        encoding="utf-8",
+    )
+    spec = extract_jira(_make_result(xml_file))
+    assert spec.story_count == 1
+    assert spec.epics[0].stories[0].title == "Real Story"
+
+
+def test_xml_customfield_epic_link(tmp_path: Path):
+    """Epic Link customfield in XML is correctly extracted."""
+    xml_file = tmp_path / "export.xml"
+    xml_file.write_text(
+        '<?xml version="1.0"?>'
+        "<rss><channel><title>Proj</title>"
+        "<item><summary>Story One</summary><description>desc</description>"
+        "<customfields>"
+        "<customfield>"
+        "<customfieldname>Epic Link</customfieldname>"
+        "<customfieldvalues><customfieldvalue>My Epic</customfieldvalue></customfieldvalues>"
+        "</customfield>"
+        "</customfields>"
+        "</item></channel></rss>",
+        encoding="utf-8",
+    )
+    spec = extract_jira(_make_result(xml_file))
+    assert spec.story_count == 1
+    assert spec.epics[0].name == "My Epic"
+
+
+def test_csv_empty_title_skipped(tmp_path: Path):
+    """CSV rows with empty Summary are silently skipped."""
+    csv_file = tmp_path / "export.csv"
+    csv_file.write_text(
+        "Issue key,Summary,Description,Epic Link\n"
+        "TT-1,,empty title row,Auth\n"
+        "TT-2,Real Story,desc,Auth\n",
+        encoding="utf-8",
+    )
+    spec = extract_jira(_make_result(csv_file))
+    assert spec.story_count == 1
+    assert spec.epics[0].stories[0].title == "Real Story"

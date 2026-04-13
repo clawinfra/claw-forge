@@ -90,3 +90,75 @@ def test_no_headings_file(tmp_path: Path):
     spec = extract_generic(_make_result([md_file]))
     assert spec.story_count == 0
     assert spec.epic_count == 0
+
+
+def test_oserror_artifact_skipped(tmp_path: Path):
+    """An artifact that raises OSError is silently skipped."""
+    missing = tmp_path / "nonexistent.md"
+    # Do NOT create the file — read_text will raise OSError
+    spec = extract_generic(_make_result([missing]))
+    assert spec.story_count == 0
+    assert spec.epic_count == 0
+
+
+def test_database_section_extracted(tmp_path: Path):
+    """A ## Database Schema section populates database_tables_raw."""
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(
+        "# MyApp\n\n"
+        "## Database Schema\nusers table\nposts table\n\n"
+        "## Features\n\n### Create Post\nUser can create a post.\n",
+        encoding="utf-8",
+    )
+    spec = extract_generic(_make_result([md_file]))
+    assert "users table" in spec.database_tables_raw
+
+
+def test_api_section_extracted(tmp_path: Path):
+    """A ## API Endpoints section populates api_endpoints_raw."""
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(
+        "# MyApp\n\n"
+        "## API Endpoints\nGET /users\nPOST /users\n\n"
+        "## Features\n\n### List Users\nUser can list users.\n",
+        encoding="utf-8",
+    )
+    spec = extract_generic(_make_result([md_file]))
+    assert "GET /users" in spec.api_endpoints_raw
+
+
+def test_subheading_inside_tech_section(tmp_path: Path):
+    """Subheadings inside a tech section are accumulated as part of the section content."""
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(
+        "# MyApp\n\n"
+        "## Tech Stack\nMain stack info.\n### Frontend\nReact\n### Backend\nFastAPI\n\n"
+        "## Features\n\n### Login\nUser logs in.\n",
+        encoding="utf-8",
+    )
+    spec = extract_generic(_make_result([md_file]))
+    assert "React" in spec.tech_stack_raw
+    assert "FastAPI" in spec.tech_stack_raw
+
+
+def test_story_without_epic_goes_to_general(tmp_path: Path):
+    """H3 story before any H2 epic is placed into a synthetic 'General' epic."""
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(
+        "# MyApp\n\nOverview line.\n\n### Orphan Story\nThis story has no parent epic.\n",
+        encoding="utf-8",
+    )
+    spec = extract_generic(_make_result([md_file]))
+    assert spec.story_count == 1
+    assert spec.epics[0].name == "General"
+
+
+def test_second_file_tech_not_overwritten(tmp_path: Path):
+    """Tech section from the first file is not overwritten by a later file."""
+    first = tmp_path / "a.md"
+    second = tmp_path / "b.md"
+    first.write_text("# First\n\n## Tech Stack\nPython\n\n## Feats\n\n### Story A\ndesc\n")
+    second.write_text("# Second\n\n## Tech Stack\nJava\n\n## Feats\n\n### Story B\ndesc\n")
+    spec = extract_generic(_make_result([first, second]))
+    assert "Python" in spec.tech_stack_raw
+    assert "Java" not in spec.tech_stack_raw

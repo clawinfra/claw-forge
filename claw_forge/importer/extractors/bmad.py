@@ -19,7 +19,12 @@ def extract_bmad(result: FormatResult) -> ExtractedSpec:
     epics = _parse_stories(story_paths, prd_epics)
 
     story_count = sum(len(e.stories) for e in epics)
-    source_path = prd_path.parent if prd_path else (result.artifacts[0].parent if result.artifacts else Path("."))
+    if prd_path:
+        source_path = prd_path.parent
+    elif result.artifacts:
+        source_path = result.artifacts[0].parent
+    else:
+        source_path = Path(".")
 
     return ExtractedSpec(
         project_name=project_name,

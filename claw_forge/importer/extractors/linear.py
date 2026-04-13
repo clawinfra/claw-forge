@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from claw_forge.importer.detector import FormatResult
 from claw_forge.importer.extractors.base import Epic, ExtractedSpec, Story
@@ -57,12 +58,13 @@ def extract_linear(result: FormatResult) -> ExtractedSpec:
     )
 
 
-def _load_json(json_path: Path | None) -> dict | None:
+def _load_json(json_path: Path | None) -> dict[str, Any] | None:
     """Load and parse a JSON file; return None on any error."""
     if json_path is None or not json_path.exists():
         return None
     try:
-        return json.loads(json_path.read_text(encoding="utf-8"))
+        data: dict[str, Any] = json.loads(json_path.read_text(encoding="utf-8"))
+        return data
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -76,7 +78,7 @@ def _label_name(label: object) -> str:
     return ""
 
 
-def _group_by_label(issues: list[dict]) -> list[Epic]:
+def _group_by_label(issues: list[dict[str, Any]]) -> list[Epic]:
     """Group issues into Epics by their first label; unlabelled → 'General'."""
     # Use an ordered dict to preserve insertion order
     epic_map: dict[str, list[Story]] = {}
