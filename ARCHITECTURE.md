@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        CLI  (Typer)                               │
-│   run | init | status | pause | resume | input | pool-status | state | fix │
+│   run | init | import | status | pause | resume | input | pool-status | state | fix │
 └─────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -489,6 +489,34 @@ claw-forge fix <bug>      # read manifest → RED-GREEN fix cycle
 The manifest is consumed by `add` and `fix` agents to ensure new code matches existing conventions and doesn't break the test baseline.
 
 > **Status:** `analyze`, `add`, and `fix` commands are planned. See [`docs/brownfield.md`](docs/brownfield.md) for the full design.
+
+---
+
+## Import Pipeline (`claw_forge/importer/`)
+
+Converts 3rd-party harness tool exports into claw-forge spec files.
+
+```
+<path>
+  │
+  ▼
+detector.py ──→ FormatResult(format, confidence, artifacts)
+  │
+  ▼
+extractors/<format>.py ──→ ExtractedSpec(epics, stories, tech_stack, ...)
+  │
+  ▼
+converter.py (Claude) ──→ ConvertedSections (one call per XML section group)
+  │
+  ▼
+writer.py ──→ app_spec.txt (greenfield) or additions_spec.xml (brownfield)
+```
+
+Supported formats: BMAD (`prd.md` + `architecture.md` + `stories/`), Linear JSON, Jira XML/CSV,
+generic markdown.
+
+The pipeline is exposed as both a one-shot CLI command (`claw-forge import`) and an interactive
+slash command (`/import-spec`) that adds approval gates between each converted section.
 
 ---
 

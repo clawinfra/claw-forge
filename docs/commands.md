@@ -295,6 +295,91 @@ iteratively, then re-run `validate-spec` until clean.
 
 ---
 
+### `claw-forge import`
+
+#### Purpose
+Convert a 3rd-party harness tool export (BMAD, Linear JSON, Jira XML/CSV, or generic markdown
+folder) into a claw-forge spec file (`app_spec.txt` or `additions_spec.xml`).
+
+#### When to use
+- You have BMAD planning output (`prd.md`, `architecture.md`, `stories/`)
+- You exported issues from Linear as JSON
+- You exported tickets from Jira as XML or CSV
+- You have a folder of markdown files describing features
+
+#### Usage
+```bash
+# Auto-detect format and convert
+claw-forge import ./bmad-output
+
+# Skip confirmation prompt
+claw-forge import ./bmad-output --yes
+
+# Use a faster model
+claw-forge import ./bmad-output --model claude-sonnet-4-6
+
+# Write to a custom filename
+claw-forge import ./bmad-output --out my-spec.xml
+
+# Point at a different project directory
+claw-forge import ./linear-export.json --project ~/projects/myapp
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `path` | positional | **required** | Path to harness output folder or file |
+| `--project`, `-p` | path | `.` | Project directory (for brownfield detection + output) |
+| `--model`, `-m` | string | `claude-opus-4-6` | Model for Claude conversion calls |
+| `--yes`, `-y` | flag | `False` | Skip format confirmation prompt |
+| `--config`, `-c` | path | `claw-forge.yaml` | Config file path |
+| `--out`, `-o` | string | `""` | Output filename (default: auto — `app_spec.txt` or `additions_spec.xml`) |
+
+#### What it does internally
+1. Scans the path and detects format (BMAD / Linear / Jira / generic) with confidence score.
+2. Shows the detected format and asks for confirmation (unless `--yes`).
+3. Extracts epics, stories, tech stack, DB schema, and API endpoints using format-specific rules.
+4. Calls Claude once per XML section (overview+tech, core features per epic, DB+API, steps+criteria).
+5. Detects greenfield vs brownfield from presence of `brownfield_manifest.json`.
+6. Writes `app_spec.txt` (greenfield) or `additions_spec.xml` (brownfield).
+7. Shows output stats and next steps.
+
+#### Output example
+```
+Scanning ./bmad-output...
+✓ Detected: BMAD output — prd.md + architecture.md + 2 epics (5 stories)
+  Confidence: high
+
+Proceed with import? [Y/n]: Y
+
+Extracting structure...  ✓  2 epics, 5 stories
+Converting to spec via Claude...  ✓
+Auto-detected: greenfield (no brownfield_manifest.json found)
+
+✓ Written: app_spec.txt
+  Features: 23 bullets across 2 categories
+  Epics:    2 implementation phases
+
+Next steps:
+  1. Review app_spec.txt
+  2. claw-forge validate-spec app_spec.txt
+  3. claw-forge plan app_spec.txt
+```
+
+#### Pro tips
+- Use `--yes` in scripts and CI pipelines to skip the confirmation prompt.
+- For interactive section-by-section review, use `/import-spec` in Claude Code instead.
+- Run `claw-forge analyze` first on brownfield projects to generate `brownfield_manifest.json`.
+- The converter uses one Claude call per section to avoid context truncation on large specs.
+
+#### Related commands
+- **Before:** `claw-forge analyze` (brownfield), BMAD / Linear / Jira planning tools
+- **Interactive version:** `/import-spec` slash command
+- **After:** `claw-forge validate-spec`, `claw-forge plan`
+
+---
+
 ### `claw-forge run`
 
 #### Purpose
@@ -1297,6 +1382,35 @@ Next steps:
 #### Related commands
 - **Before:** `claw-forge analyze` (brownfield)
 - **After:** `claw-forge plan` (greenfield) or `claw-forge add` (brownfield)
+
+---
+
+### `/import-spec`
+
+#### Purpose
+Interactive section-by-section review of a 3rd-party harness export before writing — same
+pipeline as `claw-forge import` but with approval gates at each XML section.
+
+#### When to use
+- You want to review and optionally edit each converted section before it's written
+- You want to verify the extractor found the right epics and stories
+- You prefer interactive control over a one-shot command
+
+#### Usage
+In Claude Code chat panel:
+```
+/import-spec ./bmad-output
+/import-spec ./linear-export.json --model claude-sonnet-4-6
+```
+
+#### What it does internally
+Steps through 5 stages — detect, extract, convert section by section (with approve/edit/skip
+at each), write, suggest next steps. Each XML section is shown for review before being
+committed to the output file.
+
+#### Related commands
+- **Non-interactive version:** `claw-forge import`
+- **After:** `claw-forge validate-spec`, `claw-forge plan`
 
 ---
 

@@ -26,6 +26,22 @@ UX doc                         →   <ui_layout> + <design_system>
 
 ### 1. After BMAD planning is done
 
+### Automated import (recommended)
+
+The fastest path is `claw-forge import`:
+
+```bash
+claw-forge import ./bmad-output
+```
+
+This auto-detects the BMAD format, extracts all epics and stories, and converts them to a
+claw-forge spec using Claude. See [`docs/commands.md`](commands.md) for full options.
+
+If you want to review each section interactively before writing, use `/import-spec` in
+Claude Code instead.
+
+The manual steps below are useful for understanding the mapping or for custom conversions.
+
 You have (in `_bmad-output/`):
 - `prd.md` — product requirements + epics
 - `architecture.md` — tech stack, data models, API design
