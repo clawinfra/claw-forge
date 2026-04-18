@@ -43,6 +43,7 @@ dependencies = [
     "requests>=2.33.0",
     "cryptography>=46.0.7",
     "pygments>=2.20.0",
+    "python-multipart>=0.0.26",
 ]
 
 [project.optional-dependencies]
@@ -52,8 +53,8 @@ vertex = ["anthropic[vertex]>=0.40,<1", "google-auth>=2,<3"]
 postgres = ["asyncpg>=0.29,<1"]
 all-providers = ["claw-forge[bedrock,azure,vertex]"]
 dev = [
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<1",
+    "pytest>=9,<10",
+    "pytest-asyncio>=1,<2",
     "pytest-cov>=5,<6",
     "playwright>=1.40,<2",
     "ruff>=0.6,<1",
