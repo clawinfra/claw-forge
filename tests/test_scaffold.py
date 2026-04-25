@@ -478,3 +478,93 @@ def test_scaffold_project_existing_git_repo_skips_init(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     result = scaffold_project(tmp_path)
     assert result["git_initialized"] is False
+
+
+def test_scaffold_config_git_branch_prefix_default(tmp_path: Path) -> None:
+    """Scaffolded config includes branch_prefix: feat."""
+    from unittest.mock import patch
+    import yaml
+    from claw_forge.cli import _scaffold_config
+
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert data["git"]["branch_prefix"] == "feat"
+
+
+def test_scaffold_config_git_commit_on_plugin_boundary(tmp_path: Path) -> None:
+    """Scaffolded config includes commit_on_plugin_boundary: true."""
+    from unittest.mock import patch
+    import yaml
+    from claw_forge.cli import _scaffold_config
+
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert data["git"]["commit_on_plugin_boundary"] is True
+
+
+def test_scaffold_config_git_target_branch_defaults_to_main(tmp_path: Path) -> None:
+    """Scaffolded config includes target_branch: main as the explicit default."""
+    from unittest.mock import patch
+    import yaml
+    from claw_forge.cli import _scaffold_config
+
+    cfg = str(tmp_path / "claw-forge.yaml")
+    with patch("claw_forge.cli.console"):
+        _scaffold_config(cfg)
+    data = yaml.safe_load((tmp_path / "claw-forge.yaml").read_text())
+    assert data["git"]["target_branch"] == "main"
+
+
+def test_load_config_git_target_branch_explicit(tmp_path: Path) -> None:
+    """When target_branch is set in claw-forge.yaml, _load_config returns it."""
+    import yaml
+    from unittest.mock import patch
+    from claw_forge.cli import _load_config
+
+    cfg_path = tmp_path / "claw-forge.yaml"
+    cfg_path.write_text(yaml.dump({
+        "git": {
+            "enabled": True,
+            "merge_strategy": "auto",
+            "branch_prefix": "feat",
+            "target_branch": "develop",
+        }
+    }))
+    with patch("claw_forge.cli.console"):
+        data = _load_config(str(cfg_path))
+    assert data["git"]["target_branch"] == "develop"
+
+
+def test_load_config_git_target_branch_absent_triggers_autodetect(tmp_path: Path) -> None:
+    """When target_branch is absent, git_cfg.get('target_branch') returns None
+    so that detect_default_branch() is used as the fallback at runtime."""
+    import subprocess
+    import yaml
+    from unittest.mock import patch
+    from claw_forge.cli import _load_config
+    from claw_forge.git import detect_default_branch
+
+    # Real git repo with a 'main' branch so detect_default_branch has something to find
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("x")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    cfg_path = tmp_path / "claw-forge.yaml"
+    cfg_path.write_text(yaml.dump({
+        "git": {"enabled": True, "merge_strategy": "auto", "branch_prefix": "feat"}
+    }))
+    with patch("claw_forge.cli.console"):
+        data = _load_config(str(cfg_path))
+
+    git_cfg = data.get("git", {})
+    # target_branch absent from config → None → runtime falls back to detect_default_branch
+    assert git_cfg.get("target_branch") is None
+    # and the detector resolves the actual branch correctly
+    assert detect_default_branch(tmp_path) == "main"

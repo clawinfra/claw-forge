@@ -429,3 +429,142 @@ class TestStopAllResumeAll:
                 json={"role": "assistant", "content": "resumed log", "task_name": "t1"},
             )
             assert resp.json()["status"] == "ok"
+
+
+# ── Paused-status guard ───────────────────────────────────────────────────────
+
+
+class TestPausedStatusGuard:
+    """PATCH /tasks/{id} must not overwrite 'paused' with 'pending'.
+
+    When a task is paused via POST /tasks/{id}/stop or POST /sessions/{id}/tasks/stop-all,
+    the dispatcher's asyncio task is subsequently cancelled.  The CLI's finally-block
+    calls PATCH /tasks/{id} with status='pending' before returning.  Without a guard,
+    this overwrites the 'paused' status and the task jumps to the Pending column
+    immediately — before the user explicitly resumes it.
+    """
+
+    async def _make_client(self):  # type: ignore[return]
+        from httpx import ASGITransport, AsyncClient
+
+        from claw_forge.state.service import AgentStateService
+
+        svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+        await svc.init_db()
+        app = svc.create_app()
+
+        class _CleanupClient(AsyncClient):
+            async def aclose(self) -> None:
+                await super().aclose()
+                await svc.dispose()
+
+        return _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    # ── Single-task stop ──────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_stop_one_task_status_not_overwritten_by_pending_patch(self) -> None:
+        """POST /tasks/{id}/stop sets 'paused'; a subsequent PATCH to 'pending' is ignored."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+
+            t = await client.post(
+                f"/sessions/{session_id}/tasks",
+                json={"plugin_name": "coding", "description": "task A"},
+            )
+            task_id = t.json()["id"]
+
+            # Mark running, then stop (sets to "paused")
+            await client.patch(f"/tasks/{task_id}", json={"status": "running"})
+            await client.post(f"/tasks/{task_id}/stop")
+
+            # Simulate CLI cancel-finally: PATCH back to "pending"
+            await client.patch(f"/tasks/{task_id}", json={"status": "pending"})
+
+            resp = await client.get(f"/tasks/{task_id}")
+            assert resp.json()["status"] == "paused", (
+                f"Paused status was overwritten — got '{resp.json()['status']}'"
+            )
+
+    @pytest.mark.asyncio
+    async def test_stop_one_task_paused_guard_does_not_block_other_transitions(self) -> None:
+        """Guard only blocks paused→pending; running→pending must still work normally."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+
+            t = await client.post(
+                f"/sessions/{session_id}/tasks",
+                json={"plugin_name": "coding", "description": "task B"},
+            )
+            task_id = t.json()["id"]
+
+            # running → pending (NOT paused) must still succeed
+            await client.patch(f"/tasks/{task_id}", json={"status": "running"})
+            await client.patch(f"/tasks/{task_id}", json={"status": "pending"})
+
+            resp = await client.get(f"/tasks/{task_id}")
+            assert resp.json()["status"] == "pending"
+
+    # ── Stop-all ─────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_stop_all_tasks_not_overwritten_by_pending_patch(self) -> None:
+        """stop-all sets all running tasks to 'paused'; PATCH to 'pending' is ignored for each."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+
+            t1 = await client.post(
+                f"/sessions/{session_id}/tasks",
+                json={"plugin_name": "coding", "description": "task 1"},
+            )
+            t2 = await client.post(
+                f"/sessions/{session_id}/tasks",
+                json={"plugin_name": "coding", "description": "task 2"},
+            )
+            task1_id = t1.json()["id"]
+            task2_id = t2.json()["id"]
+
+            await client.patch(f"/tasks/{task1_id}", json={"status": "running"})
+            await client.patch(f"/tasks/{task2_id}", json={"status": "running"})
+
+            # Stop all (sets both to "paused")
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+
+            # Simulate CLI cancel-finally for both tasks
+            await client.patch(f"/tasks/{task1_id}", json={"status": "pending"})
+            await client.patch(f"/tasks/{task2_id}", json={"status": "pending"})
+
+            tasks = (await client.get(f"/sessions/{session_id}/tasks")).json()
+            for task in tasks:
+                assert task["status"] == "paused", (
+                    f"Task {task['id']}: expected 'paused' but got '{task['status']}'"
+                )
+
+    @pytest.mark.asyncio
+    async def test_stop_all_resume_all_still_transitions_paused_to_pending(self) -> None:
+        """resume-all must still move paused→pending (via SQLAlchemy, not the PATCH guard path)."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+
+            t1 = await client.post(
+                f"/sessions/{session_id}/tasks",
+                json={"plugin_name": "coding", "description": "task 1"},
+            )
+            task1_id = t1.json()["id"]
+            await client.patch(f"/tasks/{task1_id}", json={"status": "running"})
+
+            await client.post(f"/sessions/{session_id}/tasks/stop-all")
+            await client.post(f"/sessions/{session_id}/tasks/resume-all")
+
+            resp = await client.get(f"/tasks/{task1_id}")
+            assert resp.json()["status"] == "pending", (
+                f"resume-all should set paused→pending but got '{resp.json()['status']}'"
+            )

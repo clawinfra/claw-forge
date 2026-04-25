@@ -786,7 +786,14 @@ class AgentStateService:
                 if not task:
                     raise HTTPException(404, "Task not found")
                 if req.status:
-                    task.status = req.status
+                    # Guard: don't let a cancellation-triggered PATCH overwrite a
+                    # user-paused status.  The stop endpoint already set the task to
+                    # "paused"; the CLI finally-block then calls PATCH status=pending —
+                    # that must not win.  resume-all uses SQLAlchemy directly and is
+                    # unaffected by this guard.
+                    _skip_status = req.status == "pending" and task.status == "paused"
+                    if not _skip_status:
+                        task.status = req.status
                     if req.status == "running" and not task.started_at:
                         task.started_at = datetime.now(UTC)
                     elif req.status == "pending":

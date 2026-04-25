@@ -7,7 +7,7 @@ Multi-provider API rotation · Claude Agent SDK core · 18 pre-installed skills 
 [![CI](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/clawinfra/claw-forge/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/claw-forge)](https://pypi.org/project/claw-forge/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-forge)](https://pypi.org/project/claw-forge/)
-[![Tests](https://img.shields.io/badge/tests-2029%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
+[![Tests](https://img.shields.io/badge/tests-2569%20passing-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![Mypy](https://img.shields.io/badge/mypy-clean-brightgreen)](https://github.com/clawinfra/claw-forge/actions)
 [![ClawHub](https://img.shields.io/badge/clawhub-claw--forge--cli-blue)](https://clawhub.com/skills/claw-forge-cli)
@@ -93,7 +93,7 @@ claw-forge supports **two spec formats**:
 The `/create-spec` slash command generates whichever format is appropriate — it **auto-detects**
 whether you're in a greenfield or brownfield project and runs the matching conversational flow.
 
-### 4 ways to create a spec
+### Ways to create a spec
 
 **Option 1 — Write it yourself** (best control)
 
@@ -257,6 +257,28 @@ claw-forge analyze     # generates brownfield_manifest.json first
 Paste a PRD, Notion export, or detailed README into Claude and ask:
 
 > "Convert this into a claw-forge `app_spec.txt`. Break each requirement into a concrete feature with acceptance criteria and `Depends on:` links."
+
+**Option 6 — Import from BMAD / Linear / Jira** (automated)
+
+If your team already has stories in a 3rd-party tool, `claw-forge import` converts them to
+`app_spec.txt` (or `additions_spec.xml` for brownfield projects) automatically — no manual
+rewriting.
+
+```bash
+# Import from a BMAD workspace (detects prd.md + epic-* structure)
+claw-forge import ./docs/prd --project my-api
+
+# Import from a Linear JSON export
+claw-forge import linear-export.json --project my-api
+
+# Import from a Jira XML/CSV export
+claw-forge import jira-export.xml --project my-api
+```
+
+Supported formats: **BMAD** (`prd.md` + `docs/stories/` layout), **Linear** (JSON issues
+export), **Jira** (XML RSS or CSV export), **Generic** (any Markdown with `#`/`##`/`###`
+headings). The `/import-spec` slash command runs the same pipeline interactively with
+section-by-section review before writing the file.
 
 ### Spec format reference
 
@@ -541,6 +563,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge resume` | Resume a paused project | — |
 | `claw-forge input` | Answer human-input questions from blocked agents | — |
 | `claw-forge state` | Start the state service REST API (port 8420) | `--port`, `--host`, `--reload` |
+| `claw-forge import` | Import BMAD / Linear / Jira exports → `app_spec.txt` or `additions_spec.xml` | `--project`, `--model`, `--yes`, `--out` |
 
 ### Slash Commands (Claude Code)
 
@@ -554,6 +577,7 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `/pool-status` | Diagnosing slow agents or cost spikes | Provider health + recommendations |
 | `/create-bug-report` | Structured bug reporting before fix | `bug_report.md` → auto-runs `claw-forge fix` |
 | `/claw-forge-status` | Re-entry after leaving a session | Full project status card |
+| `/import-spec` | Import 3rd-party tool export interactively with section-by-section review | `app_spec.txt` or `additions_spec.xml` |
 
 > 📚 Full details: [`docs/commands.md`](docs/commands.md) · End-to-end workflows: [`docs/workflows.md`](docs/workflows.md)
 
@@ -569,6 +593,11 @@ claw-forge init → /create-spec → claw-forge plan → claw-forge run
 **Add features to existing app:**
 ```
 claw-forge analyze → /create-spec → claw-forge add → claw-forge run
+```
+
+**Import from BMAD / Linear / Jira:**
+```
+claw-forge import ./export → claw-forge validate-spec → claw-forge plan → claw-forge run
 ```
 
 **Fix a bug:**
@@ -874,6 +903,7 @@ uv run mypy claw_forge/ --ignore-missing-imports                 # type check
 
 | Document | Contents |
 |---|---|
+| [`docs/faq.md`](docs/faq.md) | Frequently asked questions — architecture, security, performance, operations |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, data flow, component details |
 | [`docs/commands.md`](docs/commands.md) | Full CLI command reference with options and examples |
 | [`docs/workflows.md`](docs/workflows.md) | End-to-end workflow walkthroughs |
@@ -1067,6 +1097,27 @@ clawhub install claw-forge-cli
 
 See [`docs/agent-skill.md`](docs/agent-skill.md) for details on `--edit-mode hashline`,
 the middleware stack, Terminal Bench ablation numbers, and how the skill integrates with OpenClaw.
+
+---
+
+## Frequently Asked Questions
+
+**What happens if an agent fails mid-run?**
+Failed tasks are retried up to 3 times with exponential back-off. Other tasks in the same wave keep running — a single failure never halts the project. Dependent tasks are marked `blocked` and can be retried from the Kanban UI.
+
+**Is my codebase safe with agents running on it?**
+Two layers enforce safety: a bash allowlist blocks any command not on an explicit permitted list (and hardcodes `sudo`, `dd`, `shutdown`, and similar as always-denied), and a `CanUseTool` callback sandboxes all file operations to your project root. Note that `WebFetch` and `WebSearch` do not filter URLs — for network-restricted deployments, run claw-forge inside a container with egress rules.
+
+**Can I use providers other than Anthropic?**
+Yes. The provider pool supports Anthropic, AWS Bedrock, Azure AI, Google Vertex, any OpenAI-compatible endpoint, and local Ollama models — configure as many as you like in `claw-forge.yaml`. The pool rotates across them with automatic failover and per-provider circuit breaking.
+
+**Can I add new features while a run is in progress?**
+`claw-forge plan` (or `/expand-project` in Claude Code) reconciles new spec features against the existing session without touching completed tasks. New features land as `pending` and are picked up on the next run.
+
+**Does it work with PostgreSQL?**
+Yes. Set `CLAW_FORGE_DB_URL=postgresql+asyncpg://...` in your environment — the state service uses SQLAlchemy 2.0 and the swap is transparent. PostgreSQL is recommended for large runs (20+ concurrent agents) or when you need cross-version state persistence.
+
+→ [Full FAQ — architecture, security, performance, and more](docs/faq.md)
 
 ---
 

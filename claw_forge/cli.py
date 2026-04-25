@@ -143,6 +143,7 @@ git:
   enabled: true
   merge_strategy: auto    # auto | manual
   branch_prefix: feat
+  target_branch: main
   commit_on_plugin_boundary: true
 """
 
