@@ -483,7 +483,9 @@ def test_scaffold_project_existing_git_repo_skips_init(tmp_path: Path) -> None:
 def test_scaffold_config_git_branch_prefix_default(tmp_path: Path) -> None:
     """Scaffolded config includes branch_prefix: feat."""
     from unittest.mock import patch
+
     import yaml
+
     from claw_forge.cli import _scaffold_config
 
     cfg = str(tmp_path / "claw-forge.yaml")
@@ -496,7 +498,9 @@ def test_scaffold_config_git_branch_prefix_default(tmp_path: Path) -> None:
 def test_scaffold_config_git_commit_on_plugin_boundary(tmp_path: Path) -> None:
     """Scaffolded config includes commit_on_plugin_boundary: true."""
     from unittest.mock import patch
+
     import yaml
+
     from claw_forge.cli import _scaffold_config
 
     cfg = str(tmp_path / "claw-forge.yaml")
@@ -509,7 +513,9 @@ def test_scaffold_config_git_commit_on_plugin_boundary(tmp_path: Path) -> None:
 def test_scaffold_config_git_target_branch_defaults_to_main(tmp_path: Path) -> None:
     """Scaffolded config includes target_branch: main as the explicit default."""
     from unittest.mock import patch
+
     import yaml
+
     from claw_forge.cli import _scaffold_config
 
     cfg = str(tmp_path / "claw-forge.yaml")
@@ -521,8 +527,10 @@ def test_scaffold_config_git_target_branch_defaults_to_main(tmp_path: Path) -> N
 
 def test_load_config_git_target_branch_explicit(tmp_path: Path) -> None:
     """When target_branch is set in claw-forge.yaml, _load_config returns it."""
-    import yaml
     from unittest.mock import patch
+
+    import yaml
+
     from claw_forge.cli import _load_config
 
     cfg_path = tmp_path / "claw-forge.yaml"
@@ -543,15 +551,23 @@ def test_load_config_git_target_branch_absent_triggers_autodetect(tmp_path: Path
     """When target_branch is absent, git_cfg.get('target_branch') returns None
     so that detect_default_branch() is used as the fallback at runtime."""
     import subprocess
-    import yaml
     from unittest.mock import patch
+
+    import yaml
+
     from claw_forge.cli import _load_config
     from claw_forge.git import detect_default_branch
 
     # Real git repo with a 'main' branch so detect_default_branch has something to find
     subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"],
+        cwd=tmp_path, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "T"],
+        cwd=tmp_path, check=True, capture_output=True,
+    )
     (tmp_path / "README.md").write_text("x")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
