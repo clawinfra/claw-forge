@@ -1,15 +1,133 @@
 # Ralph Progress Log
 
 ## Codebase Patterns
-- UI stack: React 18 + Vite + TypeScript (strict) + TailwindCSS + @tanstack/react-query + lucide-react
-- State management: React Query for server state, useState for local UI state, no Redux/Context
-- WebSocket: Single shared connection via useWebSocket hook, patches React Query cache via setQueryData
-- Dark mode: Tailwind class strategy, useDarkMode hook with localStorage persistence
-- All components are functional React components with hooks
-- TypeScript check: run from ui/ directory: node node_modules/.bin/tsc --noEmit --project tsconfig.json
-- Default state service port: 8420 (configurable via VITE_API_PORT env var)
-- SVG components (DependencyGraph) use inline styles, not Tailwind classes
+- **Direct sqlite3 reads for export/audit code**: When reading state.db, prefer
+  stdlib `sqlite3` over SQLAlchemy unless ORM features are actually needed.
+  No async overhead, no engine lifecycle, much faster for bulk reads. See
+  `claw_forge/exporter.py`.
+- **JSON list columns** (`tasks.depends_on`, `tasks.steps`): SQLAlchemy stores
+  these as JSON-encoded TEXT. When reading via raw `sqlite3`, decode with
+  `json.loads()` and tolerate empty strings / corrupt payloads (mirror
+  SafeJSON's fallback behavior in `claw_forge/state/models.py`).
+- **Test DB fixtures**: For tests that need a state.db without spinning up
+  the async service, mirror the schema with raw `CREATE TABLE` SQL — see
+  `tests/test_exporter.py::_build_state_db`. Faster than going through the
+  ORM, and tests stay sync.
+- **CSV serialization for list columns**: Use `;` as the delimiter when
+  flattening list columns into a CSV cell. Avoids escaping conflicts with
+  the CSV `,` field separator.
+- **Filtered SQL dump pattern**: To produce a SQLite dump filtered to a
+  subset of rows, copy schema + filtered data into an in-memory DB, then
+  call `iterdump()` on it. Lets us reuse the proven SQLite serializer
+  instead of hand-rolling INSERT escaping. Post-process lines through
+  `_patch_create_if_not_exists()` so the dump can be re-applied to a
+  pre-seeded DB. See `claw_forge/exporter.py::export_sql`.
+- **No nested escapes inside f-strings**: ruff/CI run with `target = py311`,
+  which forbids backslash escapes inside f-string expressions even though
+  Python 3.12 allows them. Compute joined SQL fragments in a separate
+  variable rather than nesting f"\"{c}\"" inside f"{...}".
 
 ---
 
-Started: 2026-03-05
+Started: Wed Apr 29 22:01:59 AEST 2026
+
+## 2026-04-29 22:11 - US-001
+- Implemented `claw_forge/exporter.py` with `export_csv_flat(db_path, session_id, out)`.
+- Reads sessions+tasks via raw `sqlite3`, joins, writes denormalized CSV
+  (one row per task, session fields repeated). `depends_on` and `steps` are
+  serialized as `;`-joined strings; null values become empty strings.
+- Returns the output Path.
+- 18 unit tests in `tests/test_exporter.py` covering: column order, row count,
+  session-field denormalization, list serialization, null→empty-string,
+  session filter (including `None` for full dump), empty-result header-only,
+  parent-dir creation, numeric-field preservation, JSON-decode helper edge cases.
+- Files changed:
+  - claw_forge/exporter.py (new)
+  - tests/test_exporter.py (new)
+- Quality gates:
+  - uv run pytest tests/test_exporter.py -q → 18 passed
+  - uv run pytest tests/ -q (excluding e2e) → 2455 passed, no regressions
+  - uv run ruff check claw_forge/ tests/ → clean
+  - uv run mypy claw_forge/exporter.py → clean
+- **Learnings:**
+  - The pre-existing `claw_forge/export/` directory had only a stale
+    `__pycache__/pdf.cpython-312.pyc` left over from a removed module — safe
+    to ignore; we used the flat `claw_forge/exporter.py` per spec.
+  - `sqlite3` columns for datetime are TEXT in SQLAlchemy SQLite — the
+    raw SELECT returns strings already, no parsing needed for re-serialization.
+  - `_decode_json_list` must handle 4 cases: None, empty string,
+    JSON-encoded list, and malformed payload. Mirrors SafeJSON behavior.
+---
+
+## 2026-04-29 22:18 - US-002
+- Extended `claw_forge/exporter.py` with three new exporters:
+  - `export_csv_split(db_path, session_id, out_dir)`: one CSV per table
+    (sessions.csv, tasks.csv, events.csv), schema mirrored, filtered by
+    session id when provided.
+  - `export_sql(db_path, session_id, out)`: SQLite dump (CREATE TABLE
+    IF NOT EXISTS + INSERT). For filtered (session-scope) exports, copies
+    schema and matching rows into an in-memory DB, then iterdump()s it.
+  - `export_json(db_path, session_id, out)`: API-shaped JSON with
+    `{exported_at, claw_forge_version, scope, sessions: [{..., tasks: [...]}]}`.
+- Helpers added: `_decode_json_value`, `_table_columns`, `_patch_create_if_not_exists`,
+  `_build_filtered_dump_db`, `_row_to_session_dict`, `_row_to_task_dict`.
+- 26 new unit tests (44 total) including a SQL round-trip test that imports
+  the dump into a fresh DB and verifies all three tables.
+- Files changed:
+  - claw_forge/exporter.py (extended)
+  - tests/test_exporter.py (extended)
+- Quality gates:
+  - uv run pytest tests/test_exporter.py -q → 44 passed
+  - uv run ruff check claw_forge/ tests/ → clean
+  - uv run mypy claw_forge/exporter.py → clean
+- **Learnings:**
+  - `sqlite3.Connection.iterdump()` writes bare `CREATE TABLE` (no
+    `IF NOT EXISTS`); we post-process the lines so the dump remains
+    re-appliable.
+  - Pyright/ruff target Python 3.11 in this repo — backslash-escaped
+    quotes inside f-string expressions trip the linter even though
+    runtime is 3.12. Compute SQL fragments separately first.
+  - When the in-memory DB has no rows for a table, `executemany` with an
+    empty sequence is a no-op — guard with a row-count check anyway to
+    keep the SQL minimal.
+---
+
+## 2026-04-29 22:30 - US-003
+- Added `claw-forge export` Typer command in `claw_forge/cli.py`.
+- Flags wired up: --format, --scope, --session, --csv-mode, --out, --project.
+- Resolves DB path as `<project>/.claw-forge/state.db`. Resolves session
+  via existing `_resolve_latest_session(db_path, project_path)` helper.
+- Auto-generated filenames follow the spec pattern. `--csv-mode split`
+  yields a directory with no extension; other formats yield a file with
+  the proper extension.
+- Validates flag values and exits 1 with rich error messages on bad input.
+- DB-not-found and session-not-found errors include actionable hints
+  (the latter lists up to 10 candidate sessions via `_list_sessions_for_help`).
+- Prints summary line: row counts, format label, output path.
+- 16 new CLI tests added to `tests/test_exporter.py` using Typer's CliRunner.
+  Total tests in the file: 76 (covers helpers + four exporters + CLI).
+- Files changed:
+  - claw_forge/cli.py (added export command + 3 helpers, kept signature
+    of `_resolve_latest_session` unchanged)
+  - tests/test_exporter.py (extended)
+- Quality gates:
+  - uv run pytest tests/ -q --ignore=tests/e2e → 2504 passed
+  - Exporter coverage: 98% (only defensive guards uncovered)
+  - Global coverage: 93.78% (above 90% gate)
+  - uv run ruff check claw_forge/ tests/ → clean
+- **Learnings:**
+  - Typer's CliRunner runs commands synchronously and captures stdout —
+    use `result.exit_code` and `result.output`. The `--help` text is
+    rendered via Click so flag presence checks are stable.
+  - Defensive helpers (`_session_exists`, `_count_sessions_and_tasks`,
+    `_list_sessions_for_help`) live in cli.py rather than exporter.py
+    because they're CLI-UX concerns, not export-format concerns.
+  - Auto-generated filename uses `_dt.now()` (local time, no tz) per spec
+    — the CLI is operator-facing and local time is more readable.
+---
+
+## All stories complete.
+- US-001: ✓ Created exporter module with CSV flat export
+- US-002: ✓ Added CSV split, SQL, JSON exports
+- US-003: ✓ Added CLI command `claw-forge export`
+- All 2504 tests pass; coverage 93.78% (above 90% gate); lint clean.

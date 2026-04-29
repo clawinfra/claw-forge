@@ -1,0 +1,19 @@
+# Ralph Progress Log
+
+## Codebase Patterns
+- Use `uv run` to execute Python tools — never activate the venv manually
+- Coverage gate: CI enforces fail_under = 90 (branch coverage)
+- All git commits use --no-verify to skip target project pre-commit hooks
+- State service models use String(32) for status columns (not Enum)
+- Session resolution: use _resolve_latest_session(db_path, project_path) to filter by project
+- Pure sqlite3 for direct DB access — SQLAlchemy only used by the state service
+- CLI tests in tests/test_cli_commands.py, module tests in tests/test_*.py
+- cli.py is large (~3500 lines) — add minimal code, reuse existing helpers
+- Typer app is `app` in cli.py, commands registered with @app.command()
+- _load_env_file and _load_config are shared helpers for project/config resolution
+
+---
+
+Started: 2026-04-29
+Feature: claw-forge export command
+Spec: docs/superpowers/specs/2026-04-29-export-command-design.md

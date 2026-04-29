@@ -23,7 +23,7 @@
         "Lint passes (uv run ruff check claw_forge/ tests/)"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "New file: claw_forge/exporter.py, tests/test_exporter.py"
     },
     {
@@ -40,7 +40,7 @@
         "Lint passes (uv run ruff check claw_forge/ tests/)"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "Extend claw_forge/exporter.py and tests/test_exporter.py"
     },
     {
@@ -62,7 +62,7 @@
         "Lint passes (uv run ruff check claw_forge/ tests/)"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": "Add to claw_forge/cli.py, add CLI tests to tests/test_cli_commands.py or tests/test_exporter.py"
     }
   ]

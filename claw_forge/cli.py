@@ -2514,6 +2514,240 @@ def human_input(
     console.print(f"[green]All questions answered. Project {project!r} can now continue.[/green]")
 
 
+def _list_sessions_for_help(
+    db_path: Path, project_path: Path | None = None, limit: int = 10
+) -> list[tuple[str, str, str]]:
+    """Return [(id, project_path, created_at), ...] for error-message hints.
+
+    Filters by *project_path* when given. Most recent first. Errors are
+    swallowed and yield an empty list — this is purely for UX guidance.
+    """
+    try:
+        import sqlite3 as _sq
+        if not db_path.exists():
+            return []
+        with _sq.connect(str(db_path)) as conn:
+            if project_path is not None:
+                cursor = conn.execute(
+                    "SELECT id, project_path, created_at FROM sessions "
+                    "WHERE project_path = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (str(project_path), limit),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT id, project_path, created_at FROM sessions "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                )
+            return [(str(r[0]), str(r[1]), str(r[2])) for r in cursor.fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _session_exists(db_path: Path, session_id: str) -> bool:
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ? LIMIT 1", (session_id,)
+            ).fetchone()
+            return row is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _count_sessions_and_tasks(
+    db_path: Path, session_id: str | None
+) -> tuple[int, int]:
+    """Return (session_count, task_count) for the export summary line."""
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(str(db_path)) as conn:
+            if session_id is None:
+                s_count = conn.execute(
+                    "SELECT COUNT(*) FROM sessions"
+                ).fetchone()[0]
+                t_count = conn.execute(
+                    "SELECT COUNT(*) FROM tasks"
+                ).fetchone()[0]
+            else:
+                s_count = conn.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                t_count = conn.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+            return int(s_count), int(t_count)
+    except Exception:  # noqa: BLE001
+        return 0, 0
+
+
+@app.command()
+def export(
+    format_: str = typer.Option(
+        "csv", "--format", "-f", help="Output format: csv, sql, json.",
+    ),
+    scope: str = typer.Option(
+        "session", "--scope",
+        help="'session' = one session, 'all' = entire DB.",
+    ),
+    session: str = typer.Option(
+        "", "--session", "-s",
+        help="Session UUID (default: latest session for this project).",
+    ),
+    csv_mode: str = typer.Option(
+        "flat", "--csv-mode",
+        help="'flat' = denormalized CSV, 'split' = directory with one CSV per table.",
+    ),
+    out: str = typer.Option(
+        "", "--out", "-o",
+        help="Output path (file, or directory for --csv-mode split). "
+             "Default: claw-forge-export-<id>-<timestamp>.<ext>.",
+    ),
+    project: str = typer.Option(
+        ".", "--project", "-p",
+        help="Project directory (to find .claw-forge/state.db).",
+    ),
+) -> None:
+    """Export session and task data from state.db to CSV, SQL, or JSON.
+
+    Examples:
+
+        claw-forge export                                 # latest session, flat CSV
+        claw-forge export --format sql                    # SQL dump
+        claw-forge export --format json --scope all       # all sessions, JSON
+        claw-forge export --csv-mode split                # directory with per-table CSVs
+        claw-forge export --session <uuid> --out my.csv   # explicit session + path
+    """
+    from datetime import datetime as _dt
+
+    from claw_forge.exporter import (
+        export_csv_flat,
+        export_csv_split,
+        export_json,
+        export_sql,
+    )
+
+    fmt = format_.lower()
+    if fmt not in ("csv", "sql", "json"):
+        console.print(
+            f"[bold red]✖  Unknown --format {format_!r}.[/bold red] "
+            "Choose one of: csv, sql, json."
+        )
+        raise typer.Exit(1)
+    if scope not in ("session", "all"):
+        console.print(
+            f"[bold red]✖  Unknown --scope {scope!r}.[/bold red] "
+            "Choose one of: session, all."
+        )
+        raise typer.Exit(1)
+    if csv_mode not in ("flat", "split"):
+        console.print(
+            f"[bold red]✖  Unknown --csv-mode {csv_mode!r}.[/bold red] "
+            "Choose one of: flat, split."
+        )
+        raise typer.Exit(1)
+
+    project_path = Path(project).resolve()
+    db_path = project_path / ".claw-forge" / "state.db"
+    if not db_path.exists():
+        console.print(
+            f"[bold red]✖  State database not found at {db_path}[/bold red]"
+        )
+        console.print(
+            "  Run [bold]claw-forge run[/bold] in this project to create it,\n"
+            "  or pass [bold]--project[/bold] to point at the right directory."
+        )
+        raise typer.Exit(1)
+
+    session_id: str | None
+    if scope == "all":
+        session_id = None
+    else:
+        if session:
+            session_id = session
+            if not _session_exists(db_path, session_id):
+                console.print(
+                    f"[bold red]✖  Session {session_id!r} not found in "
+                    f"{db_path}.[/bold red]"
+                )
+                _print_session_hints(db_path, project_path)
+                raise typer.Exit(1)
+        else:
+            resolved = _resolve_latest_session(db_path, project_path)
+            if not resolved:
+                console.print(
+                    "[bold red]✖  No session found for this project.[/bold red]"
+                )
+                _print_session_hints(db_path, project_path)
+                raise typer.Exit(1)
+            session_id = resolved
+
+    timestamp = _dt.now().strftime("%Y%m%d-%H%M%S")
+    if not out:
+        if scope == "all":
+            base = f"claw-forge-export-all-{timestamp}"
+        else:
+            assert session_id is not None
+            base = f"claw-forge-export-{session_id[:8]}-{timestamp}"
+        if fmt == "csv" and csv_mode == "split":
+            out = base
+        else:
+            ext = fmt
+            out = f"{base}.{ext}"
+    out_path = Path(out)
+
+    if fmt == "csv":
+        if csv_mode == "split":
+            result_path = export_csv_split(db_path, session_id, out_path)
+            fmt_label = "CSV (split)"
+        else:
+            result_path = export_csv_flat(db_path, session_id, out_path)
+            fmt_label = "CSV (flat)"
+    elif fmt == "sql":
+        result_path = export_sql(db_path, session_id, out_path)
+        fmt_label = "SQL"
+    else:
+        result_path = export_json(db_path, session_id, out_path)
+        fmt_label = "JSON"
+
+    s_count, t_count = _count_sessions_and_tasks(db_path, session_id)
+    if scope == "all":
+        console.print(
+            f"\n  [green]✓[/green] Exported {s_count} session(s), "
+            f"{t_count} task(s)"
+        )
+    else:
+        assert session_id is not None
+        console.print(
+            f"\n  [green]✓[/green] Exported {t_count} task(s) from "
+            f"session {session_id[:8]}…"
+        )
+    console.print(f"  Format:  {fmt_label}")
+    console.print(f"  Output:  {result_path}\n")
+
+
+def _print_session_hints(db_path: Path, project_path: Path) -> None:
+    """Print a list of available sessions to help the operator pick one."""
+    sessions = _list_sessions_for_help(db_path, project_path=project_path)
+    if not sessions:
+        # Fall back to all sessions across projects.
+        sessions = _list_sessions_for_help(db_path)
+    if sessions:
+        console.print("\n  Available sessions:")
+        for sid, ppath, created in sessions:
+            console.print(
+                f"    [cyan]{sid}[/cyan]  {created}  [dim]{ppath}[/dim]"
+            )
+    else:
+        console.print(
+            "\n  [dim]No sessions in DB. Run [bold]claw-forge run[/bold] first.[/dim]"
+        )
+
+
 def _resolve_latest_session(db_path: Path, project_path: Path | None = None) -> str:
     """Read the most-recent session id from state.db; return '' if none found.
 
