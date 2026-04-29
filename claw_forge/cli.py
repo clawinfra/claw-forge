@@ -2592,12 +2592,19 @@ def _port_in_use_error(port: int, service: str = "state service") -> None:
     raise typer.Exit(1)
 
 
-def _ensure_state_service(project_path: Path, port: int) -> int:
+def _ensure_state_service(
+    project_path: Path, port: int, *, skip_version_restart: bool = False,
+) -> int:
     """Start state service if not running or serving the wrong project.
 
     If the requested port is occupied, tries port+1 … port+4 and starts on
     the first free one.  The chosen port is always printed to the console.
     Returns the port the state service is listening on.
+
+    When *skip_version_restart* is True (used by ``claw-forge ui``), the
+    service is reused as-is when it serves the correct project, even if the
+    version differs.  This prevents the UI from killing a state service that
+    ``claw-forge run`` is actively using.
     """
     import json as _json
     import socket as _sock
@@ -2690,9 +2697,9 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
             if svc_project_raw:
                 svc_project = str(Path(str(svc_project_raw)).resolve())
                 if svc_project == want_project:
-                    if svc_version == __version__:
+                    if svc_version == __version__ or skip_version_restart:
                         console.print(f"[dim]State service already running on port {port}[/dim]")
-                        return port  # same project, same version — nothing to do
+                        return port  # same project — reuse
                     # Same project but stale version → restart to pick up code changes
                     console.print(
                         f"[dim]State service outdated "
@@ -2876,7 +2883,11 @@ def ui(
     # Auto-start state service if not already running.
     # Must happen BEFORE session resolution, HTML patching, and proxy setup
     # so that state_port reflects the actual port the service is on.
-    state_port = _ensure_state_service(Path(project).resolve(), state_port)
+    # skip_version_restart: the UI is a read-only consumer — never kill a
+    # running state service just because the CLI version differs.
+    state_port = _ensure_state_service(
+        Path(project).resolve(), state_port, skip_version_restart=True,
+    )
 
     # Resolve session: explicit arg → latest from DB (filtered by project) → empty
     _project_path = Path(project).resolve()
