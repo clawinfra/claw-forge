@@ -12,7 +12,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
-    Enum,
     Float,
     ForeignKey,
     Integer,
@@ -88,7 +87,7 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     status: Mapped[str] = mapped_column(
-        Enum("pending", "running", "paused", "completed", "failed", name="session_status"),
+        String(32),
         default="pending",
     )
     project_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -113,17 +112,7 @@ class Task(Base):
     plugin_name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
-        Enum(
-            "pending",
-            "queued",
-            "running",
-            "paused",
-            "completed",
-            "failed",
-            "blocked",
-            "needs_human",
-            name="task_status",
-        ),
+        String(32),
         default="pending",
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)

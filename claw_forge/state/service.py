@@ -786,21 +786,25 @@ class AgentStateService:
                 if not task:
                     raise HTTPException(404, "Task not found")
                 if req.status:
+                    # Normalize synonyms: agents may report "done" instead of
+                    # "completed".
+                    _STATUS_ALIASES = {"done": "completed", "success": "completed"}
+                    _normalized = _STATUS_ALIASES.get(req.status, req.status)
                     # Guard: don't let a cancellation-triggered PATCH overwrite a
                     # user-paused status.  The stop endpoint already set the task to
                     # "paused"; the CLI finally-block then calls PATCH status=pending —
                     # that must not win.  resume-all uses SQLAlchemy directly and is
                     # unaffected by this guard.
-                    _skip_status = req.status == "pending" and task.status == "paused"
+                    _skip_status = _normalized == "pending" and task.status == "paused"
                     if not _skip_status:
-                        task.status = req.status
-                    if req.status == "running" and not task.started_at:
+                        task.status = _normalized
+                    if _normalized == "running" and not task.started_at:
                         task.started_at = datetime.now(UTC)
-                    elif req.status == "pending":
+                    elif _normalized == "pending":
                         task.started_at = None
-                    elif req.status in ("completed", "failed"):
+                    elif _normalized in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
-                        if req.status == "completed" and self._reviewer is not None:
+                        if _normalized == "completed" and self._reviewer is not None:
                             self._reviewer.notify_feature_completed(
                                 task_id=str(task.id),
                                 task_name=task.description or task.plugin_name,
