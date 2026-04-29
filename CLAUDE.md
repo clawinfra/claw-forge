@@ -90,6 +90,20 @@ Two MCP surfaces:
 - **`sdk_server.py`** (`create_feature_mcp_server`) — in-process SDK MCP, used by default (`use_sdk_mcp=True`)
 - **`feature_mcp.py`** — subprocess FastMCP server (legacy fallback). Exposes `claim_feature`, `update_feature`, `list_features`, `get_feature` tools to agents.
 
+### State Service Auto-Start (`cli.py` `_ensure_state_service`)
+
+Both `claw-forge run` and `claw-forge ui` auto-start the state service via `_ensure_state_service()`:
+- **Project-aware**: passes `--config` pointing to the project directory's `claw-forge.yaml` so the subprocess finds the correct config even when CWD differs from the project dir
+- **Project verification**: after starting, verifies `/info` returns a `project_path` matching the intended project (not just non-null)
+- **Port fallback**: if the configured port is occupied, tries port+1 … port+4
+- **Version check**: restarts the service if the running version differs from the CLI version
+
+### Session Resolution (`cli.py` `_resolve_latest_session`)
+
+All session auto-detection (ui prod, ui dev, dev command) uses `_resolve_latest_session()`:
+- **Project-filtered**: queries `WHERE project_path = ?` to avoid picking up stale test sessions or sessions from other projects sharing the same DB
+- **Centralized**: all inline session queries have been consolidated into this single function
+
 ### State Service API (default `localhost:8420`)
 
 All CLI commands communicate with the state service via HTTP. Key endpoints:
@@ -103,6 +117,13 @@ All CLI commands communicate with the state service via HTTP. Key endpoints:
 ### UI (`ui/`)
 
 React + Vite + TypeScript Kanban board. Built with `npm --prefix ui run build`; output copied to `claw_forge/ui_dist/` before wheel packaging. In development, served via `claw-forge ui`. Connects to the state service WebSocket for real-time updates.
+
+**`claw-forge ui` production mode init order** (ordering matters — `state_port` must be resolved before anything that depends on it):
+1. `_ensure_state_service()` — discover or start the state service, resolve final port
+2. `_resolve_latest_session()` — read session from DB filtered by project path
+3. Patch `index.html` with runtime JS config (port, session)
+4. Build reverse proxy client (`httpx.AsyncClient`) targeting the resolved port
+5. Construct Starlette app with proxy routes and static file serving
 
 ### spec/parser.py
 
@@ -130,7 +151,7 @@ Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees
 A background `asyncio.Task` periodically commits dirty worktree files during agent execution to minimize data loss on crash:
 - **Config**: `git.auto_checkpoint_interval_seconds` in `claw-forge.yaml` (default `300` = 5 minutes, `0` to disable)
 - **Phase trailer**: commits use `Phase: auto-save` to distinguish from agent-initiated checkpoints
-- **Best-effort**: checkpoint errors are silently caught — never crashes the agent
+- **Best-effort**: all checkpoint commits (periodic, boundary, and completion) are best-effort — `commit_checkpoint()` catches `git commit` failures (e.g. pre-commit hooks in the target project) and returns `None` instead of crashing the task
 - **Lifecycle**: started after worktree creation, cancelled in the finally block on task completion/failure/cancel
 
 ### Emergency Commit on Signals (`cli.py` + `commits.py`)
