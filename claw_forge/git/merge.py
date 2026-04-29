@@ -72,7 +72,18 @@ def squash_merge(
     original_branch = current_branch(project_dir)
     try:
         switch_branch(project_dir, target)
-        _run_git(["merge", "--squash", branch], project_dir)
+        try:
+            _run_git(["merge", "--squash", branch], project_dir)
+        except Exception:
+            # Squash merge failed — likely conflicts because other branches
+            # merged to target since this branch was created.  Reset, merge
+            # target into the feature branch to catch it up, then retry.
+            with suppress(Exception):
+                _run_git(["reset", "--hard", "HEAD"], project_dir)
+            switch_branch(project_dir, branch)
+            _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
+            switch_branch(project_dir, target)
+            _run_git(["merge", "--squash", branch], project_dir)
         commit_msg = _build_merge_message(
             branch,
             title=title,
