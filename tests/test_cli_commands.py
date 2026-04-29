@@ -2053,15 +2053,20 @@ def test_ui_reads_session_from_db(tmp_path: Path) -> None:
 
     import claw_forge.cli as cli_mod
 
-    # Create state.db with a session
-    db_dir = tmp_path / "proj" / ".claw-forge"
+    # Create state.db with a session whose project_path matches the test project
+    proj_dir = tmp_path / "proj"
+    db_dir = proj_dir / ".claw-forge"
     db_dir.mkdir(parents=True)
     db_path = db_dir / "state.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
-            "CREATE TABLE sessions (id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            "CREATE TABLE sessions "
+            "(id TEXT, project_path TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
         )
-        conn.execute("INSERT INTO sessions VALUES ('auto-sess-id', '2026-01-01')")
+        conn.execute(
+            "INSERT INTO sessions VALUES ('auto-sess-id', ?, '2026-01-01')",
+            (str(proj_dir),),
+        )
 
     fake_dist = tmp_path / "ui_dist"
     fake_dist.mkdir()
@@ -2075,7 +2080,7 @@ def test_ui_reads_session_from_db(tmp_path: Path) -> None:
         patch("claw_forge.cli._ensure_state_service", return_value=8420),
     ):
         result = runner.invoke(
-            app, ["ui", "--no-open", "--project", str(tmp_path / "proj")]
+            app, ["ui", "--no-open", "--project", str(proj_dir)]
         )
     assert result.exit_code == 0, result.output
     assert "auto-sess-id" in result.output
@@ -4044,15 +4049,19 @@ def test_ui_dev_reads_session_from_db(tmp_path: Path) -> None:
     fake_ui.mkdir()
     (fake_ui / "node_modules").mkdir()
 
-    # Create a state.db with a session
+    # Create a state.db with a session whose project_path matches
     db_dir = tmp_path / ".claw-forge"
     db_dir.mkdir(parents=True)
     db_path = db_dir / "state.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
-            "CREATE TABLE sessions (id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            "CREATE TABLE sessions "
+            "(id TEXT, project_path TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
         )
-        conn.execute("INSERT INTO sessions VALUES ('dev-sess-id', '2026-01-01')")
+        conn.execute(
+            "INSERT INTO sessions VALUES ('dev-sess-id', ?, '2026-01-01')",
+            (str(tmp_path),),
+        )
 
     with (
         patch.object(cli_mod, "__file__", str(fake_pkg / "cli.py")),
@@ -4336,15 +4345,19 @@ def test_dev_session_from_db(tmp_path: Path) -> None:
     fake_ui.mkdir()
     (fake_ui / "node_modules").mkdir()
 
-    # Create a state.db with a session
+    # Create a state.db with a session whose project_path matches
     db_dir = tmp_path / ".claw-forge"
     db_dir.mkdir(parents=True)
     db_path = db_dir / "state.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
-            "CREATE TABLE sessions (id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            "CREATE TABLE sessions "
+            "(id TEXT, project_path TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
         )
-        conn.execute("INSERT INTO sessions VALUES ('dev-db-sess', '2026-01-01')")
+        conn.execute(
+            "INSERT INTO sessions VALUES ('dev-db-sess', ?, '2026-01-01')",
+            (str(tmp_path),),
+        )
 
     proc_mock = Mock()
     proc_mock.poll.return_value = 0

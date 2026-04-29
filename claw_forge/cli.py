@@ -2514,15 +2514,28 @@ def human_input(
     console.print(f"[green]All questions answered. Project {project!r} can now continue.[/green]")
 
 
-def _resolve_latest_session(db_path: Path) -> str:
-    """Read the most-recent session id from state.db; return '' if none found."""
+def _resolve_latest_session(db_path: Path, project_path: Path | None = None) -> str:
+    """Read the most-recent session id from state.db; return '' if none found.
+
+    When *project_path* is given, only sessions whose ``project_path``
+    column matches are considered — this prevents stale test sessions
+    (or sessions from other projects sharing the same DB) from being
+    selected over the real project session.
+    """
     try:
         import sqlite3 as _sq
         if db_path.exists():
             with _sq.connect(str(db_path)) as conn:
-                row = conn.execute(
-                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                ).fetchone()
+                if project_path is not None:
+                    row = conn.execute(
+                        "SELECT id FROM sessions WHERE project_path = ? "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (str(project_path),),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
+                    ).fetchone()
                 if row:
                     return str(row[0])
     except Exception:  # noqa: BLE001
@@ -2807,18 +2820,13 @@ def ui(
             subprocess.run(["npm", "install"], cwd=ui_dir, check=True)  # noqa: S603, S607
 
         _session_id_dev = "(none — run `claw-forge run` to create a session)"
-        try:
-            import sqlite3 as _sqlite3_dev
-            _db_path_dev = Path(project).resolve() / ".claw-forge" / "state.db"
-            if _db_path_dev.exists():
-                with _sqlite3_dev.connect(str(_db_path_dev)) as _conn2:
-                    _row2 = _conn2.execute(
-                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                    ).fetchone()
-                    if _row2:
-                        _session_id_dev = _row2[0]
-        except Exception:  # noqa: BLE001
-            pass
+        _project_path_dev = Path(project).resolve()
+        _dev_session = _resolve_latest_session(
+            _project_path_dev / ".claw-forge" / "state.db",
+            project_path=_project_path_dev,
+        )
+        if _dev_session:
+            _session_id_dev = _dev_session
 
         console.print("[bold green]🔥 claw-forge Kanban UI (dev)[/bold green]")
         console.print(f"   UI:        [cyan]{url}[/cyan]")
@@ -2870,9 +2878,10 @@ def ui(
     # so that state_port reflects the actual port the service is on.
     state_port = _ensure_state_service(Path(project).resolve(), state_port)
 
-    # Resolve session: explicit arg → latest from DB → empty
+    # Resolve session: explicit arg → latest from DB (filtered by project) → empty
+    _project_path = Path(project).resolve()
     _resolved_session = session or _resolve_latest_session(
-        Path(project).resolve() / ".claw-forge" / "state.db"
+        _project_path / ".claw-forge" / "state.db", project_path=_project_path,
     )
 
     # Inject runtime config so the SPA knows where the state API lives
@@ -2998,19 +3007,10 @@ def ui(
     if session:
         _session_id_display = session
     else:
-        _session_id_display = "(none — run `claw-forge run` to create a session)"
-        try:
-            import sqlite3 as _sqlite3
-            _db_path = Path(project).resolve() / ".claw-forge" / "state.db"
-            if _db_path.exists():
-                with _sqlite3.connect(str(_db_path)) as _conn:
-                    _row = _conn.execute(
-                        "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                    ).fetchone()
-                    if _row:
-                        _session_id_display = _row[0]
-        except Exception:  # noqa: BLE001
-            pass
+        _session_id_display = _resolve_latest_session(
+            _project_path / ".claw-forge" / "state.db",
+            project_path=_project_path,
+        ) or "(none — run `claw-forge run` to create a session)"
 
     console.print("[bold green]🔥 claw-forge Kanban UI[/bold green]")
     console.print(f"   UI:        [cyan]{url}[/cyan]")
@@ -3103,19 +3103,9 @@ def dev(
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
     # ── Resolve session for display ─────────────────────────────────────────
-    _session_id_dev = "(none — run `claw-forge run` to create a session)"
-    try:
-        import sqlite3 as _sqlite3_dev
-
-        if db_path.exists():
-            with _sqlite3_dev.connect(str(db_path)) as _conn:
-                _row = _conn.execute(
-                    "SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1"
-                ).fetchone()
-                if _row:
-                    _session_id_dev = _row[0]
-    except Exception:  # noqa: BLE001
-        pass
+    _session_id_dev = _resolve_latest_session(
+        db_path, project_path=project_path,
+    ) or "(none — run `claw-forge run` to create a session)"
 
     url = f"http://localhost:{ui_port}"
     if session:
