@@ -27,14 +27,33 @@ from claude_agent_sdk.types import (
 
 _log = logging.getLogger("claw_forge.permissions")
 
-# Commands that are always blocked regardless of context
+# Commands that are always blocked regardless of context.
+# Matched as substrings of the command string, so prefer multi-token or
+# distinctive single tokens to avoid false positives on benign text
+# (e.g. ``concatenate`` would falsely match ``ncat``; ``halt`` would
+# falsely match commit messages).
 ALWAYS_BLOCK: frozenset[str] = frozenset({
+    # System control / shutdown
     "dd",
     "sudo",
     "su",
     "shutdown",
     "reboot",
+    "poweroff",
+    # Filesystem destruction
+    "mkfs",
+    "fdisk",
+    "wipefs",
     "rm -rf /",
+    # Network / firewall manipulation
+    "iptables",
+    "ip6tables",
+    "nftables",
+    # Credential / secret exfiltration
+    "ssh-keygen",
+    "gpg --export-secret",
+    "curl --upload-file",
+    "wget --post-file",
 })
 
 # File tools that should be sandboxed to project_dir

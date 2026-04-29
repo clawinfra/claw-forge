@@ -824,6 +824,8 @@ def _setup_project_with_db(tmp_path: Path) -> tuple[Path, Path]:
 
 class TestExportCli:
     def test_help_lists_all_flags(self) -> None:
+        import re
+
         from typer.testing import CliRunner
 
         from claw_forge.cli import app
@@ -831,12 +833,14 @@ class TestExportCli:
         runner = CliRunner()
         result = runner.invoke(app, ["export", "--help"])
         assert result.exit_code == 0
-        assert "--format" in result.output
-        assert "--scope" in result.output
-        assert "--session" in result.output
-        assert "--csv-mode" in result.output
-        assert "--out" in result.output
-        assert "--project" in result.output
+        # Strip ANSI escape codes — Typer's rich output wraps flag names
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "--format" in plain
+        assert "--scope" in plain
+        assert "--session" in plain
+        assert "--csv-mode" in plain
+        assert "--out" in plain
+        assert "--project" in plain
 
     def test_default_csv_flat_writes_file(self, tmp_path: Path) -> None:
         from typer.testing import CliRunner

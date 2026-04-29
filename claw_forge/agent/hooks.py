@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover — SDK always installed in production
     HookMatcher = Any  # type: ignore[assignment,misc]
     SyncHookJSONOutput = Any  # type: ignore[assignment,misc]
 
-from .security import bash_security_hook
 
 
 def _as_dict(input_data: HookInput) -> dict[str, Any]:
@@ -590,9 +589,9 @@ def get_default_hooks(
             agent completion. Format: "/path/to/repo" or "/path/to/repo:remote-name".
             Set to None (default) to disable.
     """
-    pre_tool_use_hooks: list[Any] = [
-        HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
-    ]
+    # Bash security is enforced by the OS sandbox + ``can_use_tool`` callback
+    # (see ``claw_forge/agent/permissions.py``); no PreToolUse hook is needed.
+    pre_tool_use_hooks: list[Any] = []
     post_tool_use_hooks: list[Any] = [
         HookMatcher(hooks=[post_tool_hook]),
     ]
