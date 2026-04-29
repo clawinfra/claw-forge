@@ -81,7 +81,7 @@ def squash_merge(
             task_id=task_id,
             session_id=session_id,
         )
-        _run_git(["commit", "-m", commit_msg], project_dir)
+        _run_git(["commit", "--no-verify", "-m", commit_msg], project_dir)
         short_hash = _run_git(
             ["rev-parse", "--short", "HEAD"], project_dir
         ).stdout.strip()

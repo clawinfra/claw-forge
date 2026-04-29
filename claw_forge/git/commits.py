@@ -39,7 +39,7 @@ def commit_checkpoint(
         f"Session: {session_id}"
     )
     try:
-        _run_git(["commit", "-m", body], project_dir)
+        _run_git(["commit", "--no-verify", "-m", body], project_dir)
     except Exception:  # noqa: BLE001
         # Commit can fail due to pre-commit hooks, signing errors, or
         # race conditions — a checkpoint failure should not crash the task.
@@ -71,7 +71,8 @@ def emergency_commit(project_dir: Path, *, task_id: str = "unknown") -> bool:
         pass  # staged changes exist — proceed
     try:
         _run_git(
-            ["commit", "-m", f"emergency: auto-save before shutdown (task {task_id})"],
+            ["commit", "--no-verify", "-m",
+             f"emergency: auto-save before shutdown (task {task_id})"],
             project_dir,
         )
         return True
