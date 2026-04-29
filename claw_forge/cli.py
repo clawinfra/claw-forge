@@ -2865,6 +2865,11 @@ def ui(
         )
         raise typer.Exit(1) from None
 
+    # Auto-start state service if not already running.
+    # Must happen BEFORE session resolution, HTML patching, and proxy setup
+    # so that state_port reflects the actual port the service is on.
+    state_port = _ensure_state_service(Path(project).resolve(), state_port)
+
     # Resolve session: explicit arg → latest from DB → empty
     _resolved_session = session or _resolve_latest_session(
         Path(project).resolve() / ".claw-forge" / "state.db"
@@ -2988,9 +2993,6 @@ def ui(
             Route("/{path:path}", serve_index),
         ]
     )
-
-    # Auto-start state service if not already running
-    state_port = _ensure_state_service(Path(project).resolve(), state_port)
 
     # Prefer --session arg; otherwise read latest from DB
     if session:

@@ -18,3 +18,4 @@ ui/dist/
 <MagicMock*
 .claw-forge/
 .worktrees/
+.playwright-mcp/
