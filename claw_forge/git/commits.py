@@ -38,7 +38,12 @@ def commit_checkpoint(
         f"Phase: {phase}\n"
         f"Session: {session_id}"
     )
-    _run_git(["commit", "-m", body], project_dir)
+    try:
+        _run_git(["commit", "-m", body], project_dir)
+    except Exception:  # noqa: BLE001
+        # Commit can fail due to pre-commit hooks, signing errors, or
+        # race conditions — a checkpoint failure should not crash the task.
+        return None
 
     short_hash = _run_git(
         ["rev-parse", "--short", "HEAD"], project_dir
