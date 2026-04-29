@@ -76,13 +76,35 @@ def squash_merge(
             _run_git(["merge", "--squash", branch], project_dir)
         except Exception:
             # Squash merge failed — likely conflicts because other branches
-            # merged to target since this branch was created.  Reset, merge
-            # target into the feature branch to catch it up, then retry.
+            # merged to target since this branch was created.  Reset, catch
+            # the feature branch up to target, then retry.
+            #
+            # The catch-up merge MUST run inside the worktree when one is
+            # passed: the feature branch is already checked out there, so
+            # ``git checkout <branch>`` from project_dir would fail with
+            # "fatal: '<branch>' is already used by worktree at ..." (exit
+            # 128).  Without a worktree (e.g. legacy callers/tests), fall
+            # back to toggling HEAD in project_dir.
             with suppress(Exception):
                 _run_git(["reset", "--hard", "HEAD"], project_dir)
-            switch_branch(project_dir, branch)
-            _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
-            switch_branch(project_dir, target)
+            if worktree_path is not None:
+                try:
+                    _run_git(
+                        ["merge", "--no-verify", "--no-edit", target],
+                        worktree_path,
+                    )
+                except Exception:
+                    # Catch-up merge had a true conflict — clean the worktree
+                    # so a later retry doesn't inherit conflict markers.
+                    with suppress(Exception):
+                        _run_git(["merge", "--abort"], worktree_path)
+                    with suppress(Exception):
+                        _run_git(["reset", "--hard", "HEAD"], worktree_path)
+                    raise
+            else:
+                switch_branch(project_dir, branch)
+                _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
+                switch_branch(project_dir, target)
             _run_git(["merge", "--squash", branch], project_dir)
         commit_msg = _build_merge_message(
             branch,

@@ -243,3 +243,41 @@ class TestSquashMerge:
         assert result["merged"] is False
         # Worktree should still exist since merge failed
         assert wt_path.exists()
+
+    def test_squash_merge_recovery_does_not_checkout_worktree_branch(
+        self, git_repo: Path,
+    ) -> None:
+        """Regression: when squash merge falls into the conflict-recovery path,
+        it must NOT try to ``git checkout <branch>`` from project_dir — that
+        branch is already checked out in the worktree, so the checkout fails
+        with ``fatal: '<branch>' is already used by worktree at ...`` (exit
+        128).  The recovery must operate inside the worktree where the branch
+        is checked out.
+        """
+        branch, wt_path = create_worktree(git_repo, "t-rec", "rec")
+        (wt_path / "README.md").write_text("# from feature branch\n")
+        commit_checkpoint(
+            wt_path, message="readme change on feature",
+            task_id="t-rec", plugin="coding", phase="coding", session_id="s1",
+        )
+
+        # Conflicting change on main — forces ``git merge --squash`` to fail
+        # which triggers the recovery path.
+        (git_repo / "README.md").write_text("# from main\n")
+        subprocess.run(
+            ["git", "add", "."], cwd=git_repo, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "readme change on main"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+
+        result = squash_merge(git_repo, branch, worktree_path=wt_path)
+
+        # Even if the merge ultimately fails (true content conflict), the error
+        # must NOT be the bogus "checkout already-held branch" failure.
+        err = result.get("error", "")
+        assert "'checkout', 'feat/" not in err, (
+            "Recovery path tried to `git checkout` a worktree-held branch "
+            f"from project_dir — error: {err!r}"
+        )
