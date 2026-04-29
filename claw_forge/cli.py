@@ -2643,13 +2643,19 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
         claw_forge_cmd = str(venv_bin) if venv_bin.exists() else (
             _shutil.which("claw-forge") or "claw-forge"
         )
+        cmd = [
+            claw_forge_cmd, "state",
+            "--project", str(project_path),
+            "--port", str(p),
+        ]
+        # Pass --config pointing to the project directory's config so the
+        # subprocess finds claw-forge.yaml even when CWD != project dir.
+        _cfg_path = project_path / "claw-forge.yaml"
+        if _cfg_path.exists():
+            cmd.extend(["--config", str(_cfg_path)])
         with open(log_path, "w") as log_f:  # noqa: WPS515
             _sp.Popen(  # noqa: S603
-                [
-                    claw_forge_cmd, "state",
-                    "--project", str(project_path),
-                    "--port", str(p),
-                ],
+                cmd,
                 stdout=log_f,
                 stderr=_sp.STDOUT,
                 start_new_session=True,
@@ -2657,7 +2663,10 @@ def _ensure_state_service(project_path: Path, port: int) -> int:
         if not _wait_for_port(p, timeout=10.0):
             return False
         info = _get_info(p, timeout=3.0)
-        return info is not None and info.get("project_path") is not None
+        if info is None:
+            return False
+        svc_project = info.get("project_path", "")
+        return bool(svc_project) and str(Path(str(svc_project)).resolve()) == want_project
 
     # ── Is the configured port occupied by something? ─────────────────────────
     if _listening(port):

@@ -1098,12 +1098,29 @@ class TestEnsureStateService:
         from claw_forge.cli import _ensure_state_service
 
         wrong_project = "/some/other/project"
-        mock_resp = Mock()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = Mock(return_value=False)
-        mock_resp.read.return_value = json.dumps(
-            {"project_path": wrong_project}
-        ).encode()
+        info_call_count = [0]
+
+        def fake_urlopen(url_or_req: Any, **kw: Any) -> Any:
+            url_str = (
+                url_or_req if isinstance(url_or_req, str) else url_or_req.full_url
+            )
+            if "/shutdown" in url_str:
+                resp = Mock()
+                resp.__enter__ = lambda s: s
+                resp.__exit__ = Mock(return_value=False)
+                resp.read.return_value = b'{"status":"ok"}'
+                return resp
+            info_call_count[0] += 1
+            # First /info: wrong project (triggers restart).
+            # Second /info (after restart): correct project.
+            project = wrong_project if info_call_count[0] == 1 else str(tmp_path)
+            resp = Mock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = Mock(return_value=False)
+            resp.read.return_value = json.dumps(
+                {"project_path": project}
+            ).encode()
+            return resp
 
         mock_popen = Mock()
         mock_conn = Mock()
@@ -1114,7 +1131,7 @@ class TestEnsureStateService:
             srv.listen(1)
             port = srv.getsockname()[1]
             with (
-                patch("urllib.request.urlopen", return_value=mock_resp),
+                patch("urllib.request.urlopen", side_effect=fake_urlopen),
                 patch("subprocess.Popen", mock_popen),
                 patch("time.sleep"),
                 # monotonic: always return 0 so loops never time out
@@ -3943,17 +3960,20 @@ def test_ensure_state_service_shutdown_exception(tmp_path: Path) -> None:
     mock_conn.__enter__ = lambda s: s
     mock_conn.__exit__ = Mock(return_value=False)
 
-    url_call_count = [0]
+    info_call_count = [0]
     def fake_urlopen(url_or_req: Any, **kw: Any) -> Any:
-        url_call_count[0] += 1
         url_str = url_or_req if isinstance(url_or_req, str) else url_or_req.full_url
         if "/shutdown" in url_str:
             raise ConnectionRefusedError("cant connect")
+        info_call_count[0] += 1
         resp = Mock()
         resp.__enter__ = lambda s: s
         resp.__exit__ = Mock(return_value=False)
+        # First /info call: existing service serves a different project.
+        # Second /info call (after restart): correct project.
+        project = "/other/project" if info_call_count[0] == 1 else str(tmp_path)
         resp.read.return_value = json.dumps({
-            "project_path": "/other/project",
+            "project_path": project,
         }).encode()
         return resp
 
