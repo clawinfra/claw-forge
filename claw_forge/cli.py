@@ -2934,27 +2934,37 @@ def _ensure_state_service(
                     if svc_version == __version__ or skip_version_restart:
                         console.print(f"[dim]State service already running on port {port}[/dim]")
                         return port  # same project — reuse
-                    # Same project but stale version → restart to pick up code changes
+                    # Same project but stale version → restart in place.
+                    # POSTing /shutdown is safe here because we own the
+                    # service (same project_path).
                     console.print(
                         f"[dim]State service outdated "
                         f"({svc_version} → {__version__}), restarting…[/dim]"
                     )
-                else:
-                    # Claw-forge running but wrong project → shut down and restart
-                    console.print(f"[dim]State service switching project → {want_project}[/dim]")
-                try:
-                    with _req.urlopen(  # noqa: S310
-                        _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),
-                        timeout=2,
-                    ):
+                    try:
+                        with _req.urlopen(  # noqa: S310
+                            _req.Request(f"http://127.0.0.1:{port}/shutdown", method="POST"),
+                            timeout=2,
+                        ):
+                            pass
+                    except Exception:  # noqa: BLE001
                         pass
-                except Exception:  # noqa: BLE001
-                    pass
-                _wait_for_port_free(port)
-                if _start_on(port):
-                    console.print(f"[dim]State service restarted on port {port}[/dim]")
-                    return port
-        # Port is blocked by a non-claw-forge process — find the next free port.
+                    _wait_for_port_free(port)
+                    if _start_on(port):
+                        console.print(f"[dim]State service restarted on port {port}[/dim]")
+                        return port
+                else:
+                    # Different project — yield: NEVER shut down a state
+                    # service that another project's run is actively using.
+                    # Fall through to the port+1..port+4 fallback so concurrent
+                    # ``claw-forge run`` invocations across projects don't
+                    # terminate each other.
+                    console.print(
+                        f"[dim]Port {port} held by another project's state service; "
+                        f"selecting alternate port[/dim]"
+                    )
+        # Port is blocked (non-claw-forge process, or claw-forge for another
+        # project we yielded to) — find the next free port.
         for p in range(port + 1, port + 5):
             if _listening(p):
                 # Check if it's already our service on this alternate port

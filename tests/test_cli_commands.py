@@ -1089,30 +1089,35 @@ class TestEnsureStateService:
                 result = _ensure_state_service(tmp_path, port)
         assert result == port
 
-    def test_restarts_when_wrong_project(self, tmp_path: Path) -> None:
-        """If /info returns a different project, the service is restarted."""
+    def test_yields_to_other_project_on_alt_port(self, tmp_path: Path) -> None:
+        """If the configured port hosts another project's state service, this
+        invocation must NOT shut it down — it falls through to port+1..port+4
+        and starts there.  This prevents concurrent ``claw-forge run``
+        instances across projects from terminating each other.
+        """
         import json
-        import socket
         from unittest.mock import Mock, patch
 
         from claw_forge.cli import _ensure_state_service
 
         wrong_project = "/some/other/project"
         info_call_count = [0]
+        shutdown_calls: list[str] = []
 
         def fake_urlopen(url_or_req: Any, **kw: Any) -> Any:
             url_str = (
                 url_or_req if isinstance(url_or_req, str) else url_or_req.full_url
             )
             if "/shutdown" in url_str:
+                shutdown_calls.append(url_str)
                 resp = Mock()
                 resp.__enter__ = lambda s: s
                 resp.__exit__ = Mock(return_value=False)
                 resp.read.return_value = b'{"status":"ok"}'
                 return resp
             info_call_count[0] += 1
-            # First /info: wrong project (triggers restart).
-            # Second /info (after restart): correct project.
+            # First /info: another project on configured port (caller yields).
+            # Second /info: correct project on alt port (after start).
             project = wrong_project if info_call_count[0] == 1 else str(tmp_path)
             resp = Mock()
             resp.__enter__ = lambda s: s
@@ -1126,25 +1131,89 @@ class TestEnsureStateService:
         mock_conn = Mock()
         mock_conn.__enter__ = lambda s: s
         mock_conn.__exit__ = Mock(return_value=False)
-        with socket.socket() as srv:
-            srv.bind(("127.0.0.1", 0))
-            srv.listen(1)
-            port = srv.getsockname()[1]
-            with (
-                patch("urllib.request.urlopen", side_effect=fake_urlopen),
-                patch("subprocess.Popen", mock_popen),
-                patch("time.sleep"),
-                # monotonic: always return 0 so loops never time out
-                patch("time.monotonic", return_value=0.0),
-                # call 1: initial check (port busy by srv socket above)
-                # call 2: _wait_for_port_free (OSError = port freed)
-                # call 3: _wait_for_port in _start (success = new service ready)
-                patch("socket.create_connection",
-                      side_effect=[mock_conn, OSError("free"), mock_conn]),
+        port = 19998  # arbitrary; mocked
+        with (
+            patch("urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("subprocess.Popen", mock_popen),
+            patch("time.sleep"),
+            patch("time.monotonic", return_value=0.0),
+            # call 1: _listening(port)        → busy (other project)
+            # call 2: _listening(port+1)      → free (OSError)
+            # call 3: _wait_for_port(port+1)  → ready (new service started)
+            patch("socket.create_connection",
+                  side_effect=[mock_conn, OSError("free"), mock_conn]),
+        ):
+            result = _ensure_state_service(tmp_path, port)
+        # Yields to other project: starts on port+1, never shuts down theirs.
+        assert result == port + 1
+        assert shutdown_calls == [], (
+            "Wrong-project case must not POST /shutdown; "
+            f"observed: {shutdown_calls}"
+        )
+        mock_popen.assert_called_once()
 
-            ):
-                result = _ensure_state_service(tmp_path, port)
+    def test_restarts_in_place_for_same_project_stale_version(
+        self, tmp_path: Path,
+    ) -> None:
+        """If the configured port hosts the *same* project but a stale claw-forge
+        version, the service IS restarted in place on the same port.  This is
+        the legitimate use of ``POST /shutdown`` — only the project that owns
+        the service may restart it.
+        """
+        import json
+        from unittest.mock import Mock, patch
+
+        from claw_forge.cli import _ensure_state_service
+
+        info_call_count = [0]
+        shutdown_calls: list[str] = []
+
+        def fake_urlopen(url_or_req: Any, **kw: Any) -> Any:
+            url_str = (
+                url_or_req if isinstance(url_or_req, str) else url_or_req.full_url
+            )
+            if "/shutdown" in url_str:
+                shutdown_calls.append(url_str)
+                resp = Mock()
+                resp.__enter__ = lambda s: s
+                resp.__exit__ = Mock(return_value=False)
+                resp.read.return_value = b'{"status":"ok"}'
+                return resp
+            info_call_count[0] += 1
+            # First /info: same project, stale version (triggers in-place
+            # restart). Second /info: same project, current version (after
+            # restart succeeds).
+            payload: dict[str, str] = {"project_path": str(tmp_path)}
+            if info_call_count[0] == 1:
+                payload["claw_forge_version"] = "0.0.0-stale"
+            resp = Mock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = Mock(return_value=False)
+            resp.read.return_value = json.dumps(payload).encode()
+            return resp
+
+        mock_popen = Mock()
+        mock_conn = Mock()
+        mock_conn.__enter__ = lambda s: s
+        mock_conn.__exit__ = Mock(return_value=False)
+        port = 19997
+        with (
+            patch("urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("subprocess.Popen", mock_popen),
+            patch("time.sleep"),
+            patch("time.monotonic", return_value=0.0),
+            # call 1: _listening(port)        → busy (stale us)
+            # call 2: _wait_for_port_free     → free (after our shutdown)
+            # call 3: _wait_for_port(port)    → ready (after restart)
+            patch("socket.create_connection",
+                  side_effect=[mock_conn, OSError("free"), mock_conn]),
+        ):
+            result = _ensure_state_service(tmp_path, port)
+        # Stale-version restart is allowed — same port, one shutdown POSTed.
         assert result == port
+        assert len(shutdown_calls) == 1, (
+            f"Expected exactly one /shutdown POST, got {shutdown_calls}"
+        )
         mock_popen.assert_called_once()
 
     def test_auto_starts_when_port_free(self, tmp_path: Path) -> None:
@@ -3955,7 +4024,12 @@ def test_ensure_state_service_alternate_port_already_ours(tmp_path: Path) -> Non
 
 
 def test_ensure_state_service_shutdown_exception(tmp_path: Path) -> None:
-    """Shutdown POST fails silently (line 2127-2128)."""
+    """Shutdown POST fails silently during in-place stale-version restart.
+
+    Only reachable when the existing service serves the *same* project but
+    a stale claw-forge version — the wrong-project path no longer POSTs
+    shutdown (it yields to the other project's run instead).
+    """
     import json
     import socket
 
@@ -3974,12 +4048,13 @@ def test_ensure_state_service_shutdown_exception(tmp_path: Path) -> None:
         resp = Mock()
         resp.__enter__ = lambda s: s
         resp.__exit__ = Mock(return_value=False)
-        # First /info call: existing service serves a different project.
-        # Second /info call (after restart): correct project.
-        project = "/other/project" if info_call_count[0] == 1 else str(tmp_path)
-        resp.read.return_value = json.dumps({
-            "project_path": project,
-        }).encode()
+        # First /info: same project, stale version (triggers in-place
+        # restart, which is the only path that POSTs /shutdown).
+        # Second /info: same project, current version (after restart).
+        payload: dict[str, str] = {"project_path": str(tmp_path)}
+        if info_call_count[0] == 0:
+            payload["claw_forge_version"] = "0.0.0-stale"
+        resp.read.return_value = json.dumps(payload).encode()
         return resp
 
     conn_call_count = [0]
