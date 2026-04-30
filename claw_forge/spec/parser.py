@@ -170,60 +170,61 @@ class ProjectSpec:
                 _name_attr = category_el.get("name", "")
                 category = _name_attr if _name_attr else category_el.tag.replace("_", " ").title()
                 feature_els = category_el.findall("feature")
-                if feature_els:
-                    # New format: <feature><description>…</description><steps>…</steps></feature>
-                    for feat_el in feature_els:
-                        desc = (feat_el.findtext("description") or "").strip()
-                        if not desc:
-                            continue
-                        short_name = desc[:60].rstrip(".,:;")
-                        feat_steps: list[str] = []
-                        steps_el = feat_el.find("steps")
-                        if steps_el is not None:
-                            for line in (steps_el.text or "").splitlines():
-                                stripped = line.strip()
-                                if stripped.startswith("- ") or stripped.startswith("* "):
-                                    feat_steps.append(stripped[2:].strip())
-                        # Optional <feature index="N"> attribute (1-based)
-                        index_attr = feat_el.get("index", "").strip()
-                        feat_index = int(index_attr) if index_attr.isdigit() else None
-                        # Optional <feature depends_on="N,M,..."> — comma-separated
-                        # 1-based feature indices.  Whitespace and non-digit fragments
-                        # are tolerated (skipped).  Empty / missing → no edges.
-                        depends_attr = feat_el.get("depends_on", "").strip()
-                        explicit_deps: list[int] = []
-                        if depends_attr:
-                            for part in depends_attr.split(","):
-                                token = part.strip()
-                                if token.isdigit():
-                                    explicit_deps.append(int(token))
-                        features.append(
-                            FeatureItem(
-                                category=category,
-                                name=short_name,
-                                description=desc,
-                                steps=feat_steps,
-                                index=feat_index,
-                                depends_on_indices=explicit_deps,
-                            )
+                # New format: parse every <feature> child if present.  This
+                # runs in addition to (not instead of) legacy-bullet parsing
+                # so a category can mix both forms during migration.
+                for feat_el in feature_els:
+                    desc = (feat_el.findtext("description") or "").strip()
+                    if not desc:
+                        continue
+                    short_name = desc[:60].rstrip(".,:;")
+                    feat_steps: list[str] = []
+                    steps_el = feat_el.find("steps")
+                    if steps_el is not None:
+                        for line in (steps_el.text or "").splitlines():
+                            stripped = line.strip()
+                            if stripped.startswith("- ") or stripped.startswith("* "):
+                                feat_steps.append(stripped[2:].strip())
+                    # Optional <feature index="N"> attribute (1-based)
+                    index_attr = feat_el.get("index", "").strip()
+                    feat_index = int(index_attr) if index_attr.isdigit() else None
+                    # Optional <feature depends_on="N,M,..."> — comma-separated
+                    # 1-based feature indices.  Whitespace and non-digit fragments
+                    # are tolerated (skipped).  Empty / missing → no edges.
+                    depends_attr = feat_el.get("depends_on", "").strip()
+                    explicit_deps: list[int] = []
+                    if depends_attr:
+                        for part in depends_attr.split(","):
+                            token = part.strip()
+                            if token.isdigit():
+                                explicit_deps.append(int(token))
+                    features.append(
+                        FeatureItem(
+                            category=category,
+                            name=short_name,
+                            description=desc,
+                            steps=feat_steps,
+                            index=feat_index,
+                            depends_on_indices=explicit_deps,
                         )
-                else:
-                    # Legacy format: text bullets in category element text
-                    text = category_el.text or ""
-                    for line in text.splitlines():
-                        stripped = line.strip()
-                        if stripped.startswith("- ") or stripped.startswith("* "):
-                            bullet = stripped[2:].strip()
-                            if bullet:
-                                # Derive a short name: first 60 chars, title-cased
-                                short_name = bullet[:60].rstrip(".,:;")
-                                features.append(
-                                    FeatureItem(
-                                        category=category,
-                                        name=short_name,
-                                        description=bullet,
-                                    )
+                    )
+                # Legacy bullet format: text bullets directly in category element text.
+                # Runs alongside the <feature> branch above so categories can mix forms.
+                text = category_el.text or ""
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- ") or stripped.startswith("* "):
+                        bullet = stripped[2:].strip()
+                        if bullet:
+                            # Derive a short name: first 60 chars, title-cased
+                            short_name = bullet[:60].rstrip(".,:;")
+                            features.append(
+                                FeatureItem(
+                                    category=category,
+                                    name=short_name,
+                                    description=bullet,
                                 )
+                            )
 
         # Brownfield: if <features_to_add> has plain-text lines (not sub-elements),
         # parse them directly as flat feature list under "Addition" category.

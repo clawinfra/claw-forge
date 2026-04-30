@@ -863,6 +863,29 @@ def test_feature_element_depends_on_with_whitespace_and_garbage() -> None:
     assert spec.features[2].depends_on_indices == [1, 2]
 
 
+def test_mixed_legacy_bullets_and_feature_elements_in_same_category() -> None:
+    """A category may contain a mix of legacy ``- bullet`` lines and new
+    <feature> elements; both produce FeatureItems."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="Mixed">
+              - Legacy bullet one
+              - Legacy bullet two
+              <feature index="3" depends_on="1"><description>New element</description></feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    descriptions = [f.description for f in spec.features]
+    assert "Legacy bullet one" in descriptions
+    assert "Legacy bullet two" in descriptions
+    assert "New element" in descriptions
+    assert len(spec.features) == 3
+
+
 def test_explicit_depends_on_preserved_over_phase_inference() -> None:
     """Explicit depends_on attributes are preserved; phase-based inference
     only adds edges for features that didn't declare any explicitly.
