@@ -213,6 +213,87 @@ action verb:
 
 ---
 
+### Phase 3.5: Overlap Analysis
+
+After confirming the feature list with the user, audit for **merge-conflict risk** between
+features that would be dispatched in parallel. The earlier you serialize known-overlapping
+features, the fewer wasted agent runs you'll have downstream.
+
+#### Step 1 — Run the analysis prompt on the bullet list
+
+Number the confirmed bullets from Phase 3 starting at 1. Then, as the LLM executing
+`/create-spec`, mentally apply the following prompt to that numbered list:
+
+> You are auditing a feature spec for merge-conflict risk. Below are N feature bullets, each
+> numbered. Find pairs where implementing both would force conflicting edits to the same
+> file or function — i.e. they would both modify the same hunks if scheduled in parallel.
+>
+> A pair is overlapping ONLY if changing one without the other would force a merge
+> conflict. Belonging to the same category alone is not overlap.
+>
+> Return JSON only:
+> ```json
+> [{"a": <int>, "b": <int>, "surface": "<file_or_concept>", "rationale": "<one sentence>"}]
+> ```
+> Empty list `[]` if no overlaps. No prose outside the JSON.
+
+#### Step 2 — Resolve each overlap interactively
+
+For every entry returned, present:
+
+```
+Overlap detected:
+  #<a>  <description of feature a>
+  #<b>  <description of feature b>
+  Shared surface: <surface>
+  Rationale: <rationale>
+
+Resolution? [s] serialize (#<b> depends on #<a>)  [k] keep parallel  [q] quit
+```
+
+- **`s`** → record an explicit edge: feature `<b>` will be emitted with `depends_on="<a>"` so
+  the runtime DAG runs `<a>` first and `<b>` only after.
+- **`k`** → record the user's decision to keep parallel; do not flag this pair again on retry.
+- **`q`** → abort `/create-spec` cleanly; do not write any files.
+
+If the user selects `m` (merge), explain that merging is out of scope for this phase — they
+can manually combine the bullets in Phase 3 and re-run, or pick `s` for now.
+
+#### Step 3 — Persist resolutions through Phase 5
+
+In memory, build a list `serialized_pairs: list[tuple[int, int]]` of `(later, earlier)`
+feature numbers from each `s` decision. When Phase 5 emits the XML, every feature that
+appears as `later` in any pair must use the new `<feature>` element form with explicit
+attributes:
+
+```xml
+<core_features>
+  <category name="DSL Compiler">
+    <feature index="14">
+      <description>System displays parse errors on stderr</description>
+    </feature>
+    <feature index="18" depends_on="14">
+      <description>System displays side-by-side diff in terminal</description>
+    </feature>
+  </category>
+</core_features>
+```
+
+Multiple dependencies are comma-separated: `depends_on="14,15,16"`. Features without edges
+may continue using the legacy bullet form; both coexist within the same `<category>`.
+
+#### Failure modes
+
+- **LLM returns malformed JSON** → re-prompt once with the schema; if still bad, skip the
+  analysis with a one-line warning ("could not analyze overlaps; emitting spec without
+  explicit edges") and continue to Phase 4.
+- **Empty feature list** (Phase 3 produced 0 bullets) → skip Phase 3.5; downstream
+  validation handles the empty-spec case.
+- **No overlaps detected** (`[]`) → skip directly to Phase 4 with one line: "No overlap
+  risk detected — features can run in parallel."
+
+---
+
 ### Phase 4: Technical Details (Detailed mode only)
 
 If the user chose **Detailed**, ask about:
