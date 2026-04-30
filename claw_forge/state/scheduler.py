@@ -17,6 +17,7 @@ class TaskNode:
     category: str = ""
     steps: list[str] = field(default_factory=list)
     description: str = ""
+    merged_to_main: bool = True  # gate: dep not satisfied until merged
 
 
 class CycleDetectedError(Exception):
@@ -47,8 +48,12 @@ class Scheduler:
             self._tasks[task_id].status = "failed"
 
     def get_ready_tasks(self) -> list[TaskNode]:
-        """Return tasks whose dependencies are all completed, sorted by priority."""
-        completed = {tid for tid, t in self._tasks.items() if t.status == "completed"}
+        """Return tasks whose dependencies are all completed AND merged, sorted by priority."""
+        # A dep is satisfied when status == completed AND merged_to_main is True.
+        satisfied: set[str] = {
+            tid for tid, t in self._tasks.items()
+            if t.status == "completed" and t.merged_to_main
+        }
         failed = {tid for tid, t in self._tasks.items() if t.status == "failed"}
 
         ready: list[TaskNode] = []
@@ -61,11 +66,11 @@ class Scheduler:
                 # Dependency failed — mark as blocked
                 task.status = "blocked"
                 continue
-            # A dep is satisfied when it is completed in this cycle OR not present in
-            # this scheduler at all (meaning it finished before this dispatch cycle).
+            # A dep is satisfied when it is completed+merged in this cycle OR not
+            # present in this scheduler at all (finished before this dispatch cycle).
             unsatisfied = {
                 dep for dep in task.depends_on
-                if dep in self._tasks and dep not in completed
+                if dep in self._tasks and dep not in satisfied
             }
             if not unsatisfied:
                 ready.append(task)
@@ -105,7 +110,11 @@ class Scheduler:
         """
         self.validate_no_cycles()
         waves: list[list[str]] = []
-        completed: set[str] = set()
+        # Tasks already completed-and-merged before this dispatch cycle.
+        completed: set[str] = {
+            tid for tid, t in self._tasks.items()
+            if t.status == "completed" and t.merged_to_main
+        }
         remaining = {tid for tid, t in self._tasks.items() if t.status == "pending"}
 
         while remaining:
