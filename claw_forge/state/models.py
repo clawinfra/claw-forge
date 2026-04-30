@@ -135,6 +135,9 @@ class Task(Base):
     active_subagents: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     bugfix_retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    merged_to_main: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
