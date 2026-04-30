@@ -250,6 +250,33 @@ class SetProviderModelsRequest(BaseModel):
     active_tiers: list[str]
 
 
+async def _ensure_task_columns(database_url: str) -> None:
+    """Add columns to ``tasks`` that may be missing on legacy SQLite DBs.
+
+    The project does not use SQL migrations (CLAUDE.md, "No DB migrations").
+    Instead, on every startup we introspect the live ``tasks`` table and
+    issue ``ALTER TABLE … ADD COLUMN`` for any new columns the model expects
+    but the DB lacks.  Idempotent — second call is a no-op.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.begin() as conn:
+            rows = await conn.execute(text("PRAGMA table_info(tasks)"))
+            existing = {r[1] for r in rows.fetchall()}
+            if "merged_to_main" not in existing:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE tasks ADD COLUMN merged_to_main "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                )
+    finally:
+        await engine.dispose()
+
+
 class AgentStateService:
     """REST + SSE + WebSocket state service for orchestrating agents."""
 
@@ -484,6 +511,7 @@ class AgentStateService:
     async def _init_db_inner(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await _ensure_task_columns(self._database_url)
         async with self._engine.begin() as conn:
             # SQLite: verify database integrity early so corruption is
             # caught here (where tiered recovery can handle it).
