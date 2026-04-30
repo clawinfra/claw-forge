@@ -39,3 +39,22 @@ async def test_set_merged_to_main_after_merge_no_patch_when_none() -> None:
     http = AsyncMock()
     await _set_merged_to_main_after_merge(http, "http://x", "task-1", None)
     http.patch.assert_not_called()
+
+
+def test_task_dict_to_node_reads_merged_to_main() -> None:
+    """The DB→TaskNode mapper preserves merged_to_main."""
+    from claw_forge.cli import _task_dict_to_node
+
+    payload = {
+        "id": "t1", "plugin_name": "coding", "priority": 0,
+        "depends_on": [], "status": "completed",
+        "merged_to_main": False, "description": "X", "category": "c",
+        "steps": [],
+    }
+    node = _task_dict_to_node(payload)
+    assert node.merged_to_main is False
+    # Backward-compat: missing key defaults to True.
+    payload2 = dict(payload)
+    payload2.pop("merged_to_main")
+    node2 = _task_dict_to_node(payload2)
+    assert node2.merged_to_main is True

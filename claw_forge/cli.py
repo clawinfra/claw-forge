@@ -11,7 +11,10 @@ import sys
 from collections.abc import AsyncGenerator
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from claw_forge.state.scheduler import TaskNode
 
 import httpx
 import typer
@@ -248,6 +251,23 @@ def _state_url(port: int = 8420) -> str:
     return f"http://localhost:{port}"
 
 
+def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
+    """Build a scheduler TaskNode from a state-service task JSON payload."""
+    from claw_forge.state.scheduler import TaskNode
+
+    return TaskNode(
+        id=payload["id"],
+        plugin_name=payload.get("plugin_name", ""),
+        priority=int(payload.get("priority", 0) or 0),
+        depends_on=list(payload.get("depends_on", []) or []),
+        status=payload.get("status", "pending"),
+        category=payload.get("category", "") or "",
+        steps=list(payload.get("steps", []) or []),
+        description=payload.get("description", "") or "",
+        merged_to_main=bool(payload.get("merged_to_main", True)),
+    )
+
+
 def _http_get(url: str) -> dict[str, Any] | list[Any]:
     """Simple synchronous GET helper."""
     try:
@@ -448,23 +468,10 @@ def run(
     import asyncio
 
     from claw_forge.orchestrator.dispatcher import Dispatcher
-    from claw_forge.state.scheduler import TaskNode
 
     def _task_dicts_to_nodes(dicts: list[dict[str, Any]]) -> list[TaskNode]:
         """Convert task dicts from the state service API into TaskNode objects."""
-        return [
-            TaskNode(
-                id=t["id"],
-                plugin_name=t["plugin_name"],
-                priority=t.get("priority", 0),
-                depends_on=t.get("depends_on") or [],
-                status="pending",
-                category=t.get("category") or "",
-                steps=t.get("steps") or [],
-                description=t.get("description") or "",
-            )
-            for t in dicts
-        ]
+        return [_task_dict_to_node(t) for t in dicts]
 
     # Resolve config path: prefer project-relative if config is a bare filename
     _config_path = Path(config)
