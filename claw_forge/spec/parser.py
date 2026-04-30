@@ -16,6 +16,9 @@ class FeatureItem:
     description: str  # full bullet text
     steps: list[str] = field(default_factory=list)
     depends_on_indices: list[int] = field(default_factory=list)
+    # 1-based feature number when declared via <feature index="N">.
+    # None for legacy bullets and <feature> elements without an explicit index.
+    index: int | None = None
 
 
 @dataclass
@@ -181,12 +184,16 @@ class ProjectSpec:
                                 stripped = line.strip()
                                 if stripped.startswith("- ") or stripped.startswith("* "):
                                     feat_steps.append(stripped[2:].strip())
+                        # Optional <feature index="N"> attribute (1-based)
+                        index_attr = feat_el.get("index", "").strip()
+                        feat_index = int(index_attr) if index_attr.isdigit() else None
                         features.append(
                             FeatureItem(
                                 category=category,
                                 name=short_name,
                                 description=desc,
                                 steps=feat_steps,
+                                index=feat_index,
                             )
                         )
                 else:

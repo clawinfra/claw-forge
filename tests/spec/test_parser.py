@@ -759,3 +759,44 @@ class TestNewXmlFormat:
         assert spec.database_tables["users"][0] == "id UUID PRIMARY KEY DEFAULT gen_random_uuid()"
         assert "Authentication" in spec.api_endpoints
         assert spec.implementation_phases == ["Phase 1: Auth", "Phase 2: Recipes"]
+
+
+# ── <feature index="N"> attribute (overlap-analysis support) ─────────────────
+
+
+def test_feature_element_index_attribute_populates_index_field() -> None:
+    """A <feature index="14"> attribute is preserved on FeatureItem."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="14">
+                <description>User can register</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    assert len(spec.features) == 1
+    assert spec.features[0].index == 14
+
+
+def test_feature_element_without_index_has_none() -> None:
+    """A <feature> with no index attribute leaves index = None."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature>
+                <description>No index attr</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    assert len(spec.features) == 1
+    assert spec.features[0].index is None
