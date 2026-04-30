@@ -154,3 +154,53 @@ def test_apply_hotspot_skipped_when_subagent_raises(
     assert result["status"] == "skipped"
     assert "agent crashed" in result.get("reason", "")
     assert (tmp_path / "cli.py").read_text() == "# original\n"
+
+
+# ── End-to-end: audit → apply on synthetic dispatcher ─────────────────────────
+
+
+def test_end_to_end_audit_then_apply_on_synthetic_dispatcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit identifies a dispatcher hotspot; apply (with stubbed subagent)
+    refactors it; tests stay green; squash-merged on main."""
+    from claw_forge.boundaries.audit import run_audit
+    from claw_forge.boundaries.report import emit_report
+
+    _init_repo(tmp_path)
+    cli = tmp_path / "main.py"
+    cli.write_text(
+        "\n".join(
+            f"{'if' if i == 0 else 'elif'} cmd == 'c{i}':\n    do_c{i}()"
+            for i in range(8)
+        ) + "\n"
+    )
+    (tmp_path / "test.sh").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "test.sh").chmod(0o755)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    # Audit
+    spots = run_audit(tmp_path, min_score=2.0)
+    emit_report(
+        spots, out_path=tmp_path / "boundaries_report.md", project_name="syn",
+    )
+    assert any(h.path == "main.py" for h in spots)
+
+    # Apply (stubbed subagent writes a "refactored" version)
+    async def fake_run_refactor(
+        h: Hotspot, *, project_dir: Path,
+    ) -> dict[str, Any]:
+        (project_dir / "main.py").write_text("# refactored — registry pattern\n")
+        return {"changes_made": True}
+
+    monkeypatch.setattr(
+        "claw_forge.boundaries.apply.run_refactor_subagent", fake_run_refactor,
+    )
+    main_hotspot = next(h for h in spots if h.path == "main.py")
+    main_hotspot.pattern = "registry"  # would normally come from classifier
+    result = apply_hotspot(
+        main_hotspot, project_dir=tmp_path, test_command="./test.sh",
+    )
+    assert result["status"] == "merged", result
+    assert (tmp_path / "main.py").read_text().startswith("# refactored")
