@@ -187,6 +187,16 @@ class ProjectSpec:
                         # Optional <feature index="N"> attribute (1-based)
                         index_attr = feat_el.get("index", "").strip()
                         feat_index = int(index_attr) if index_attr.isdigit() else None
+                        # Optional <feature depends_on="N,M,..."> — comma-separated
+                        # 1-based feature indices.  Whitespace and non-digit fragments
+                        # are tolerated (skipped).  Empty / missing → no edges.
+                        depends_attr = feat_el.get("depends_on", "").strip()
+                        explicit_deps: list[int] = []
+                        if depends_attr:
+                            for part in depends_attr.split(","):
+                                token = part.strip()
+                                if token.isdigit():
+                                    explicit_deps.append(int(token))
                         features.append(
                             FeatureItem(
                                 category=category,
@@ -194,6 +204,7 @@ class ProjectSpec:
                                 description=desc,
                                 steps=feat_steps,
                                 index=feat_index,
+                                depends_on_indices=explicit_deps,
                             )
                         )
                 else:

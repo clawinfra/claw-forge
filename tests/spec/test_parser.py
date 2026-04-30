@@ -800,3 +800,64 @@ def test_feature_element_without_index_has_none() -> None:
     spec = ProjectSpec._parse_xml(xml)
     assert len(spec.features) == 1
     assert spec.features[0].index is None
+
+
+def test_feature_element_depends_on_attribute_populates_indices() -> None:
+    """A <feature depends_on="10,12"> attribute is parsed into depends_on_indices."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="10"><description>First</description></feature>
+              <feature index="12"><description>Second</description></feature>
+              <feature index="14" depends_on="10,12">
+                <description>Third depends on both</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    assert len(spec.features) == 3
+    assert spec.features[2].depends_on_indices == [10, 12]
+    # Earlier features carry no edges from this attribute
+    assert spec.features[0].depends_on_indices == []
+    assert spec.features[1].depends_on_indices == []
+
+
+def test_feature_element_depends_on_single_index() -> None:
+    """A <feature depends_on="5"> with one index parses correctly."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="5"><description>Base</description></feature>
+              <feature index="6" depends_on="5"><description>Dep</description></feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    assert spec.features[1].depends_on_indices == [5]
+
+
+def test_feature_element_depends_on_with_whitespace_and_garbage() -> None:
+    """Whitespace and non-digit fragments in depends_on are tolerated/ignored."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="1"><description>A</description></feature>
+              <feature index="2"><description>B</description></feature>
+              <feature index="3" depends_on=" 1 ,  2 , junk ">
+                <description>C</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    assert spec.features[2].depends_on_indices == [1, 2]
