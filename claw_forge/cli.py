@@ -26,6 +26,11 @@ from claw_forge.pool.providers.registry import load_configs_from_yaml
 app = typer.Typer(name="claw-forge", help="Multi-provider autonomous coding agent harness")
 console = Console()
 
+# Register subapps
+from claw_forge.boundaries.cli import boundaries_app  # noqa: E402
+
+app.add_typer(boundaries_app, name="boundaries")
+
 # Maps plugin name → complexity tier for model-tier routing.
 _PLUGIN_COMPLEXITY: dict[str, str] = {
     "initializer": "high",
