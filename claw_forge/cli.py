@@ -972,7 +972,15 @@ def run(
                     prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
 
                 # Mark running via HTTP (triggers WS broadcast + sets started_at)
-                await _patch_task(http, task_node.id, status="running")
+                # ── Flip merged_to_main=False so dependents stay blocked until
+                #    our squash-merge succeeds (auto strategy only).
+                if git_enabled and git_merge_strategy == "auto":
+                    await _patch_task(
+                        http, task_node.id,
+                        status="running", merged_to_main=False,
+                    )
+                else:
+                    await _patch_task(http, task_node.id, status="running")
 
                 # Create a feature branch for this task (best-effort — git
                 # errors must not crash the dispatcher or leave tasks stuck).
@@ -1367,7 +1375,7 @@ def run(
 
                     # Git: checkpoint + optional merge on success, cleanup on failure
                     if git_enabled:
-                        await git_ops.apply_on_completion(
+                        merge_result = await git_ops.apply_on_completion(
                             task_id=task_node.id,
                             slug=_slug,
                             description=task_node.description or None,
@@ -1380,6 +1388,9 @@ def run(
                             branch_prefix=git_branch_prefix,
                             target_branch=_default_branch,
                             session_id=session_id,
+                        )
+                        await _set_merged_to_main_after_merge(
+                            http, _state_base, task_node.id, merge_result,
                         )
 
             return {"success": success, "output": output}
@@ -1864,6 +1875,29 @@ def init(
             f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
             f"  Run: [bold]claw-forge validate-spec {found.name}[/bold]\n"
             f"  Run: [bold]claw-forge plan {found.name}[/bold]"
+        )
+
+
+async def _set_merged_to_main_after_merge(
+    http: Any, state_base: str, task_id: str, merge_result: dict[str, Any] | None,
+) -> None:
+    """PATCH merged_to_main=True after a successful auto-merge.
+
+    Called by the task_handler after apply_on_completion returns.  Does
+    nothing when:
+      * ``merge_result is None`` — no merge was attempted (git disabled,
+        manual strategy, or task failed).
+      * ``merge_result['merged'] is False`` — squash hit a conflict.  The
+        task stays "completed but not merged"; dependents stay blocked
+        until a manual merge or a retry resolves it.
+    """
+    import httpx
+
+    if merge_result is None or not merge_result.get("merged"):
+        return
+    with suppress(httpx.HTTPError):
+        await http.patch(
+            f"{state_base}/tasks/{task_id}", json={"merged_to_main": True},
         )
 
 
