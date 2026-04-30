@@ -30,3 +30,16 @@ def test_dispatch_score_zero_for_simple_file(tmp_path: Path) -> None:
     p = tmp_path / "model.py"
     p.write_text("class User:\n    name: str\n    email: str\n")
     assert dispatch_score(p) == 0
+
+
+def test_import_centrality_counts_distinct_files_importing_target(tmp_path: Path) -> None:
+    """A file imported by 3 others has centrality 3."""
+    target = tmp_path / "core.py"
+    target.write_text("VALUE = 1\n")
+    (tmp_path / "a.py").write_text("from core import VALUE\n")
+    (tmp_path / "b.py").write_text("import core\n")
+    (tmp_path / "c.py").write_text("from .core import VALUE\n")
+    (tmp_path / "d.py").write_text("# does not import\n")
+    from claw_forge.boundaries.signals import import_centrality
+    files = list(tmp_path.glob("*.py"))
+    assert import_centrality(target, files) == 3
