@@ -13,6 +13,7 @@ that ``claw-forge run`` ships with.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shlex
 import subprocess
@@ -135,10 +136,8 @@ def _cleanup_branch(
     project_dir: Path, worktree_path: Path, branch_name: str,
 ) -> None:
     """Best-effort: remove the worktree + delete the branch."""
-    try:
+    with contextlib.suppress(Exception):
         remove_worktree(project_dir, worktree_path)
-    except Exception:  # noqa: BLE001
-        pass
     subprocess.run(  # noqa: S603, S607
         ["git", "branch", "-D", branch_name],
         cwd=project_dir, check=False, capture_output=True,

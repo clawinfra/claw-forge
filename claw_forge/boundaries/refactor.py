@@ -16,7 +16,6 @@ from typing import Any
 from claw_forge.agent.runner import run_agent
 from claw_forge.boundaries.scorer import Hotspot
 
-
 _REFACTOR_PROMPTS: dict[str, str] = {
     "registry": (
         "Refactor {path} so its long if/elif chain on a string key becomes "

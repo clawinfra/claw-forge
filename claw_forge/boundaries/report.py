@@ -25,7 +25,6 @@ from pathlib import Path
 
 from claw_forge.boundaries.scorer import Hotspot
 
-
 _HEADER_RE = re.compile(
     r"^## (?P<idx>\d+)\.\s+(?P<path>\S+)\s+\(score\s+(?P<score>[\d.]+)\)\s*$"
 )

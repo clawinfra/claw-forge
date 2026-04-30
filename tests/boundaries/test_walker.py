@@ -1,9 +1,8 @@
 """Tests for the source-file walker."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import subprocess
+from pathlib import Path
 
 from claw_forge.boundaries.walker import walk_source_files
 

@@ -17,23 +17,21 @@ boundaries_app = typer.Typer(
 
 @boundaries_app.command()
 def audit(
-    project: Path = typer.Option(
-        Path.cwd(), "--project", help="Project root to audit (default: CWD)",
-    ),
+    project: str = typer.Option(".", "--project", help="Project root to audit (default: CWD)"),
     min_score: float = typer.Option(
         5.0, "--min-score",
         help="Minimum hotspot score to include in the report",
     ),
-    out: Path | None = typer.Option(
+    out: str | None = typer.Option(
         None, "--out",
         help="Output path (default: <project>/boundaries_report.md)",
     ),
 ) -> None:
     """Read-only: scan the project, score hotspots, write boundaries_report.md."""
-    project = project.resolve()
-    out_path = out or (project / "boundaries_report.md")
-    hotspots = run_audit(project, min_score=min_score)
-    emit_report(hotspots, out_path=out_path, project_name=project.name)
+    project_path = Path(project).resolve()
+    out_path = Path(out).resolve() if out else (project_path / "boundaries_report.md")
+    hotspots = run_audit(project_path, min_score=min_score)
+    emit_report(hotspots, out_path=out_path, project_name=project_path.name)
     typer.echo(
         f"Wrote {out_path} with {len(hotspots)} hotspot(s) "
         f"(min score {min_score})."
@@ -42,9 +40,7 @@ def audit(
 
 @boundaries_app.command()
 def apply(
-    project: Path = typer.Option(
-        Path.cwd(), "--project", help="Project root (default: CWD)",
-    ),
+    project: str = typer.Option(".", "--project", help="Project root (default: CWD)"),
     test_command: str = typer.Option(
         "uv run pytest tests/ -q",
         "--test-command",
@@ -64,14 +60,14 @@ def apply(
     If no report exists, runs ``audit`` first with the default min-score.
     Each hotspot is processed serially: subagent edits → tests → merge/revert.
     """
-    project = project.resolve()
-    report_path = project / "boundaries_report.md"
+    project_path = Path(project).resolve()
+    report_path = project_path / "boundaries_report.md"
     if not report_path.exists():
         typer.echo(
             "No boundaries_report.md — running audit first…"
         )
-        spots = run_audit(project)
-        emit_report(spots, out_path=report_path, project_name=project.name)
+        spots = run_audit(project_path)
+        emit_report(spots, out_path=report_path, project_name=project_path.name)
 
     hotspots = parse_report(report_path)
     if hotspot:
@@ -91,7 +87,7 @@ def apply(
                 n_skipped += 1
                 continue
         result = apply_hotspot(
-            h, project_dir=project, test_command=test_command,
+            h, project_dir=project_path, test_command=test_command,
         )
         status_str = result["status"]
         if status_str == "merged":
@@ -111,12 +107,11 @@ def apply(
 
 @boundaries_app.command()
 def status(
-    project: Path = typer.Option(
-        Path.cwd(), "--project", help="Project root (default: CWD)",
-    ),
+    project: str = typer.Option(".", "--project", help="Project root (default: CWD)"),
 ) -> None:
     """Show the most recent audit's hotspot list."""
-    report_path = project.resolve() / "boundaries_report.md"
+    project_path = Path(project).resolve()
+    report_path = project_path / "boundaries_report.md"
     if not report_path.exists():
         typer.echo(
             "No boundaries_report.md — run `claw-forge boundaries audit` first."

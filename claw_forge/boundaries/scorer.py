@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 DEFAULT_WEIGHTS: dict[str, float] = {
     "dispatch": 0.4,
     "import": 0.2,

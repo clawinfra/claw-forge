@@ -147,8 +147,12 @@ def test_boundaries_apply_filters_by_hotspot_path(
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
     (tmp_path / "boundaries_report.md").write_text(
         "# Boundaries Audit\n\n2 hotspots\n\n"
-        "## 1. a.py  (score 7.0)\n- signals: dispatch=5, import=2, churn=3, function=0\n**Proposed pattern:** registry\n\n"
-        "## 2. b.py  (score 6.0)\n- signals: dispatch=4, import=1, churn=2, function=0\n**Proposed pattern:** split\n\n"
+        "## 1. a.py  (score 7.0)\n"
+        "- signals: dispatch=5, import=2, churn=3, function=0\n"
+        "**Proposed pattern:** registry\n\n"
+        "## 2. b.py  (score 6.0)\n"
+        "- signals: dispatch=4, import=1, churn=2, function=0\n"
+        "**Proposed pattern:** split\n\n"
     )
     calls: list[str] = []
 
