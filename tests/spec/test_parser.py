@@ -802,8 +802,12 @@ def test_feature_element_without_index_has_none() -> None:
     assert spec.features[0].index is None
 
 
-def test_feature_element_depends_on_attribute_populates_indices() -> None:
-    """A <feature depends_on="10,12"> attribute is parsed into depends_on_indices."""
+def test_feature_element_depends_on_attribute_resolves_to_positions() -> None:
+    """``<feature depends_on="10,12">`` declares dependencies on the features
+    with ``index="10"`` and ``index="12"``.  The parser resolves these to
+    0-based positions in the feature list so downstream consumers
+    (``_write_plan_to_db``) can use them uniformly with phase-inferred edges.
+    """
     xml = textwrap.dedent("""
         <project_specification>
           <project_name>Test</project_name>
@@ -820,14 +824,17 @@ def test_feature_element_depends_on_attribute_populates_indices() -> None:
     """).strip()
     spec = ProjectSpec._parse_xml(xml)
     assert len(spec.features) == 3
-    assert spec.features[2].depends_on_indices == [10, 12]
+    # Feature at position 2 (index=14) depends on features at positions 0 and 1
+    # (index=10 and index=12 respectively).
+    assert spec.features[2].depends_on_indices == [0, 1]
     # Earlier features carry no edges from this attribute
     assert spec.features[0].depends_on_indices == []
     assert spec.features[1].depends_on_indices == []
 
 
 def test_feature_element_depends_on_single_index() -> None:
-    """A <feature depends_on="5"> with one index parses correctly."""
+    """A ``<feature depends_on="5">`` with one feature reference resolves to
+    that feature's 0-based position."""
     xml = textwrap.dedent("""
         <project_specification>
           <project_name>Test</project_name>
@@ -840,11 +847,14 @@ def test_feature_element_depends_on_single_index() -> None:
         </project_specification>
     """).strip()
     spec = ProjectSpec._parse_xml(xml)
-    assert spec.features[1].depends_on_indices == [5]
+    # Feature at position 1 depends on feature at position 0.
+    assert spec.features[1].depends_on_indices == [0]
 
 
 def test_feature_element_depends_on_with_whitespace_and_garbage() -> None:
-    """Whitespace and non-digit fragments in depends_on are tolerated/ignored."""
+    """Whitespace and non-digit fragments in depends_on are tolerated/ignored.
+    Valid references resolve to 0-based positions; junk is dropped silently.
+    """
     xml = textwrap.dedent("""
         <project_specification>
           <project_name>Test</project_name>
@@ -860,7 +870,26 @@ def test_feature_element_depends_on_with_whitespace_and_garbage() -> None:
         </project_specification>
     """).strip()
     spec = ProjectSpec._parse_xml(xml)
-    assert spec.features[2].depends_on_indices == [1, 2]
+    # Resolves index 1 → position 0, index 2 → position 1; "junk" dropped.
+    assert spec.features[2].depends_on_indices == [0, 1]
+
+
+def test_feature_element_depends_on_unknown_index_is_dropped() -> None:
+    """A reference to a non-existent feature index is dropped rather than crashing."""
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="1"><description>A</description></feature>
+              <feature index="2" depends_on="1,99"><description>B</description></feature>
+            </category>
+          </core_features>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    # 1 → position 0; 99 missing, dropped.
+    assert spec.features[1].depends_on_indices == [0]
 
 
 def test_mixed_legacy_bullets_and_feature_elements_in_same_category() -> None:
@@ -908,7 +937,8 @@ def test_explicit_depends_on_preserved_over_phase_inference() -> None:
         </project_specification>
     """).strip()
     spec = ProjectSpec._parse_xml(xml)
-    # B has explicit depends_on=1 — preserved unchanged.
-    assert spec.features[1].depends_on_indices == [1]
-    # A is the first feature; no inferred deps.
+    # B has explicit depends_on="1" — resolves to position 0 (index=1).
+    # Phase-inference is skipped because explicit edges are populated.
+    assert spec.features[1].depends_on_indices == [0]
+    # A is the first feature; no inferred deps (no earlier phase).
     assert spec.features[0].depends_on_indices == []

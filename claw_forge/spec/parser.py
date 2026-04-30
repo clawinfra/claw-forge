@@ -279,6 +279,23 @@ class ProjectSpec:
                                     if feat.description == stripped and feat.category == "Addition":
                                         feat.category = phase_name
 
+        # Resolve attribute-based depends_on (1-based feature numbers via
+        # <feature index="N">) into 0-based positional indices, matching the
+        # convention used by ``_assign_dependencies`` and downstream consumers
+        # (``initializer.py``, ``_write_plan_to_db``).  This runs BEFORE
+        # phase inference so the post-condition ("depends_on_indices is always
+        # 0-based positional") is uniform across both edge sources.
+        index_to_pos: dict[int, int] = {
+            f.index: pos for pos, f in enumerate(features) if f.index is not None
+        }
+        for feat in features:
+            if not feat.depends_on_indices:
+                continue
+            feat.depends_on_indices = [
+                index_to_pos[ref] for ref in feat.depends_on_indices
+                if ref in index_to_pos
+            ]
+
         # Build category -> phase index map from step titles
         # Features in step N depend on features in steps 1..N-1 (same category group)
         dep_indices = _assign_dependencies(features, phases)
