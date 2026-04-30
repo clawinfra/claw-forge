@@ -106,6 +106,30 @@ def squash_merge(
                 _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
                 switch_branch(project_dir, target)
             _run_git(["merge", "--squash", branch], project_dir)
+        # If the squash produced no staged changes, the branch's content is
+        # already reachable from target (e.g. another concurrent task squashed
+        # identical content first, or the agent's commits were no-ops).  The
+        # subsequent ``git commit --no-verify`` would fail with ``nothing to
+        # commit``; recognise this as a no-op success instead of reporting a
+        # phantom 'Merge failed'.  Use ``diff --cached`` rather than
+        # ``status --porcelain`` so we only consider what the squash itself
+        # staged, ignoring untracked entries (.claw-forge/ etc.) in
+        # project_dir's working tree.
+        staged_paths = _run_git(
+            ["diff", "--cached", "--name-only"], project_dir
+        ).stdout.strip()
+        if not staged_paths:
+            short_hash = _run_git(
+                ["rev-parse", "--short", "HEAD"], project_dir
+            ).stdout.strip()
+            if worktree_path is not None:
+                remove_worktree(project_dir, worktree_path)
+            delete_branch(project_dir, branch, force=True)
+            return {
+                "merged": True,
+                "commit_hash": short_hash,
+                "no_op": True,
+            }
         commit_msg = _build_merge_message(
             branch,
             title=title,

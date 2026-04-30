@@ -244,6 +244,32 @@ class TestSquashMerge:
         # Worktree should still exist since merge failed
         assert wt_path.exists()
 
+    def test_squash_merge_no_op_when_branch_already_merged(
+        self, git_repo: Path,
+    ) -> None:
+        """When the feature branch's content is already fully reachable from
+        target (e.g. another concurrent task squashed identical content
+        first), ``git merge --squash`` succeeds with no staged changes and
+        the subsequent ``git commit --no-verify -m msg`` would fail with
+        ``nothing to commit``.  squash_merge must detect this and return a
+        no-op success rather than a phantom 'Merge failed'.
+        """
+        branch, wt_path = create_worktree(git_repo, "t-noop", "noop")
+        # Worktree branched from main with no new commits — merge --squash
+        # will succeed but stage zero changes.
+        result = squash_merge(
+            git_repo, branch,
+            title="No-op merge",
+            task_id="t-noop",
+            worktree_path=wt_path,
+        )
+        assert result["merged"] is True, (
+            f"Expected no-op success, got: {result!r}"
+        )
+        # Worktree + branch should be cleaned up just like a regular merge.
+        assert not wt_path.exists()
+        assert branch_exists(git_repo, branch) is False
+
     def test_squash_merge_recovery_does_not_checkout_worktree_branch(
         self, git_repo: Path,
     ) -> None:
