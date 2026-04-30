@@ -564,6 +564,10 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge input` | Answer human-input questions from blocked agents | — |
 | `claw-forge state` | Start the state service REST API (port 8420) | `--port`, `--host`, `--reload` |
 | `claw-forge import` | Import BMAD / Linear / Jira exports → `app_spec.txt` or `additions_spec.xml` | `--project`, `--model`, `--yes`, `--out` |
+| `claw-forge export` | Export session/task data from `state.db` to CSV (flat or split), SQL dump, or JSON | `--format`, `--scope`, `--csv-mode`, `--session`, `--out` |
+| `claw-forge boundaries audit` | Read-only: score files on dispatch density, churn, and centrality → `boundaries_report.md` | `--project`, `--min-score`, `--out` |
+| `claw-forge boundaries apply` | Per-hotspot subagent refactor on a feature branch, gated by tests; squash-merges on green | `--project`, `--test-command`, `--hotspot`, `--auto` |
+| `claw-forge boundaries status` | Show the most recent audit's hotspot list | `--project` |
 
 ### Slash Commands (Claude Code)
 

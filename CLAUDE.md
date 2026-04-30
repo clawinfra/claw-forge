@@ -34,7 +34,8 @@ claw-forge is a **multi-provider autonomous coding agent harness**. It reads an 
 
 ```
 CLI (Typer)  ──────────────────────────────────────────
-  claw_forge/cli.py — 12+ commands (plan, run, add, fix, ui, status …)
+  claw_forge/cli.py — 18+ commands (plan, run, add, fix, ui, status, export …)
+  claw_forge/boundaries/cli.py — Typer subapp: boundaries audit | apply | status
 
 State Service (FastAPI + SQLite via aiosqlite)  ────────
   claw_forge/state/service.py  — REST API + WebSocket /ws + SSE /events
@@ -51,6 +52,20 @@ Git Workspace Tracking  ──────────────────�
   claw_forge/git/branching.py — feature branch create/switch/delete
   claw_forge/git/commits.py  — checkpoint commits with structured trailers
   claw_forge/git/merge.py    — squash-merge feature branches to main
+
+Spec & Export  ──────────────────────────────────────────
+  claw_forge/spec/parser.py  — XML/plain-text spec → ProjectSpec; honours <feature index, depends_on>
+  claw_forge/exporter.py     — read-only CSV/SQL/JSON export of session+task data from state.db
+
+Boundaries Harness  ─────────────────────────────────────
+  claw_forge/boundaries/walker.py    — git ls-files-driven source enumeration
+  claw_forge/boundaries/signals.py   — dispatch / import / churn / function signals
+  claw_forge/boundaries/scorer.py    — composite weighted score + threshold ranker
+  claw_forge/boundaries/audit.py     — top-level audit pipeline (read-only)
+  claw_forge/boundaries/classifier.py — subagent that labels hotspots with refactor pattern
+  claw_forge/boundaries/report.py    — boundaries_report.md emit/parse round-trip
+  claw_forge/boundaries/refactor.py  — pattern-specific subagent prompts
+  claw_forge/boundaries/apply.py     — per-hotspot apply lifecycle (gate → merge or revert)
 ```
 
 ### How a `claw-forge run` Works
@@ -128,6 +143,29 @@ React + Vite + TypeScript Kanban board. Built with `npm --prefix ui run build`; 
 ### spec/parser.py
 
 Parses `app_spec.txt` or `app_spec.xml` (greenfield or brownfield) into a `ProjectSpec` with a list of features and dependency edges. The `initializer` plugin calls this to seed the task DAG in the state service.
+
+The XML schema accepts two forms within a `<category>`:
+- **Legacy bullets** (still supported): `- User can register` lines in the category text.
+- **`<feature>` elements** with optional `index` and `depends_on` attributes:
+  ```xml
+  <feature index="14"><description>System displays parse errors</description></feature>
+  <feature index="18" depends_on="14"><description>System displays side-by-side diff</description></feature>
+  ```
+  Both forms coexist within the same `<category>`. The parser resolves `depends_on` (1-based feature numbers) into 0-based positional indices that match the convention used by `_assign_dependencies` and `_write_plan_to_db`. `/create-spec` Phase 3.5 (overlap analysis) emits the `<feature>` form when the user serializes a flagged pair.
+
+### Export (`claw_forge/exporter.py`)
+
+`claw-forge export` reads `.claw-forge/state.db` directly via `sqlite3` (no state-service dependency, safe to run while a session is active) and emits CSV (flat or per-table), SQL dump (sqlite-importable), or JSON. Supports `--scope session|all`, `--csv-mode flat|split`, and explicit `--session UUID`. Used for stakeholder reports, spreadsheet analysis, and DB migration round-trips.
+
+### Boundaries Harness (`claw_forge/boundaries/`)
+
+`claw-forge boundaries audit | apply | status` identifies and refactors plugin-extension hotspots in target codebases. Two phases:
+
+**Audit (read-only):** walker enumerates source files via `git ls-files`; signals scorer rates each on dispatch density, import centrality, recent-branch churn, and function centrality; weighted composite score ranks hotspots; classifier subagent labels each with one of four canonical patterns (`registry`, `split`, `extract_collaborators`, `route_table`); emits `boundaries_report.md`.
+
+**Apply (modifies repo):** for each confirmed hotspot, spawns a coding subagent on its own feature branch under `.claw-forge/worktrees/`, runs the project's test command inside the worktree, and squash-merges to main on green or reverts on red. Reuses the existing `git/branching.py` + `git/merge.py` plumbing, so it inherits the merge-conflict handling, no-op detection, and worktree cleanup that `claw-forge run` ships.
+
+Refactors run **serially** (not parallel): refactor B may depend on refactor A's output, and they share files. Use `apply --hotspot <path>` for one-at-a-time runs and `apply --auto` for fully-autonomous batch refactoring.
 
 ### Git Branch Naming (`claw_forge/git/slug.py`)
 

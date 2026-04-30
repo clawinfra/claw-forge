@@ -1268,6 +1268,200 @@ claw-forge 0.2.0b1
 
 ---
 
+### `claw-forge export`
+
+#### Purpose
+Export session and task data from `state.db` to CSV (flat or per-table), SQL (sqlite-importable
+dump), or JSON. Pure SQLite reads — no state service dependency, safe to run while a session is
+active.
+
+#### When to use
+- Cost / progress reports for stakeholders
+- Spreadsheet analysis of agent activity (per-task, per-category, per-provider)
+- Backups of completed sessions before pruning the state DB
+- Migrating session history to another machine via SQL round-trip
+
+#### Usage
+```bash
+# Latest session, flat CSV (default)
+claw-forge export
+
+# All sessions as SQL dump (importable via `sqlite3 newdb.db < out.sql`)
+claw-forge export --format sql --scope all --out backup.sql
+
+# Specific session as JSON
+claw-forge export --format json --session 8d304d81-... --out session.json
+
+# CSV split (one file per table: sessions.csv, tasks.csv, events.csv)
+claw-forge export --csv-mode split --out ./out/
+```
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format` | choice | `csv` | `csv` / `sql` / `json` |
+| `--scope` | choice | `session` | `session` (latest) or `all` (every session in DB) |
+| `--csv-mode` | choice | `flat` | `flat` (one denormalized row per task) or `split` (one CSV per table) |
+| `--session` | str | latest | Specific session UUID; overrides `--scope=session`'s "latest" pick |
+| `--out` | path | auto | Output path (auto-generated if omitted, e.g. `taskflow-2026-04-30.csv`) |
+| `--project` | path | CWD | Project root containing `.claw-forge/state.db` |
+
+#### What it does internally
+1. Opens `.claw-forge/state.db` read-only via `sqlite3`.
+2. Resolves the session(s) to export from `--scope` / `--session`.
+3. For each format:
+   - **csv flat**: denormalized join of `sessions × tasks` columns → one row per task.
+   - **csv split**: three files — `sessions.csv`, `tasks.csv`, `events.csv` — mirroring the raw schema.
+   - **sql**: standard SQLite dump (`CREATE TABLE IF NOT EXISTS` + `INSERT`); round-trippable via `sqlite3 newdb.db < out.sql`.
+   - **json**: nested shape — `{exported_at, claw_forge_version, scope, sessions: [{..., tasks: [...]}]}`.
+4. Writes to `--out` (or auto-generated filename) and prints the path.
+
+#### Related commands
+- **Inspect interactively:** `claw-forge status` for a Rich-table summary
+- **Live state:** the Kanban UI (`claw-forge ui`) for real-time activity
+
+---
+
+### `claw-forge boundaries`
+
+#### Purpose
+Identify and refactor extension hotspots in target codebases — files where many concurrent
+features are forced to edit the same lines (CLI dispatchers, parsers, route tables).
+Converts those surfaces into plugin-extensible patterns so future tasks become "drop a new
+file" instead of "edit the shared dispatcher."
+
+This is a one-shot maintenance command, not part of every `claw-forge run`. Use when your
+audit / log review reveals a recurring conflict choke point.
+
+#### Subcommands
+- **`audit`** — read-only; emit a ranked hotspot report
+- **`apply`** — refactor hotspots one at a time, test-gated, squash-merge on green
+- **`status`** — show the last audit's hotspot list
+
+---
+
+#### `claw-forge boundaries audit`
+
+##### Usage
+```bash
+# Default: scan CWD, write boundaries_report.md
+claw-forge boundaries audit
+
+# Custom project + lower threshold
+claw-forge boundaries audit --project /path/to/repo --min-score 3.0
+
+# Custom output path
+claw-forge boundaries audit --out reports/hotspots.md
+```
+
+##### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--project` | path | CWD | Project root to audit |
+| `--min-score` | float | `5.0` | Minimum hotspot score to include in the report |
+| `--out` | path | `<project>/boundaries_report.md` | Override the output path |
+
+##### What it does internally
+1. Walk source files via `git ls-files` (respects `.gitignore` + `boundaries.ignore_paths`).
+2. Compute four signals per file:
+   - **dispatch_score** — string-keyed `if/elif/match` branches (registry candidates)
+   - **import_centrality** — distinct files importing this one (blast radius)
+   - **recent_churn** — distinct branches that touched this file in the last 90 days
+   - **function_centrality** — call-site fanout for each public top-level function
+3. Composite weighted score (defaults: dispatch 0.4, churn 0.3, import 0.2, function 0.1).
+4. Filter at or above `--min-score`, sort descending.
+5. (Optional) classifier subagent labels each hotspot with one of four refactor patterns:
+   `registry`, `split`, `extract_collaborators`, `route_table`.
+6. Emit a markdown report with one section per hotspot.
+
+##### Output example
+```
+Wrote /path/to/project/boundaries_report.md with 3 hotspot(s) (min score 5.0).
+```
+
+The generated `boundaries_report.md`:
+```markdown
+# Boundaries Audit — myapp
+
+3 hotspot(s) identified.
+
+## 1. cli/main.py  (score 8.7)
+- signals: dispatch=10, import=6, churn=14, function=3
+**Proposed pattern:** registry
+
+## 2. parser.py  (score 6.2)
+...
+```
+
+---
+
+#### `claw-forge boundaries apply`
+
+##### Usage
+```bash
+# Interactive — prompts before each hotspot
+claw-forge boundaries apply
+
+# Run only one named hotspot (recommended for first runs)
+claw-forge boundaries apply --hotspot cli/main.py
+
+# Fully autonomous — applies all hotspots in score order
+claw-forge boundaries apply --auto
+
+# Custom test command (default: `uv run pytest tests/ -q`)
+claw-forge boundaries apply --test-command "npm test"
+```
+
+##### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--project` | path | CWD | Project root |
+| `--test-command` | str | `uv run pytest tests/ -q` | Test command run inside each refactor's worktree |
+| `--hotspot` | str | (all) | Apply only this one named hotspot path |
+| `--auto` | flag | `false` | No prompts; apply all hotspots in score order |
+
+##### What it does internally
+For each hotspot in the report:
+
+1. **`create_worktree`** → isolated branch + worktree under `.claw-forge/worktrees/`.
+2. **Subagent dispatch** → claude-agent-sdk `query()` with a pattern-specific prompt (registry / split / extract / route_table). Subagent edits files inside the worktree only.
+3. **Stage and commit** with `--no-verify` on the boundaries branch.
+4. **Test gate** — runs `--test-command` inside the worktree so it sees the refactored code.
+5. **Green** → `squash_merge` to `main` (reuses `claw-forge run`'s squash-merge plumbing); worktree + branch removed.
+6. **Red** → cleanup, `main` untouched, refactor reverted.
+
+##### Safety properties
+- Reuses claw-forge's existing git plumbing (`create_worktree`, `squash_merge`, `remove_worktree`), so the v0.5.24 worktree-checkout fix and the v0.5.27 empty-squash detection apply automatically.
+- Refactors run **serially** (refactor B may depend on refactor A's output); never in parallel.
+- Subagents are sandboxed via the existing `make_can_use_tool` permission callback — file writes restricted to `project_dir`.
+- Each hotspot's outcome is reported: `merged` / `reverted` / `skipped` (with reason).
+
+##### First-run advice
+For your first apply against a real codebase, use `--hotspot=<one_known_safe_file>` to validate the test command and the agent's behavior end-to-end before unleashing `--auto`.
+
+---
+
+#### `claw-forge boundaries status`
+
+##### Usage
+```bash
+claw-forge boundaries status
+claw-forge boundaries status --project /path/to/repo
+```
+
+Reads `boundaries_report.md` and prints the hotspot list with paths, scores, and proposed patterns. Exits 1 if no report is present (with instructions to run `audit`).
+
+---
+
+### Related commands
+- **Diagnose merge conflicts:** if features keep conflicting, run `claw-forge boundaries audit` to see whether they're all editing the same hotspot file.
+- **Spec-time prevention:** `/create-spec` Phase 3.5 lets you serialize known-overlapping features at spec creation, complementing the structural fix that `boundaries apply` provides.
+
+---
+
 ## Claude Slash Commands
 
 These commands live in `.claude/commands/` and are used **inside Claude Code** (the editor),
