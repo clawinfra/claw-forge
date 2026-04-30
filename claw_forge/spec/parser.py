@@ -282,6 +282,10 @@ class ProjectSpec:
         # Features in step N depend on features in steps 1..N-1 (same category group)
         dep_indices = _assign_dependencies(features, phases)
         for i, deps in enumerate(dep_indices):
+            # Preserve explicit <feature depends_on="..."> edges — phase-based
+            # inference only fills in features that didn't declare any.
+            if features[i].depends_on_indices:
+                continue
             features[i].depends_on_indices = deps
 
         # Parse success criteria

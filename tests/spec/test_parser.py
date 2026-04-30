@@ -861,3 +861,31 @@ def test_feature_element_depends_on_with_whitespace_and_garbage() -> None:
     """).strip()
     spec = ProjectSpec._parse_xml(xml)
     assert spec.features[2].depends_on_indices == [1, 2]
+
+
+def test_explicit_depends_on_preserved_over_phase_inference() -> None:
+    """Explicit depends_on attributes are preserved; phase-based inference
+    only adds edges for features that didn't declare any explicitly.
+    """
+    xml = textwrap.dedent("""
+        <project_specification>
+          <project_name>Test</project_name>
+          <core_features>
+            <category name="X">
+              <feature index="1"><description>A</description></feature>
+              <feature index="2" depends_on="1"><description>B explicit</description></feature>
+              <feature index="3"><description>C inferred</description></feature>
+            </category>
+          </core_features>
+          <implementation_steps>
+            <phase name="P1">A</phase>
+            <phase name="P2">B explicit</phase>
+            <phase name="P3">C inferred</phase>
+          </implementation_steps>
+        </project_specification>
+    """).strip()
+    spec = ProjectSpec._parse_xml(xml)
+    # B has explicit depends_on=1 — preserved unchanged.
+    assert spec.features[1].depends_on_indices == [1]
+    # A is the first feature; no inferred deps.
+    assert spec.features[0].depends_on_indices == []
