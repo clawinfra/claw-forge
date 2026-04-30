@@ -42,6 +42,7 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "depends_on": task.depends_on,
         "steps": task.steps or [],
         "active_subagents": task.active_subagents,
+        "merged_to_main": task.merged_to_main,
     }
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,7 @@ class UpdateTaskRequest(BaseModel):
     output_tokens: int | None = None
     cost_usd: float | None = None
     active_subagents: int | None = None
+    merged_to_main: bool | None = None
 
 
 class HumanInputRequest(BaseModel):
@@ -849,6 +851,8 @@ class AgentStateService:
                     task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
                 if req.active_subagents is not None:
                     task.active_subagents = req.active_subagents
+                if req.merged_to_main is not None:
+                    task.merged_to_main = req.merged_to_main
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),
@@ -866,6 +870,7 @@ class AgentStateService:
                         "input_tokens": task.input_tokens,
                         "output_tokens": task.output_tokens,
                         "active_subagents": task.active_subagents,
+                        "merged_to_main": task.merged_to_main,
                     },
                 )
                 return {"id": task.id, "status": task.status}
@@ -931,6 +936,7 @@ class AgentStateService:
                         "input_tokens": t.input_tokens,
                         "output_tokens": t.output_tokens,
                         "cost_usd": t.cost_usd,
+                        "merged_to_main": t.merged_to_main,
                         "created_at": str(t.created_at) if t.created_at else None,
                         "started_at": str(t.started_at) if t.started_at else None,
                         "completed_at": str(t.completed_at) if t.completed_at else None,
