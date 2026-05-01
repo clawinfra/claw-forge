@@ -165,3 +165,36 @@ async def test_patch_task_status_running_does_not_release_claims(
         await cl.patch(f"/tasks/{t1}", json={"status": "running"})
         r = await cl.get(f"/sessions/{sid}/file-claims")
         assert len(r.json()["claims"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_touches_files_persists_field(
+    svc: AgentStateService, tmp_path: Path
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+    ) as cl:
+        r = await cl.post("/sessions", json={"project_path": str(tmp_path)})
+        sid = r.json()["id"]
+        r = await cl.post(
+            f"/sessions/{sid}/tasks",
+            json={"plugin_name": "coding", "touches_files": ["x.py", "y.py"]},
+        )
+        tid = r.json()["id"]
+        r = await cl.get(f"/tasks/{tid}")
+        assert r.json()["touches_files"] == ["x.py", "y.py"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_without_touches_files_defaults_empty(
+    svc: AgentStateService, tmp_path: Path
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+    ) as cl:
+        r = await cl.post("/sessions", json={"project_path": str(tmp_path)})
+        sid = r.json()["id"]
+        r = await cl.post(f"/sessions/{sid}/tasks", json={"plugin_name": "coding"})
+        tid = r.json()["id"]
+        r = await cl.get(f"/tasks/{tid}")
+        assert r.json()["touches_files"] == []

@@ -43,6 +43,7 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "steps": task.steps or [],
         "active_subagents": task.active_subagents,
         "merged_to_main": task.merged_to_main,
+        "touches_files": task.touches_files or [],
     }
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,7 @@ class CreateTaskRequest(BaseModel):
     steps: list[str] = []
     parent_task_id: str | None = None
     bugfix_retry_count: int = 0
+    touches_files: list[str] = []
 
 
 class SessionInitRequest(BaseModel):
@@ -813,6 +815,7 @@ class AgentStateService:
                     steps=req.steps,
                     parent_task_id=req.parent_task_id,
                     bugfix_retry_count=req.bugfix_retry_count,
+                    touches_files=req.touches_files,
                 )
                 db.add(task)
                 await db.commit()
@@ -958,6 +961,7 @@ class AgentStateService:
                         "output_tokens": t.output_tokens,
                         "cost_usd": t.cost_usd,
                         "merged_to_main": t.merged_to_main,
+                        "touches_files": t.touches_files or [],
                         "created_at": str(t.created_at) if t.created_at else None,
                         "started_at": str(t.started_at) if t.started_at else None,
                         "completed_at": str(t.completed_at) if t.completed_at else None,
