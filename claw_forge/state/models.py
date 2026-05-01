@@ -137,7 +137,7 @@ class Task(Base):
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     bugfix_retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     touches_files: Mapped[list[str]] = mapped_column(
-        SafeJSON(fallback=[]), default=list, nullable=False,
+        SafeJSON(fallback=[]), default=list, server_default="[]", nullable=False,
     )
     merged_to_main: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False,

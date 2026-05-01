@@ -290,6 +290,13 @@ async def _ensure_task_columns(database_url: str) -> None:
                         "INTEGER NOT NULL DEFAULT 1"
                     )
                 )
+            if "touches_files" not in existing:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE tasks ADD COLUMN touches_files "
+                        "JSON NOT NULL DEFAULT '[]'"
+                    )
+                )
     finally:
         await engine.dispose()
 
