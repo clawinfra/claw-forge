@@ -42,6 +42,8 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "depends_on": task.depends_on,
         "steps": task.steps or [],
         "active_subagents": task.active_subagents,
+        "merged_to_main": task.merged_to_main,
+        "touches_files": task.touches_files or [],
     }
 
 logger = logging.getLogger(__name__)
@@ -192,6 +194,7 @@ class CreateTaskRequest(BaseModel):
     steps: list[str] = []
     parent_task_id: str | None = None
     bugfix_retry_count: int = 0
+    touches_files: list[str] = []
 
 
 class SessionInitRequest(BaseModel):
@@ -206,6 +209,7 @@ class UpdateTaskRequest(BaseModel):
     output_tokens: int | None = None
     cost_usd: float | None = None
     active_subagents: int | None = None
+    merged_to_main: bool | None = None
 
 
 class HumanInputRequest(BaseModel):
@@ -248,6 +252,53 @@ class SetProviderModelsRequest(BaseModel):
     """Request to update the active tier list for a provider."""
 
     active_tiers: list[str]
+
+
+class FileClaimRequest(BaseModel):
+    """Request to claim a set of file paths for a task."""
+
+    task_id: str
+    file_paths: list[str]
+
+
+async def _ensure_task_columns(database_url: str) -> None:
+    """Add columns to ``tasks`` that may be missing on legacy SQLite DBs.
+
+    The project does not use SQL migrations (CLAUDE.md, "No DB migrations").
+    Instead, on every startup we introspect the live ``tasks`` table and
+    issue ``ALTER TABLE … ADD COLUMN`` for any new columns the model expects
+    but the DB lacks.  Idempotent — second call is a no-op.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.begin() as conn:
+            rows = await conn.execute(text("PRAGMA table_info(tasks)"))
+            existing = {r[1] for r in rows.fetchall()}
+            # Empty result means the helper opened an isolated view of the DB
+            # (typical for ``:memory:`` URLs, where each engine is its own
+            # private database) — there's no legacy ``tasks`` table to
+            # migrate.  Fresh DBs already get the column from create_all.
+            if not existing:
+                return
+            if "merged_to_main" not in existing:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE tasks ADD COLUMN merged_to_main "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                )
+            if "touches_files" not in existing:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE tasks ADD COLUMN touches_files "
+                        "JSON NOT NULL DEFAULT '[]'"
+                    )
+                )
+    finally:
+        await engine.dispose()
 
 
 class AgentStateService:
@@ -484,6 +535,7 @@ class AgentStateService:
     async def _init_db_inner(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await _ensure_task_columns(self._database_url)
         async with self._engine.begin() as conn:
             # SQLite: verify database integrity early so corruption is
             # caught here (where tiered recovery can handle it).
@@ -770,6 +822,7 @@ class AgentStateService:
                     steps=req.steps,
                     parent_task_id=req.parent_task_id,
                     bugfix_retry_count=req.bugfix_retry_count,
+                    touches_files=req.touches_files,
                 )
                 db.add(task)
                 await db.commit()
@@ -804,11 +857,19 @@ class AgentStateService:
                         task.started_at = None
                     elif _normalized in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
+                        # Auto-release file claims when task hits a terminal state.
+                        from claw_forge.state.file_claims import release_for_task
+                        await release_for_task(db, task_id)
                         if _normalized == "completed" and self._reviewer is not None:
                             self._reviewer.notify_feature_completed(
                                 task_id=str(task.id),
                                 task_name=task.description or task.plugin_name,
                             )
+                    elif _normalized == "paused":
+                        # Paused tasks aren't actively running; release their
+                        # claims so other tasks can pick up the files.
+                        from claw_forge.state.file_claims import release_for_task
+                        await release_for_task(db, task_id)
                 if req.result is not None:
                     task.result_json = req.result
                 if req.error_message is not None:
@@ -821,6 +882,8 @@ class AgentStateService:
                     task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
                 if req.active_subagents is not None:
                     task.active_subagents = req.active_subagents
+                if req.merged_to_main is not None:
+                    task.merged_to_main = req.merged_to_main
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),
@@ -838,6 +901,7 @@ class AgentStateService:
                         "input_tokens": task.input_tokens,
                         "output_tokens": task.output_tokens,
                         "active_subagents": task.active_subagents,
+                        "merged_to_main": task.merged_to_main,
                     },
                 )
                 return {"id": task.id, "status": task.status}
@@ -903,6 +967,8 @@ class AgentStateService:
                         "input_tokens": t.input_tokens,
                         "output_tokens": t.output_tokens,
                         "cost_usd": t.cost_usd,
+                        "merged_to_main": t.merged_to_main,
+                        "touches_files": t.touches_files or [],
                         "created_at": str(t.created_at) if t.created_at else None,
                         "started_at": str(t.started_at) if t.started_at else None,
                         "completed_at": str(t.completed_at) if t.completed_at else None,
@@ -1473,6 +1539,50 @@ class AgentStateService:
             if not entry:
                 raise HTTPException(404, "Execution not found")
             return {"execution_id": execution_id, **entry}
+
+        # ------------------------------------------------------------------ #
+        # File-claim endpoints                                                 #
+        # ------------------------------------------------------------------ #
+
+        @app.post("/sessions/{session_id}/file-claims")
+        async def post_file_claim(
+            session_id: str, req: FileClaimRequest,
+        ) -> Any:
+            from fastapi.responses import JSONResponse
+
+            from claw_forge.state.file_claims import try_claim
+            async with self._session_factory() as db:
+                result = await try_claim(
+                    db, session_id, req.task_id, req.file_paths,
+                )
+            if not result["claimed"]:
+                return JSONResponse(status_code=409, content=result)
+            return result
+
+        @app.delete("/sessions/{session_id}/file-claims/{task_id}")
+        async def delete_file_claims(
+            session_id: str, task_id: str,
+        ) -> dict[str, Any]:
+            from claw_forge.state.file_claims import release_for_task
+            async with self._session_factory() as db:
+                n = await release_for_task(db, task_id)
+            return {"released": n}
+
+        @app.get("/sessions/{session_id}/file-claims")
+        async def get_file_claims(session_id: str) -> dict[str, Any]:
+            from claw_forge.state.file_claims import claims_for_session
+            async with self._session_factory() as db:
+                rows = await claims_for_session(db, session_id)
+            return {
+                "claims": [
+                    {
+                        "task_id": r.task_id,
+                        "file_path": r.file_path,
+                        "claimed_at": r.claimed_at.isoformat(),
+                    }
+                    for r in rows
+                ]
+            }
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]

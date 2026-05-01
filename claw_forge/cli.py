@@ -11,7 +11,10 @@ import sys
 from collections.abc import AsyncGenerator
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from claw_forge.state.scheduler import TaskNode
 
 import httpx
 import typer
@@ -253,6 +256,24 @@ def _state_url(port: int = 8420) -> str:
     return f"http://localhost:{port}"
 
 
+def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
+    """Build a scheduler TaskNode from a state-service task JSON payload."""
+    from claw_forge.state.scheduler import TaskNode
+
+    return TaskNode(
+        id=payload["id"],
+        plugin_name=payload.get("plugin_name", ""),
+        priority=int(payload.get("priority", 0) or 0),
+        depends_on=list(payload.get("depends_on", []) or []),
+        status=payload.get("status", "pending"),
+        category=payload.get("category", "") or "",
+        steps=list(payload.get("steps", []) or []),
+        description=payload.get("description", "") or "",
+        merged_to_main=bool(payload.get("merged_to_main", True)),
+        touches_files=list(payload.get("touches_files", []) or []),
+    )
+
+
 def _http_get(url: str) -> dict[str, Any] | list[Any]:
     """Simple synchronous GET helper."""
     try:
@@ -453,23 +474,10 @@ def run(
     import asyncio
 
     from claw_forge.orchestrator.dispatcher import Dispatcher
-    from claw_forge.state.scheduler import TaskNode
 
     def _task_dicts_to_nodes(dicts: list[dict[str, Any]]) -> list[TaskNode]:
         """Convert task dicts from the state service API into TaskNode objects."""
-        return [
-            TaskNode(
-                id=t["id"],
-                plugin_name=t["plugin_name"],
-                priority=t.get("priority", 0),
-                depends_on=t.get("depends_on") or [],
-                status="pending",
-                category=t.get("category") or "",
-                steps=t.get("steps") or [],
-                description=t.get("description") or "",
-            )
-            for t in dicts
-        ]
+        return [_task_dict_to_node(t) for t in dicts]
 
     # Resolve config path: prefer project-relative if config is a bare filename
     _config_path = Path(config)
@@ -976,13 +984,37 @@ def run(
                     )
                     prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
 
+                # File-claim guard: defer this task if any file it declares
+                # is already held by another running task.  Tasks without
+                # touches_files declared participate in no locking.
+                # NOTE: this return is before the try/finally block, so the
+                # finally won't PATCH status="failed" — the task stays pending.
+                import logging as _logging
+
+                touches = list(getattr(task_node, "touches_files", []) or [])
+                _claim_ok, _claim_conflicts = await _try_claim_files(
+                    http, _state_base, session_id, task_node.id, touches,
+                )
+                if not _claim_ok:
+                    _logging.getLogger(__name__).info(
+                        "Task %s deferred — files claimed by another task: %s",
+                        task_node.id, _claim_conflicts,
+                    )
+                    return {"success": False, "output": "deferred"}
+
                 # Mark running via HTTP (triggers WS broadcast + sets started_at)
-                await _patch_task(http, task_node.id, status="running")
+                # ── Flip merged_to_main=False so dependents stay blocked until
+                #    our squash-merge succeeds (auto strategy only).
+                if git_enabled and git_merge_strategy == "auto":
+                    await _patch_task(
+                        http, task_node.id,
+                        status="running", merged_to_main=False,
+                    )
+                else:
+                    await _patch_task(http, task_node.id, status="running")
 
                 # Create a feature branch for this task (best-effort — git
                 # errors must not crash the dispatcher or leave tasks stuck).
-                import logging as _logging
-
                 from claw_forge.git.slug import make_branch_name as _make_branch_name
 
                 _slug = _make_branch_name(
@@ -1372,7 +1404,7 @@ def run(
 
                     # Git: checkpoint + optional merge on success, cleanup on failure
                     if git_enabled:
-                        await git_ops.apply_on_completion(
+                        merge_result = await git_ops.apply_on_completion(
                             task_id=task_node.id,
                             slug=_slug,
                             description=task_node.description or None,
@@ -1385,6 +1417,9 @@ def run(
                             branch_prefix=git_branch_prefix,
                             target_branch=_default_branch,
                             session_id=session_id,
+                        )
+                        await _set_merged_to_main_after_merge(
+                            http, _state_base, task_node.id, merge_result,
                         )
 
             return {"success": success, "output": output}
@@ -1869,6 +1904,58 @@ def init(
             f"\n[bold cyan]Spec found:[/bold cyan] {found.name}\n"
             f"  Run: [bold]claw-forge validate-spec {found.name}[/bold]\n"
             f"  Run: [bold]claw-forge plan {found.name}[/bold]"
+        )
+
+
+async def _try_claim_files(
+    http: Any, state_base: str, session_id: str, task_id: str,
+    file_paths: list[str],
+) -> tuple[bool, list[str]]:
+    """POST /file-claims for *task_id*; return (ok, conflicts).
+
+    Empty *file_paths* short-circuits to (True, []) — tasks that don't
+    declare files participate in no locking.
+    """
+    if not file_paths:
+        return True, []
+    import httpx
+    try:
+        r = await http.post(
+            f"{state_base}/sessions/{session_id}/file-claims",
+            json={"task_id": task_id, "file_paths": list(file_paths)},
+        )
+    except httpx.HTTPError:
+        # State service unavailable — treat as success (don't block dispatch
+        # on transient state-service errors).
+        return True, []
+    if r.status_code == 200:
+        return True, []
+    if r.status_code == 409:
+        return False, list(r.json().get("conflicts", []))
+    # Any other status — log-then-allow; don't block on unexpected codes.
+    return True, []
+
+
+async def _set_merged_to_main_after_merge(
+    http: Any, state_base: str, task_id: str, merge_result: dict[str, Any] | None,
+) -> None:
+    """PATCH merged_to_main=True after a successful auto-merge.
+
+    Called by the task_handler after apply_on_completion returns.  Does
+    nothing when:
+      * ``merge_result is None`` — no merge was attempted (git disabled,
+        manual strategy, or task failed).
+      * ``merge_result['merged'] is False`` — squash hit a conflict.  The
+        task stays "completed but not merged"; dependents stay blocked
+        until a manual merge or a retry resolves it.
+    """
+    import httpx
+
+    if merge_result is None or not merge_result.get("merged"):
+        return
+    with suppress(httpx.HTTPError):
+        await http.patch(
+            f"{state_base}/tasks/{task_id}", json={"merged_to_main": True},
         )
 
 

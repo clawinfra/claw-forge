@@ -119,3 +119,33 @@ class TestScheduler:
         waves = s2.get_execution_order()
         # "a" cannot run because "blocker" is in the scheduler but not completed.
         assert waves == []
+
+    def test_completed_dep_not_merged_to_main_keeps_child_blocked(self):
+        """A child whose parent is completed but merged_to_main=False stays blocked."""
+        s = Scheduler()
+        parent = TaskNode(
+            id="parent", plugin_name="coding", priority=0, depends_on=[],
+            status="completed", merged_to_main=False,
+        )
+        child = TaskNode(
+            id="child", plugin_name="coding", priority=0, depends_on=["parent"],
+            status="pending",
+        )
+        s.add_task(parent)
+        s.add_task(child)
+        assert s.get_ready_tasks() == []  # child stays blocked
+
+    def test_completed_dep_with_merged_to_main_unblocks_child(self):
+        """A child whose parent is completed AND merged_to_main is unblocked."""
+        s = Scheduler()
+        parent = TaskNode(
+            id="parent", plugin_name="coding", priority=0, depends_on=[],
+            status="completed", merged_to_main=True,
+        )
+        child = TaskNode(
+            id="child", plugin_name="coding", priority=0, depends_on=["parent"],
+            status="pending",
+        )
+        s.add_task(parent)
+        s.add_task(child)
+        assert [t.id for t in s.get_ready_tasks()] == ["child"]
