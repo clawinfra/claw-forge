@@ -108,8 +108,11 @@ All session auto-detection (ui prod, ui dev, dev command) uses `_resolve_latest_
 
 All CLI commands communicate with the state service via HTTP. Key endpoints:
 - `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`
-- `POST /sessions/{id}/tasks`, `PATCH /sessions/{id}/tasks/{id}` (status, cost, tokens, merged_to_main)
+- `POST /sessions/{id}/tasks` (accepts optional `touches_files: list[str]` for file-lock declaration), `PATCH /sessions/{id}/tasks/{id}` (status, cost, tokens, merged_to_main)
 - `POST /sessions/{id}/tasks/{id}/human-input`
+- `POST /sessions/{id}/file-claims` — atomic file-lock claim for a task; returns 200 on success or 409 with conflict list
+- `DELETE /sessions/{id}/file-claims/{task_id}` — release all claims held by a task
+- `GET /sessions/{id}/file-claims` — list current claims (for debugging)
 - `WebSocket /ws` — real-time broadcast of feature updates, cost events, pool health
 - `GET /pool/status`
 - `POST /shutdown`
@@ -189,3 +192,4 @@ The state service uses SQLite WAL mode with multi-layer corruption defense:
 - **`.claw-forge/state.log`** is a runtime file, gitignored. Do not commit it.
 - **Default state port is `8420`** — configurable via `--port` flag or `state.port` in `claw-forge.yaml`.
 - **Merge-gating** (`merged_to_main` flag on tasks): a dependent task is unblocked only when its parent is `status=completed AND merged_to_main=True`. The dispatcher PATCHes `merged_to_main=False` when starting a task on a feature branch with `merge_strategy: auto`, and back to `True` after a successful squash. If the squash fails, the task stays "completed but not merged" and its descendants stay blocked until a manual merge or retry resolves the conflict — preventing dependents from running on a stale main.
+- **File-claim locks** (`touches_files` on tasks): a task may declare a list of files it intends to edit. Before starting an agent, the dispatcher POSTs a claim to `/file-claims`; if any file is held by another running task, the dispatcher defers this task to the next dispatch cycle. Claims auto-release on task transition to `completed`/`failed`/`paused`. Tasks that don't declare `touches_files` participate in no locking — full backward compatibility.
