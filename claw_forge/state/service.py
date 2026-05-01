@@ -252,6 +252,13 @@ class SetProviderModelsRequest(BaseModel):
     active_tiers: list[str]
 
 
+class FileClaimRequest(BaseModel):
+    """Request to claim a set of file paths for a task."""
+
+    task_id: str
+    file_paths: list[str]
+
+
 async def _ensure_task_columns(database_url: str) -> None:
     """Add columns to ``tasks`` that may be missing on legacy SQLite DBs.
 
@@ -1513,6 +1520,50 @@ class AgentStateService:
             if not entry:
                 raise HTTPException(404, "Execution not found")
             return {"execution_id": execution_id, **entry}
+
+        # ------------------------------------------------------------------ #
+        # File-claim endpoints                                                 #
+        # ------------------------------------------------------------------ #
+
+        @app.post("/sessions/{session_id}/file-claims")
+        async def post_file_claim(
+            session_id: str, req: FileClaimRequest,
+        ) -> Any:
+            from fastapi.responses import JSONResponse
+
+            from claw_forge.state.file_claims import try_claim
+            async with self._session_factory() as db:
+                result = await try_claim(
+                    db, session_id, req.task_id, req.file_paths,
+                )
+            if not result["claimed"]:
+                return JSONResponse(status_code=409, content=result)
+            return result
+
+        @app.delete("/sessions/{session_id}/file-claims/{task_id}")
+        async def delete_file_claims(
+            session_id: str, task_id: str,
+        ) -> dict[str, Any]:
+            from claw_forge.state.file_claims import release_for_task
+            async with self._session_factory() as db:
+                n = await release_for_task(db, task_id)
+            return {"released": n}
+
+        @app.get("/sessions/{session_id}/file-claims")
+        async def get_file_claims(session_id: str) -> dict[str, Any]:
+            from claw_forge.state.file_claims import claims_for_session
+            async with self._session_factory() as db:
+                rows = await claims_for_session(db, session_id)
+            return {
+                "claims": [
+                    {
+                        "task_id": r.task_id,
+                        "file_path": r.file_path,
+                        "claimed_at": r.claimed_at.isoformat(),
+                    }
+                    for r in rows
+                ]
+            }
 
     async def _emit_event(
         self, session_id: str, task_id: str | None, event_type: str, payload: dict[str, Any]
