@@ -18,6 +18,7 @@ class TaskNode:
     steps: list[str] = field(default_factory=list)
     description: str = ""
     merged_to_main: bool = True  # gate: dep not satisfied until merged
+    touches_files: list[str] = field(default_factory=list)
 
 
 class CycleDetectedError(Exception):

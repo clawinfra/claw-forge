@@ -265,6 +265,7 @@ def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
         steps=list(payload.get("steps", []) or []),
         description=payload.get("description", "") or "",
         merged_to_main=bool(payload.get("merged_to_main", True)),
+        touches_files=list(payload.get("touches_files", []) or []),
     )
 
 
@@ -978,6 +979,24 @@ def run(
                     )
                     prompt = f"{prompt}\n\n## Verification Steps\n{numbered}"
 
+                # File-claim guard: defer this task if any file it declares
+                # is already held by another running task.  Tasks without
+                # touches_files declared participate in no locking.
+                # NOTE: this return is before the try/finally block, so the
+                # finally won't PATCH status="failed" — the task stays pending.
+                import logging as _logging
+
+                touches = list(getattr(task_node, "touches_files", []) or [])
+                _claim_ok, _claim_conflicts = await _try_claim_files(
+                    http, _state_base, session_id, task_node.id, touches,
+                )
+                if not _claim_ok:
+                    _logging.getLogger(__name__).info(
+                        "Task %s deferred — files claimed by another task: %s",
+                        task_node.id, _claim_conflicts,
+                    )
+                    return {"success": False, "output": "deferred"}
+
                 # Mark running via HTTP (triggers WS broadcast + sets started_at)
                 # ── Flip merged_to_main=False so dependents stay blocked until
                 #    our squash-merge succeeds (auto strategy only).
@@ -991,8 +1010,6 @@ def run(
 
                 # Create a feature branch for this task (best-effort — git
                 # errors must not crash the dispatcher or leave tasks stuck).
-                import logging as _logging
-
                 from claw_forge.git.slug import make_branch_name as _make_branch_name
 
                 _slug = _make_branch_name(
@@ -1883,6 +1900,35 @@ def init(
             f"  Run: [bold]claw-forge validate-spec {found.name}[/bold]\n"
             f"  Run: [bold]claw-forge plan {found.name}[/bold]"
         )
+
+
+async def _try_claim_files(
+    http: Any, state_base: str, session_id: str, task_id: str,
+    file_paths: list[str],
+) -> tuple[bool, list[str]]:
+    """POST /file-claims for *task_id*; return (ok, conflicts).
+
+    Empty *file_paths* short-circuits to (True, []) — tasks that don't
+    declare files participate in no locking.
+    """
+    if not file_paths:
+        return True, []
+    import httpx
+    try:
+        r = await http.post(
+            f"{state_base}/sessions/{session_id}/file-claims",
+            json={"task_id": task_id, "file_paths": list(file_paths)},
+        )
+    except httpx.HTTPError:
+        # State service unavailable — treat as success (don't block dispatch
+        # on transient state-service errors).
+        return True, []
+    if r.status_code == 200:
+        return True, []
+    if r.status_code == 409:
+        return False, list(r.json().get("conflicts", []))
+    # Any other status — log-then-allow; don't block on unexpected codes.
+    return True, []
 
 
 async def _set_merged_to_main_after_merge(
