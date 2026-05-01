@@ -125,6 +125,31 @@ export async function resumeAllPaused(sessionId: string): Promise<void> {
   });
 }
 
+/**
+ * Batch-reset failed and/or blocked tasks back to "pending" so the dispatcher
+ * picks them up on the next run.  Returns the count of tasks reset.
+ *
+ * @param statuses statuses to reset (default: both `failed` and `blocked`).
+ * @param errorPattern optional SQL `LIKE` pattern on `error_message` to scope
+ *        the reset (e.g. `"%rate_limit%"` to reset only rate-limit failures).
+ */
+export async function requeueTasks(
+  sessionId: string,
+  statuses: ("failed" | "blocked")[] = ["failed", "blocked"],
+  errorPattern?: string,
+): Promise<{ count: number; requeued: string[] }> {
+  return fetchJSON<{ count: number; requeued: string[] }>(
+    `/sessions/${sessionId}/tasks/requeue`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        statuses,
+        ...(errorPattern ? { error_pattern: errorPattern } : {}),
+      }),
+    },
+  );
+}
+
 // ── Provider toggle ───────────────────────────────────────────────────────────
 
 /** Runtime-toggle a provider (does NOT write to disk). */

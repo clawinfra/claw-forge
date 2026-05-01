@@ -568,3 +568,183 @@ class TestPausedStatusGuard:
             assert resp.json()["status"] == "pending", (
                 f"resume-all should set paused→pending but got '{resp.json()['status']}'"
             )
+
+
+# ── Batch requeue: failed/blocked → pending ──────────────────────────────────
+
+
+class TestRequeueTasks:
+    """Test the ``POST /sessions/{id}/tasks/requeue`` batch endpoint.
+
+    Requeue resets ``failed`` and/or ``blocked`` tasks back to ``pending`` so
+    the dispatcher will pick them up on the next run.  Optionally filtered by
+    SQL ``LIKE`` pattern on ``error_message`` (e.g. only rate-limit failures).
+    """
+
+    async def _make_client(self):  # type: ignore[return]
+        from httpx import ASGITransport, AsyncClient
+
+        from claw_forge.state.service import AgentStateService
+
+        svc = AgentStateService("sqlite+aiosqlite:///:memory:")
+        await svc.init_db()
+        app = svc.create_app()
+
+        class _CleanupClient(AsyncClient):
+            async def aclose(self) -> None:
+                await super().aclose()
+                await svc.dispose()
+
+        return _CleanupClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    async def _create_task(
+        self, client, session_id: str, *, status: str = "pending",
+        error_message: str | None = None, description: str = "task",
+    ) -> str:
+        resp = await client.post(
+            f"/sessions/{session_id}/tasks",
+            json={"plugin_name": "coding", "description": description},
+        )
+        task_id = resp.json()["id"]
+        patch = {"status": status}
+        if error_message is not None:
+            patch["error_message"] = error_message
+        await client.patch(f"/tasks/{task_id}", json=patch)
+        return task_id
+
+    @pytest.mark.asyncio
+    async def test_requeue_failed_tasks_resets_to_pending(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            t1 = await self._create_task(client, session_id, status="failed")
+            t2 = await self._create_task(client, session_id, status="failed")
+            t_completed = await self._create_task(client, session_id, status="completed")
+
+            resp = await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={"statuses": ["failed"]},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert set(data["requeued"]) == {t1, t2}
+            assert data["count"] == 2
+
+            tasks = (await client.get(f"/sessions/{session_id}/tasks")).json()
+            by_id = {t["id"]: t for t in tasks}
+            assert by_id[t1]["status"] == "pending"
+            assert by_id[t2]["status"] == "pending"
+            # completed task is untouched
+            assert by_id[t_completed]["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_requeue_blocked_tasks_resets_to_pending(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            t = await self._create_task(client, session_id, status="blocked")
+
+            resp = await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={"statuses": ["blocked"]},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["count"] == 1
+
+            tasks = (await client.get(f"/sessions/{session_id}/tasks")).json()
+            assert {t_["id"]: t_["status"] for t_ in tasks}[t] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_requeue_clears_error_message(self) -> None:
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            t = await self._create_task(
+                client, session_id, status="failed",
+                error_message="Agent error: rate_limit",
+            )
+
+            await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={"statuses": ["failed"]},
+            )
+            row = (await client.get(f"/tasks/{t}")).json()
+            assert row["status"] == "pending"
+            assert (row.get("error_message") in (None, "")), (
+                f"requeue must clear error_message; got {row.get('error_message')!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_requeue_with_error_pattern_filters_by_message(self) -> None:
+        """``error_pattern`` (SQL LIKE) lets the caller scope the requeue —
+        only rate-limit failures are reset, real failures stay failed."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            rate_limited = await self._create_task(
+                client, session_id, status="failed",
+                error_message="Agent error: rate_limit — check claude login",
+            )
+            real_failure = await self._create_task(
+                client, session_id, status="failed",
+                error_message="Agent error: merge conflict in foo.py",
+            )
+
+            resp = await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={"statuses": ["failed"], "error_pattern": "%rate_limit%"},
+            )
+            assert resp.json()["count"] == 1
+            assert resp.json()["requeued"] == [rate_limited]
+
+            by_id = {t["id"]: t["status"] for t in (
+                await client.get(f"/sessions/{session_id}/tasks")
+            ).json()}
+            assert by_id[rate_limited] == "pending"
+            assert by_id[real_failure] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_requeue_default_statuses_is_failed_and_blocked(self) -> None:
+        """When no ``statuses`` are passed, defaults to resetting both
+        failed AND blocked — the common 'reset everything stuck' case."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            t_failed = await self._create_task(client, session_id, status="failed")
+            t_blocked = await self._create_task(client, session_id, status="blocked")
+            t_pending = await self._create_task(client, session_id, status="pending")
+
+            resp = await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={},
+            )
+            assert set(resp.json()["requeued"]) == {t_failed, t_blocked}
+            assert resp.json()["count"] == 2
+
+            by_id = {t["id"]: t["status"] for t in (
+                await client.get(f"/sessions/{session_id}/tasks")
+            ).json()}
+            assert by_id[t_failed] == "pending"
+            assert by_id[t_blocked] == "pending"
+            assert by_id[t_pending] == "pending"  # already was pending
+
+    @pytest.mark.asyncio
+    async def test_requeue_empty_set_returns_count_zero(self) -> None:
+        """No matching tasks → count 0, no error."""
+        client = await self._make_client()
+        async with client:
+            resp = await client.post("/sessions", json={"project_path": "/tmp/test"})
+            session_id = resp.json()["id"]
+            await self._create_task(client, session_id, status="completed")
+
+            resp = await client.post(
+                f"/sessions/{session_id}/tasks/requeue",
+                json={"statuses": ["failed"]},
+            )
+            assert resp.json()["count"] == 0
+            assert resp.json()["requeued"] == []

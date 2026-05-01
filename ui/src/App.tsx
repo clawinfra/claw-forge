@@ -69,7 +69,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useTouchGestures } from "./hooks/useTouchGestures";
 import { useMobileDetect } from "./hooks/useMobileDetect";
-import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning, resumeTask, resumeAllPaused } from "./api";
+import { fetchSession, fetchSessions, fetchCommands, executeCommand, patchTaskStatus, stopTask, stopAllRunning, resumeTask, resumeAllPaused, requeueTasks } from "./api";
 import { KANBAN_COLUMNS } from "./types";
 import type {
   Command,
@@ -483,6 +483,49 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       addToast("Failed to resume tasks", "error");
     });
   }, [sessionId, allFeatures, addToast]);
+
+  /**
+   * Batch-reset all tasks in a single column (Failed or Blocked) to "pending".
+   *
+   * The dispatcher only picks up `pending` tasks, so once a task lands in
+   * `failed` (after retry exhaustion) or `blocked` (because a dep failed),
+   * it sits there until something resets it.  This is the column-level
+   * reset path; per-card drag-to-pending is the alternative for granular use.
+   */
+  const handleRequeueColumn = useCallback(
+    (columnStatus: "failed" | "blocked") => {
+      const ids = allFeatures
+        .filter((f) => f.status === columnStatus)
+        .map((f) => f.id);
+      if (ids.length === 0) return;
+      const label = columnStatus === "failed" ? "Failed" : "Blocked";
+      const ok = window.confirm(
+        `Reset ${ids.length} ${label} task${ids.length === 1 ? "" : "s"} to Pending?\n\n` +
+          `These will be picked up by the dispatcher on the next ` +
+          `\`claw-forge run\` and re-attempted from scratch.`,
+      );
+      if (!ok) return;
+      // Optimistically move them in the local cache so the UI reflows now.
+      qc.setQueryData<Feature[]>(["features", sessionId], (prev) =>
+        (prev ?? []).map((f) =>
+          ids.includes(f.id) ? { ...f, status: "pending" as const } : f,
+        ),
+      );
+      void requeueTasks(sessionId, [columnStatus])
+        .then((res) => {
+          addToast(
+            `Reset ${res.count} ${label.toLowerCase()} task${res.count === 1 ? "" : "s"} to pending`,
+            "success",
+          );
+        })
+        .catch(() => {
+          // Revert by invalidating the cache so the WS-driven truth wins.
+          void qc.invalidateQueries({ queryKey: ["features", sessionId] });
+          addToast(`Failed to reset ${label.toLowerCase()} tasks`, "error");
+        });
+    },
+    [sessionId, allFeatures, addToast, qc],
+  );
 
   const handleResumeTask = useCallback(
     (taskId: string) => {
@@ -968,6 +1011,17 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
                               ) : (
                                 <>■ Stop All</>
                               )}
+                            </button>
+                          )}
+                          {(col.id === "failed" || col.id === "blocked") && cards.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRequeueColumn(col.id as "failed" | "blocked")}
+                              className="text-[10px] font-medium transition-colors flex items-center gap-0.5 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                              title={`Reset all ${cards.length} ${col.label.toLowerCase()} task${cards.length === 1 ? "" : "s"} to Pending`}
+                              data-testid={`requeue-all-${col.id}`}
+                            >
+                              ↺ Reset All
                             </button>
                           )}
                           <span className="text-xs font-bold bg-white/50 dark:bg-black/20 rounded-full px-2 py-0.5">

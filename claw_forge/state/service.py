@@ -242,6 +242,23 @@ class AgentLogRequest(BaseModel):
     model: str | None = None  # LLM model identifier used for this task
 
 
+class RequeueTasksRequest(BaseModel):
+    """Body for ``POST /sessions/{id}/tasks/requeue`` — batch reset of failed
+    or blocked tasks back to ``pending`` so the dispatcher will pick them up
+    on the next run.
+
+    ``statuses`` defaults to ``["failed", "blocked"]`` — the common "reset
+    everything stuck" case.  Pass a narrower list to scope.
+
+    ``error_pattern`` is an optional SQL ``LIKE`` pattern that further filters
+    by the task's ``error_message``.  Useful for resetting only transient
+    failures (e.g. ``"%rate_limit%"``) while leaving real failures untouched.
+    """
+
+    statuses: list[str] = ["failed", "blocked"]
+    error_pattern: str | None = None
+
+
 class ToggleProviderRequest(BaseModel):
     """Request to enable or disable a provider at runtime."""
 
@@ -1195,6 +1212,62 @@ class AgentStateService:
                     {"id": task_id, "status": "pending", "name": task_name}
                 )
             return {"resumed": resumed_ids}
+
+        @app.post("/sessions/{session_id}/tasks/requeue")
+        async def requeue_tasks(
+            session_id: str, req: RequeueTasksRequest,
+        ) -> dict[str, Any]:
+            """Batch-reset failed and/or blocked tasks back to ``pending``.
+
+            The dispatcher only picks up tasks in ``pending`` status; tasks
+            that failed (after retry exhaustion) or got blocked by failed deps
+            stay terminal until something resets them.  This endpoint is the
+            programmatic + UI-button path for that reset.
+
+            Body fields:
+            - ``statuses`` (default ``["failed", "blocked"]``) — the statuses
+              to reset.
+            - ``error_pattern`` (optional, SQL ``LIKE``) — if set, only tasks
+              whose ``error_message`` matches are reset.  E.g. ``"%rate_limit%"``
+              to reset just rate-limit failures and leave real failures alone.
+
+            Each affected task has its ``status`` set to ``pending`` and its
+            ``error_message`` cleared.  Idempotent.  Broadcasts a
+            feature_update WS event per task so the Kanban UI reflows.
+            """
+            from sqlalchemy import or_
+
+            async with self._session_factory() as db:
+                # Match any of the requested statuses; an empty list matches
+                # nothing (caller asked to reset zero statuses).
+                status_filter = (
+                    or_(*[Task.status == s for s in req.statuses])
+                    if req.statuses
+                    else Task.id.is_(None)
+                )
+                query = select(Task).where(
+                    Task.session_id == session_id,
+                    status_filter,
+                )
+                if req.error_pattern:
+                    query = query.where(Task.error_message.like(req.error_pattern))
+                result = await db.execute(query)
+                tasks_to_reset = result.scalars().all()
+                affected: list[tuple[str, str]] = []
+                for task in tasks_to_reset:
+                    task.status = "pending"
+                    task.error_message = None
+                    affected.append(
+                        (str(task.id), task.description or task.plugin_name)
+                    )
+                await db.commit()
+
+            affected_ids = [t[0] for t in affected]
+            for task_id, name in affected:
+                await self.ws_manager.broadcast_feature_update(
+                    {"id": task_id, "status": "pending", "name": name}
+                )
+            return {"requeued": affected_ids, "count": len(affected_ids)}
 
         @app.get("/stop-poll")
         async def stop_poll() -> dict[str, Any]:

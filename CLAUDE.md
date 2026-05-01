@@ -125,6 +125,8 @@ All CLI commands communicate with the state service via HTTP. Key endpoints:
 - `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`
 - `POST /sessions/{id}/tasks` (accepts optional `touches_files: list[str]` for file-lock declaration), `PATCH /sessions/{id}/tasks/{id}` (status, cost, tokens, merged_to_target_branch)
 - `POST /sessions/{id}/tasks/{id}/human-input`
+- `POST /sessions/{id}/tasks/stop-all`, `POST /sessions/{id}/tasks/resume-all` — pause/resume in-flight tasks
+- `POST /sessions/{id}/tasks/requeue` — batch reset failed/blocked tasks to pending. Body: `{statuses: list[str] = ["failed", "blocked"], error_pattern?: str}`. Optional ``error_pattern`` is a SQL ``LIKE`` filter on ``error_message`` (e.g. ``"%rate_limit%"`` to reset only rate-limit failures). Used by the Kanban UI's "Reset All" button on the Failed and Blocked column headers.
 - `POST /sessions/{id}/file-claims` — atomic file-lock claim for a task; returns 200 on success or 409 with conflict list
 - `DELETE /sessions/{id}/file-claims/{task_id}` — release all claims held by a task
 - `GET /sessions/{id}/file-claims` — list current claims (for debugging)
