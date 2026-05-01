@@ -68,3 +68,46 @@ async def test_ensure_task_columns_adds_missing_merged_to_main(tmp_path: Path) -
     assert "merged_to_main" in cols
     # Default is 1 (True) so legacy completed tasks aren't retroactively gated.
     assert val == 1
+
+
+@pytest.mark.asyncio
+async def test_file_claim_unique_per_session() -> None:
+    """The same (session_id, file_path) cannot be claimed twice."""
+    from sqlalchemy.exc import IntegrityError
+
+    from claw_forge.state.models import FileClaim
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with Maker() as db:
+        sess = Session(project_path="/tmp/x")
+        db.add(sess)
+        await db.flush()
+        t1 = Task(session_id=sess.id, plugin_name="coding")
+        t2 = Task(session_id=sess.id, plugin_name="coding")
+        db.add_all([t1, t2])
+        await db.flush()
+        db.add(FileClaim(session_id=sess.id, task_id=t1.id, file_path="x.py"))
+        await db.commit()
+        db.add(FileClaim(session_id=sess.id, task_id=t2.id, file_path="x.py"))
+        with pytest.raises(IntegrityError):
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_task_touches_files_defaults_empty_list() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with Maker() as db:
+        sess = Session(project_path="/tmp/x")
+        db.add(sess)
+        await db.flush()
+        t = Task(session_id=sess.id, plugin_name="coding")
+        db.add(t)
+        await db.commit()
+        await db.refresh(t)
+        assert t.touches_files == []

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -135,6 +136,9 @@ class Task(Base):
     active_subagents: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     bugfix_retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    touches_files: Mapped[list[str]] = mapped_column(
+        SafeJSON(fallback=[]), default=list, nullable=False,
+    )
     merged_to_main: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False,
     )
@@ -154,3 +158,30 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(SafeJSON(fallback=None), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class FileClaim(Base):
+    """A live claim by a running task on a single file path.
+
+    The ``UNIQUE(session_id, file_path)`` constraint provides atomic
+    claim semantics: an INSERT inside a transaction either succeeds for
+    all rows or rolls back, so two tasks racing for the same file see a
+    deterministic winner.
+    """
+
+    __tablename__ = "file_claims"
+    __table_args__ = (
+        UniqueConstraint("session_id", "file_path", name="uq_file_claim_session_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sessions.id"), nullable=False,
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id"), nullable=False,
+    )
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC),
+    )
