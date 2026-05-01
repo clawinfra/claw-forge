@@ -268,6 +268,12 @@ async def _ensure_task_columns(database_url: str) -> None:
         async with engine.begin() as conn:
             rows = await conn.execute(text("PRAGMA table_info(tasks)"))
             existing = {r[1] for r in rows.fetchall()}
+            # Empty result means the helper opened an isolated view of the DB
+            # (typical for ``:memory:`` URLs, where each engine is its own
+            # private database) — there's no legacy ``tasks`` table to
+            # migrate.  Fresh DBs already get the column from create_all.
+            if not existing:
+                return
             if "merged_to_main" not in existing:
                 await conn.execute(
                     text(
