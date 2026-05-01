@@ -55,6 +55,7 @@ import { DependencyGraph } from "./components/DependencyGraph";
 import { CostSparkline } from "./components/CostSparkline";
 import { CelebrationOverlay } from "./components/CelebrationOverlay";
 import { ConnectionIndicator } from "./components/ConnectionIndicator";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
@@ -345,6 +346,12 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   // Shortcuts modal
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
+  // Reset-all confirmation modal — column status whose tasks are about to
+  // be reset (null when no confirm is in flight).
+  const [requeueConfirm, setRequeueConfirm] = useState<
+    "failed" | "blocked" | null
+  >(null);
+
   // Command palette
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -485,47 +492,56 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
   }, [sessionId, allFeatures, addToast]);
 
   /**
-   * Batch-reset all tasks in a single column (Failed or Blocked) to "pending".
+   * Open the confirm modal for a Reset-All on a Failed or Blocked column.
    *
-   * The dispatcher only picks up `pending` tasks, so once a task lands in
-   * `failed` (after retry exhaustion) or `blocked` (because a dep failed),
-   * it sits there until something resets it.  This is the column-level
-   * reset path; per-card drag-to-pending is the alternative for granular use.
+   * Only the modal-open is gated by this handler; the actual work happens
+   * in ``confirmRequeue`` below when the user clicks Confirm.  Per-card
+   * drag-to-pending is the alternative for granular reset.
    */
   const handleRequeueColumn = useCallback(
     (columnStatus: "failed" | "blocked") => {
-      const ids = allFeatures
-        .filter((f) => f.status === columnStatus)
-        .map((f) => f.id);
-      if (ids.length === 0) return;
-      const label = columnStatus === "failed" ? "Failed" : "Blocked";
-      const ok = window.confirm(
-        `Reset ${ids.length} ${label} task${ids.length === 1 ? "" : "s"} to Pending?\n\n` +
-          `These will be picked up by the dispatcher on the next ` +
-          `\`claw-forge run\` and re-attempted from scratch.`,
-      );
-      if (!ok) return;
-      // Optimistically move them in the local cache so the UI reflows now.
-      qc.setQueryData<Feature[]>(["features", sessionId], (prev) =>
-        (prev ?? []).map((f) =>
-          ids.includes(f.id) ? { ...f, status: "pending" as const } : f,
-        ),
-      );
-      void requeueTasks(sessionId, [columnStatus])
-        .then((res) => {
-          addToast(
-            `Reset ${res.count} ${label.toLowerCase()} task${res.count === 1 ? "" : "s"} to pending`,
-            "success",
-          );
-        })
-        .catch(() => {
-          // Revert by invalidating the cache so the WS-driven truth wins.
-          void qc.invalidateQueries({ queryKey: ["features", sessionId] });
-          addToast(`Failed to reset ${label.toLowerCase()} tasks`, "error");
-        });
+      const hasAny = allFeatures.some((f) => f.status === columnStatus);
+      if (!hasAny) return;
+      setRequeueConfirm(columnStatus);
     },
-    [sessionId, allFeatures, addToast, qc],
+    [allFeatures],
   );
+
+  /**
+   * Apply the column reset after the user confirms.
+   *
+   * The dispatcher only picks up ``pending`` tasks, so once a task lands
+   * in ``failed`` (retry exhaustion) or ``blocked`` (failed dep), it sits
+   * terminally until something resets it.  This is the bulk path.
+   */
+  const confirmRequeue = useCallback(() => {
+    const columnStatus = requeueConfirm;
+    if (!columnStatus) return;
+    const ids = allFeatures
+      .filter((f) => f.status === columnStatus)
+      .map((f) => f.id);
+    const label = columnStatus === "failed" ? "Failed" : "Blocked";
+    setRequeueConfirm(null);
+    if (ids.length === 0) return;
+    // Optimistically move them in the local cache so the UI reflows now.
+    qc.setQueryData<Feature[]>(["features", sessionId], (prev) =>
+      (prev ?? []).map((f) =>
+        ids.includes(f.id) ? { ...f, status: "pending" as const } : f,
+      ),
+    );
+    void requeueTasks(sessionId, [columnStatus])
+      .then((res) => {
+        addToast(
+          `Reset ${res.count} ${label.toLowerCase()} task${res.count === 1 ? "" : "s"} to pending`,
+          "success",
+        );
+      })
+      .catch(() => {
+        // Revert by invalidating the cache so the WS-driven truth wins.
+        void qc.invalidateQueries({ queryKey: ["features", sessionId] });
+        addToast(`Failed to reset ${label.toLowerCase()} tasks`, "error");
+      });
+  }, [requeueConfirm, sessionId, allFeatures, addToast, qc]);
 
   const handleResumeTask = useCallback(
     (taskId: string) => {
@@ -1140,6 +1156,36 @@ function KanbanBoard({ sessionId }: KanbanBoardProps) {
       <ShortcutsModal
         isOpen={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
+      />
+
+      {/* ── Reset-All confirmation modal ────────────────────────────────── */}
+      <ConfirmModal
+        isOpen={requeueConfirm !== null}
+        tone="info"
+        title={
+          requeueConfirm
+            ? `Reset ${allFeatures.filter((f) => f.status === requeueConfirm).length} ${
+                requeueConfirm === "failed" ? "Failed" : "Blocked"
+              } task${
+                allFeatures.filter((f) => f.status === requeueConfirm).length === 1
+                  ? ""
+                  : "s"
+              } to Pending?`
+            : ""
+        }
+        message={
+          "These will be picked up by the dispatcher on the next " +
+          "`claw-forge run` and re-attempted from scratch.\n\n" +
+          "Per-card drag-to-pending stays available for granular reset."
+        }
+        confirmLabel={
+          requeueConfirm
+            ? `Reset ${allFeatures.filter((f) => f.status === requeueConfirm).length} to Pending`
+            : "Confirm"
+        }
+        cancelLabel="Cancel"
+        onConfirm={confirmRequeue}
+        onCancel={() => setRequeueConfirm(null)}
       />
 
       {/* ── Toast notifications ─────────────────────────────────────────── */}
