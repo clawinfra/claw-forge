@@ -270,6 +270,58 @@ class TestSquashMerge:
         assert not wt_path.exists()
         assert branch_exists(git_repo, branch) is False
 
+    def test_squash_merge_sidelines_untracked_orphan_blocking_merge(
+        self, git_repo: Path,
+    ) -> None:
+        """When project_dir's working tree has an untracked file at the same
+        path that a feat branch is adding, ``git merge --squash`` aborts
+        with "untracked working tree files would be overwritten" (exit 1).
+        squash_merge must detect this case, sideline the orphan to
+        ``.claw-forge/orphans/<timestamp>/`` (preserving it for recovery),
+        and retry — at which point the merge succeeds.
+        """
+        branch, wt_path = create_worktree(git_repo, "t-orphan", "orphan")
+        (wt_path / "new_file.py").write_text("def new():\n    pass\n")
+        commit_checkpoint(
+            wt_path, message="add new_file.py",
+            task_id="t-orphan", plugin="coding", phase="coding", session_id="s1",
+        )
+        # Plant an orphan with the same relative path in project_dir's working
+        # tree (debris from a previous failed run, in production).
+        orphan_content = "# orphan from a previous failed run\n"
+        (git_repo / "new_file.py").write_text(orphan_content)
+
+        result = squash_merge(git_repo, branch, worktree_path=wt_path)
+        assert result["merged"] is True, result
+        # Branch's new content lands in main.
+        assert (git_repo / "new_file.py").read_text() == "def new():\n    pass\n"
+        # Orphan preserved in the archive so the user can recover it if needed.
+        archive_root = git_repo / ".claw-forge" / "orphans"
+        assert archive_root.exists(), "orphans archive directory not created"
+        archived = list(archive_root.rglob("new_file.py"))
+        assert len(archived) == 1, f"expected 1 archived orphan, got {archived!r}"
+        assert archived[0].read_text() == orphan_content
+
+    def test_squash_merge_sidelines_multiple_orphan_files(
+        self, git_repo: Path,
+    ) -> None:
+        """Multiple orphans blocking the same merge are all sidelined."""
+        branch, wt_path = create_worktree(git_repo, "t-multi", "multi-orphan")
+        (wt_path / "a.py").write_text("a = 1\n")
+        (wt_path / "b.py").write_text("b = 2\n")
+        commit_checkpoint(
+            wt_path, message="add a.py and b.py",
+            task_id="t-multi", plugin="coding", phase="coding", session_id="s1",
+        )
+        (git_repo / "a.py").write_text("# orphan a\n")
+        (git_repo / "b.py").write_text("# orphan b\n")
+
+        result = squash_merge(git_repo, branch, worktree_path=wt_path)
+        assert result["merged"] is True, result
+        archive_root = git_repo / ".claw-forge" / "orphans"
+        assert len(list(archive_root.rglob("a.py"))) == 1
+        assert len(list(archive_root.rglob("b.py"))) == 1
+
     def test_squash_merge_recovery_does_not_checkout_worktree_branch(
         self, git_repo: Path,
     ) -> None:

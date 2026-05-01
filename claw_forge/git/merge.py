@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,71 @@ from claw_forge.git.branching import (
 )
 from claw_forge.git.commits import branch_commit_subjects
 from claw_forge.git.repo import _run_git
+
+_ORPHAN_OVERWRITE_MARKER = "untracked working tree files would be overwritten by merge"
+
+
+def _extract_orphan_files(stderr: str) -> list[str]:
+    """Parse git's "untracked working tree files would be overwritten" error
+    message and return the list of offending paths.
+
+    Git's output for this case looks like::
+
+        error: The following untracked working tree files would be overwritten by merge:
+                examples/strategies/eth_momentum_v0.dsl
+                tests/test_executor_price_window.py
+        Please move or remove them before you merge.
+        Aborting
+
+    Each blocking file is on its own tab-indented line between the marker
+    and the "Please" / "Aborting" terminator.
+    """
+    if _ORPHAN_OVERWRITE_MARKER not in stderr:
+        return []
+    files: list[str] = []
+    in_block = False
+    for raw in stderr.splitlines():
+        if _ORPHAN_OVERWRITE_MARKER in raw:
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        line = raw.rstrip()
+        if not line:
+            break
+        stripped = line.lstrip()
+        if stripped.startswith(("Please move", "Aborting", "error:", "fatal:")):
+            break
+        # File lines are tab- or space-indented; the path is what's after.
+        if line[0] in (" ", "\t"):
+            files.append(stripped)
+        else:
+            # Reached non-indented non-blank content — end of block.
+            break
+    return files
+
+
+def _sideline_orphans(project_dir: Path, files: list[str]) -> Path | None:
+    """Move *files* (relative paths from *project_dir*) into
+    ``.claw-forge/orphans/<timestamp>/`` so a subsequent ``git merge --squash``
+    isn't blocked.  Returns the archive directory, or ``None`` if no files
+    were actually moved (because none existed on disk).
+
+    The archive preserves the original directory structure so a user can
+    recover with a recursive copy.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir = project_dir / ".claw-forge" / "orphans" / timestamp
+    moved = 0
+    for rel in files:
+        src = project_dir / rel
+        if not src.exists():
+            continue
+        dst = archive_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+        moved += 1
+    return archive_dir if moved > 0 else None
 
 
 def _build_merge_message(
@@ -74,6 +141,20 @@ def squash_merge(
         switch_branch(project_dir, target)
         try:
             _run_git(["merge", "--squash", branch], project_dir)
+        except subprocess.CalledProcessError as exc:
+            # Specific case: untracked debris in project_dir's working tree
+            # (left over from earlier failed runs) collides with files the
+            # squash would create.  Git aborts before staging anything; the
+            # existing catch-up-merge recovery doesn't help (the issue is
+            # debris in *target*, not branch divergence).  Sideline the
+            # offending files and retry the squash directly.
+            stderr = exc.stderr or ""
+            if _ORPHAN_OVERWRITE_MARKER in stderr:
+                orphan_files = _extract_orphan_files(stderr)
+                _sideline_orphans(project_dir, orphan_files)
+                _run_git(["merge", "--squash", branch], project_dir)
+            else:
+                raise
         except Exception:
             # Squash merge failed — likely conflicts because other branches
             # merged to target since this branch was created.  Reset, catch
