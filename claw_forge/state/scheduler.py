@@ -17,7 +17,7 @@ class TaskNode:
     category: str = ""
     steps: list[str] = field(default_factory=list)
     description: str = ""
-    merged_to_main: bool = True  # gate: dep not satisfied until merged
+    merged_to_target_branch: bool = True  # gate: dep not satisfied until merged
     touches_files: list[str] = field(default_factory=list)
 
 
@@ -50,10 +50,10 @@ class Scheduler:
 
     def get_ready_tasks(self) -> list[TaskNode]:
         """Return tasks whose dependencies are all completed AND merged, sorted by priority."""
-        # A dep is satisfied when status == completed AND merged_to_main is True.
+        # A dep is satisfied when status == completed AND merged_to_target_branch is True.
         satisfied: set[str] = {
             tid for tid, t in self._tasks.items()
-            if t.status == "completed" and t.merged_to_main
+            if t.status == "completed" and t.merged_to_target_branch
         }
         failed = {tid for tid, t in self._tasks.items() if t.status == "failed"}
 
@@ -114,7 +114,7 @@ class Scheduler:
         # Tasks already completed-and-merged before this dispatch cycle.
         completed: set[str] = {
             tid for tid, t in self._tasks.items()
-            if t.status == "completed" and t.merged_to_main
+            if t.status == "completed" and t.merged_to_target_branch
         }
         remaining = {tid for tid, t in self._tasks.items() if t.status == "pending"}
 

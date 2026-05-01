@@ -1,4 +1,4 @@
-"""Tests for the merged_to_main field on the PATCH /tasks/{id} endpoint."""
+"""Tests for the merged_to_target_branch field on the PATCH /tasks/{id} endpoint."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +10,8 @@ from claw_forge.state.service import AgentStateService
 
 
 @pytest.mark.asyncio
-async def test_patch_task_persists_merged_to_main(tmp_path: Path) -> None:
-    """PATCH /tasks/{id} with merged_to_main=False persists the field."""
+async def test_patch_task_persists_merged_to_target_branch(tmp_path: Path) -> None:
+    """PATCH /tasks/{id} with merged_to_target_branch=False persists the field."""
     db_path = tmp_path / "state.db"
     svc = AgentStateService(
         database_url=f"sqlite+aiosqlite:///{db_path}",
@@ -32,17 +32,17 @@ async def test_patch_task_persists_merged_to_main(tmp_path: Path) -> None:
             task_id = r.json()["id"]
             # Default should be True
             r = await cl.get(f"/tasks/{task_id}")
-            assert r.json()["merged_to_main"] is True
+            assert r.json()["merged_to_target_branch"] is True
             # PATCH to False
             r = await cl.patch(
-                f"/tasks/{task_id}", json={"merged_to_main": False}
+                f"/tasks/{task_id}", json={"merged_to_target_branch": False}
             )
             assert r.status_code == 200
             r = await cl.get(f"/tasks/{task_id}")
-            assert r.json()["merged_to_main"] is False
+            assert r.json()["merged_to_target_branch"] is False
             # PATCH back to True
             r = await cl.patch(
-                f"/tasks/{task_id}", json={"merged_to_main": True}
+                f"/tasks/{task_id}", json={"merged_to_target_branch": True}
             )
             r = await cl.get(f"/tasks/{task_id}")
-            assert r.json()["merged_to_main"] is True
+            assert r.json()["merged_to_target_branch"] is True

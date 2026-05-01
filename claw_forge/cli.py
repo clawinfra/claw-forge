@@ -269,7 +269,12 @@ def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
         category=payload.get("category", "") or "",
         steps=list(payload.get("steps", []) or []),
         description=payload.get("description", "") or "",
-        merged_to_main=bool(payload.get("merged_to_main", True)),
+        merged_to_target_branch=bool(
+            payload.get(
+                "merged_to_target_branch",
+                payload.get("merged_to_main", True),
+            )
+        ),
         touches_files=list(payload.get("touches_files", []) or []),
     )
 
@@ -1003,12 +1008,12 @@ def run(
                     return {"success": False, "output": "deferred"}
 
                 # Mark running via HTTP (triggers WS broadcast + sets started_at)
-                # ── Flip merged_to_main=False so dependents stay blocked until
-                #    our squash-merge succeeds (auto strategy only).
+                # ── Flip merged_to_target_branch=False so dependents stay blocked
+                #    until our squash-merge succeeds (auto strategy only).
                 if git_enabled and git_merge_strategy == "auto":
                     await _patch_task(
                         http, task_node.id,
-                        status="running", merged_to_main=False,
+                        status="running", merged_to_target_branch=False,
                     )
                 else:
                     await _patch_task(http, task_node.id, status="running")
@@ -1418,7 +1423,7 @@ def run(
                             target_branch=_default_branch,
                             session_id=session_id,
                         )
-                        await _set_merged_to_main_after_merge(
+                        await _set_merged_after_merge(
                             http, _state_base, task_node.id, merge_result,
                         )
 
@@ -1936,10 +1941,10 @@ async def _try_claim_files(
     return True, []
 
 
-async def _set_merged_to_main_after_merge(
+async def _set_merged_after_merge(
     http: Any, state_base: str, task_id: str, merge_result: dict[str, Any] | None,
 ) -> None:
-    """PATCH merged_to_main=True after a successful auto-merge.
+    """PATCH merged_to_target_branch=True after a successful auto-merge.
 
     Called by the task_handler after apply_on_completion returns.  Does
     nothing when:
@@ -1955,7 +1960,8 @@ async def _set_merged_to_main_after_merge(
         return
     with suppress(httpx.HTTPError):
         await http.patch(
-            f"{state_base}/tasks/{task_id}", json={"merged_to_main": True},
+            f"{state_base}/tasks/{task_id}",
+            json={"merged_to_target_branch": True},
         )
 
 

@@ -139,7 +139,7 @@ class Task(Base):
     touches_files: Mapped[list[str]] = mapped_column(
         SafeJSON(fallback=[]), default=list, server_default="[]", nullable=False,
     )
-    merged_to_main: Mapped[bool] = mapped_column(
+    merged_to_target_branch: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

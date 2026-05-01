@@ -42,7 +42,7 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "depends_on": task.depends_on,
         "steps": task.steps or [],
         "active_subagents": task.active_subagents,
-        "merged_to_main": task.merged_to_main,
+        "merged_to_target_branch": task.merged_to_target_branch,
         "touches_files": task.touches_files or [],
     }
 
@@ -209,7 +209,7 @@ class UpdateTaskRequest(BaseModel):
     output_tokens: int | None = None
     cost_usd: float | None = None
     active_subagents: int | None = None
-    merged_to_main: bool | None = None
+    merged_to_target_branch: bool | None = None
 
 
 class HumanInputRequest(BaseModel):
@@ -283,10 +283,23 @@ async def _ensure_task_columns(database_url: str) -> None:
             # migrate.  Fresh DBs already get the column from create_all.
             if not existing:
                 return
-            if "merged_to_main" not in existing:
+            # Rename pre-v0.5.31 column.  SQLite ≥ 3.25 supports RENAME COLUMN.
+            if (
+                "merged_to_main" in existing
+                and "merged_to_target_branch" not in existing
+            ):
                 await conn.execute(
                     text(
-                        "ALTER TABLE tasks ADD COLUMN merged_to_main "
+                        "ALTER TABLE tasks RENAME COLUMN merged_to_main "
+                        "TO merged_to_target_branch"
+                    )
+                )
+                existing.discard("merged_to_main")
+                existing.add("merged_to_target_branch")
+            if "merged_to_target_branch" not in existing:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE tasks ADD COLUMN merged_to_target_branch "
                         "INTEGER NOT NULL DEFAULT 1"
                     )
                 )
@@ -882,8 +895,8 @@ class AgentStateService:
                     task.cost_usd = (task.cost_usd or 0.0) + req.cost_usd
                 if req.active_subagents is not None:
                     task.active_subagents = req.active_subagents
-                if req.merged_to_main is not None:
-                    task.merged_to_main = req.merged_to_main
+                if req.merged_to_target_branch is not None:
+                    task.merged_to_target_branch = req.merged_to_target_branch
                 await db.commit()
                 await self._emit_event(
                     str(task.session_id),
@@ -901,7 +914,7 @@ class AgentStateService:
                         "input_tokens": task.input_tokens,
                         "output_tokens": task.output_tokens,
                         "active_subagents": task.active_subagents,
-                        "merged_to_main": task.merged_to_main,
+                        "merged_to_target_branch": task.merged_to_target_branch,
                     },
                 )
                 return {"id": task.id, "status": task.status}
@@ -967,7 +980,7 @@ class AgentStateService:
                         "input_tokens": t.input_tokens,
                         "output_tokens": t.output_tokens,
                         "cost_usd": t.cost_usd,
-                        "merged_to_main": t.merged_to_main,
+                        "merged_to_target_branch": t.merged_to_target_branch,
                         "touches_files": t.touches_files or [],
                         "created_at": str(t.created_at) if t.created_at else None,
                         "started_at": str(t.started_at) if t.started_at else None,
