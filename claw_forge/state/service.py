@@ -847,11 +847,19 @@ class AgentStateService:
                         task.started_at = None
                     elif _normalized in ("completed", "failed"):
                         task.completed_at = datetime.now(UTC)
+                        # Auto-release file claims when task hits a terminal state.
+                        from claw_forge.state.file_claims import release_for_task
+                        await release_for_task(db, task_id)
                         if _normalized == "completed" and self._reviewer is not None:
                             self._reviewer.notify_feature_completed(
                                 task_id=str(task.id),
                                 task_name=task.description or task.plugin_name,
                             )
+                    elif _normalized == "paused":
+                        # Paused tasks aren't actively running; release their
+                        # claims so other tasks can pick up the files.
+                        from claw_forge.state.file_claims import release_for_task
+                        await release_for_task(db, task_id)
                 if req.result is not None:
                     task.result_json = req.result
                 if req.error_message is not None:

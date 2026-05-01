@@ -113,3 +113,55 @@ async def test_get_file_claims_lists_current(
         assert sorted((c["task_id"], c["file_path"]) for c in rows) == sorted(
             [(t1, "a.py"), (t2, "b.py")]
         )
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_completed_releases_claims(
+    svc: AgentStateService, tmp_path: Path
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+    ) as cl:
+        sid, t1, _ = await _create_session_and_tasks(cl, str(tmp_path))
+        await cl.post(
+            f"/sessions/{sid}/file-claims",
+            json={"task_id": t1, "file_paths": ["a.py"]},
+        )
+        await cl.patch(f"/tasks/{t1}", json={"status": "completed"})
+        r = await cl.get(f"/sessions/{sid}/file-claims")
+        assert r.json()["claims"] == []
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_failed_releases_claims(
+    svc: AgentStateService, tmp_path: Path
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+    ) as cl:
+        sid, t1, _ = await _create_session_and_tasks(cl, str(tmp_path))
+        await cl.post(
+            f"/sessions/{sid}/file-claims",
+            json={"task_id": t1, "file_paths": ["a.py"]},
+        )
+        await cl.patch(f"/tasks/{t1}", json={"status": "failed"})
+        r = await cl.get(f"/sessions/{sid}/file-claims")
+        assert r.json()["claims"] == []
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_running_does_not_release_claims(
+    svc: AgentStateService, tmp_path: Path
+) -> None:
+    """Status flip to running keeps claims held."""
+    async with AsyncClient(
+        transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+    ) as cl:
+        sid, t1, _ = await _create_session_and_tasks(cl, str(tmp_path))
+        await cl.post(
+            f"/sessions/{sid}/file-claims",
+            json={"task_id": t1, "file_paths": ["a.py"]},
+        )
+        await cl.patch(f"/tasks/{t1}", json={"status": "running"})
+        r = await cl.get(f"/sessions/{sid}/file-claims")
+        assert len(r.json()["claims"]) == 1
