@@ -865,6 +865,23 @@ def run(
                         )
                     console.print()
 
+        # Startup sweep: remove any remaining stale worktree directories.
+        # Runs AFTER ``merge_orphaned_worktrees`` so the salvage step can
+        # still discover orphan branches via dir listing; anything left is
+        # either pre-existing crash debris or failed-salvage residue and is
+        # safe to drop (the underlying feature branches survive in git
+        # refs and will be re-linked on demand by ``create_worktree``).
+        if git_enabled:
+            from claw_forge.git.branching import (
+                prune_worktrees as _prune_worktrees,
+            )
+
+            _pruned = _prune_worktrees(project_path)
+            if _pruned:
+                console.print(
+                    f"[dim]Pruned {_pruned} stale worktree dir(s) at startup[/dim]"
+                )
+
         raw_tasks: list[dict[str, Any]] = init_data["tasks"]
         if not raw_tasks:
             console.print(
