@@ -37,6 +37,25 @@ def branch_has_commits_ahead(project_dir: Path, branch: str, base: str = "main")
         return False
 
 
+def branch_age_in_commits(
+    project_dir: Path, branch: str, base: str = "main",
+) -> int:
+    """Return the number of commits in *base* not yet reachable from *branch*.
+
+    Used as a staleness signal: a high value means *base* has moved many
+    commits ahead of where *branch* was cut, so attempting to merge will
+    likely conflict.  Returns ``0`` if the branch does not exist or git
+    fails for any reason — callers can treat that as "fresh enough".
+    """
+    try:
+        result = _run_git(
+            ["rev-list", "--count", f"{branch}..{base}"], project_dir
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return 0
+
+
 def create_feature_branch(
     project_dir: Path,
     task_id: str,

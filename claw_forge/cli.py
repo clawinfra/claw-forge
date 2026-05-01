@@ -279,6 +279,56 @@ def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
     )
 
 
+def _decorate_resumable(
+    nodes: list[TaskNode],
+    project_dir: Path,
+    target_branch: str,
+    branch_prefix: str,
+    *,
+    enabled: bool = True,
+    stale_threshold: int = 50,
+) -> None:
+    """Mark each pending node as resumable when its feature branch already
+    has committed work that's not too stale to merge.
+
+    A task is resumable iff:
+      * ``status == "pending"`` (terminal-state tasks aren't dispatched again)
+      * the feature branch ``{branch_prefix}/{slug}`` exists with at least
+        one commit ahead of ``target_branch``
+      * ``target_branch`` is no more than ``stale_threshold`` commits ahead
+        of the feature branch (otherwise the catch-up merge will likely
+        conflict and starting fresh is cleaner)
+
+    When ``enabled`` is False the function is a no-op — useful for the
+    ``git.prefer_resumable: false`` config.
+    """
+    if not enabled:
+        return
+    from claw_forge.git import (
+        branch_age_in_commits,
+        branch_exists,
+        branch_has_commits_ahead,
+    )
+    from claw_forge.git.slug import make_branch_name
+
+    for node in nodes:
+        if node.status != "pending":
+            continue
+        branch = make_branch_name(
+            node.description or None,
+            node.category or None,
+            node.plugin_name or branch_prefix,
+            prefix=branch_prefix,
+        )
+        if not branch_exists(project_dir, branch):
+            continue
+        if not branch_has_commits_ahead(project_dir, branch, target_branch):
+            continue
+        if branch_age_in_commits(project_dir, branch, target_branch) > stale_threshold:
+            continue
+        node.resumable = True
+
+
 def _http_get(url: str) -> dict[str, Any] | list[Any]:
     """Simple synchronous GET helper."""
     try:
@@ -481,8 +531,22 @@ def run(
     from claw_forge.orchestrator.dispatcher import Dispatcher
 
     def _task_dicts_to_nodes(dicts: list[dict[str, Any]]) -> list[TaskNode]:
-        """Convert task dicts from the state service API into TaskNode objects."""
-        return [_task_dict_to_node(t) for t in dicts]
+        """Convert task dicts to TaskNodes, marking resumable ones from git state."""
+        nodes = [_task_dict_to_node(t) for t in dicts]
+        # Decorate resumable based on whether each task's feature branch already
+        # has committed work.  Closure refs are resolved at call-time, so the
+        # git_* variables defined below in this same ``run`` function are bound
+        # by the time this helper is invoked.
+        if git_enabled:
+            _decorate_resumable(
+                nodes,
+                project_path,
+                _default_branch,
+                git_branch_prefix,
+                enabled=git_prefer_resumable,
+                stale_threshold=git_resume_stale_threshold,
+            )
+        return nodes
 
     # Resolve config path: prefer project-relative if config is a bare filename
     _config_path = Path(config)
@@ -699,6 +763,13 @@ def run(
     git_commit_on_boundary = git_cfg.get("commit_on_plugin_boundary", True)
     git_auto_checkpoint_secs: int = int(
         git_cfg.get("auto_checkpoint_interval_seconds", 300)
+    )
+    # Resume-preference: prefer tasks with committed work on a feature branch
+    # over fresh pending tasks (within the same priority tier).  See CLAUDE.md
+    # → "Key Conventions" → "Resume preference".
+    git_prefer_resumable: bool = bool(git_cfg.get("prefer_resumable", True))
+    git_resume_stale_threshold: int = int(
+        git_cfg.get("resume_stale_threshold", 50)
     )
     git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
 

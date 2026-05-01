@@ -19,6 +19,9 @@ class TaskNode:
     description: str = ""
     merged_to_target_branch: bool = True  # gate: dep not satisfied until merged
     touches_files: list[str] = field(default_factory=list)
+    # True when a feature branch with committed work already exists for this task,
+    # so picking it lets the agent resume rather than start from scratch.
+    resumable: bool = False
 
 
 class CycleDetectedError(Exception):
@@ -76,7 +79,10 @@ class Scheduler:
             if not unsatisfied:
                 ready.append(task)
 
-        return sorted(ready, key=lambda t: t.priority, reverse=True)
+        # Sort: priority desc dominates; among same priority, prefer resumable
+        # (a task with committed work on a feature branch wins the tie so the
+        # agent resumes rather than starts from scratch).
+        return sorted(ready, key=lambda t: (-t.priority, 0 if t.resumable else 1))
 
     def get_blocked_tasks(self) -> list[TaskNode]:
         return [t for t in self._tasks.values() if t.status == "blocked"]

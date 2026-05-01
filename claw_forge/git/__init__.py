@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from claw_forge.git.branching import (
+    branch_age_in_commits,
     branch_exists,
+    branch_has_commits_ahead,
     create_feature_branch,
     create_worktree,
     current_branch,
@@ -31,8 +33,10 @@ from claw_forge.git.slug import make_branch_name, make_slug
 
 __all__ = [
     "GitOps",
+    "branch_age_in_commits",
     "branch_commit_subjects",
     "branch_exists",
+    "branch_has_commits_ahead",
     "commit_checkpoint",
     "create_feature_branch",
     "create_worktree",
