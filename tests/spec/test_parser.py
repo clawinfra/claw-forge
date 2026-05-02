@@ -5,6 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from claw_forge.spec.parser import (
     FeatureItem,
     ProjectSpec,
@@ -1113,9 +1115,6 @@ class TestFeatureShapeAndPluginAttrs:
         """``shape="core"`` features can't be auto-derived; missing
         ``touches_files`` is a spec error rather than a silent opt-out.
         """
-        import pytest as _pytest
-        from claw_forge.spec.parser import ProjectSpec
-
         xml = """
         <project_specification>
           <project_name>x</project_name>
@@ -1128,5 +1127,5 @@ class TestFeatureShapeAndPluginAttrs:
           </core_features>
         </project_specification>
         """
-        with _pytest.raises(ValueError, match="touches_files"):
+        with pytest.raises(ValueError, match="touches_files"):
             ProjectSpec._parse_xml(xml)
