@@ -1250,22 +1250,74 @@ def run(
                     prefix=git_branch_prefix,
                 ).removeprefix(f"{git_branch_prefix}/")
                 _worktree_path: Path | None = None
+                _resume_conflict: bool = False
                 if git_enabled:
                     try:
-                        _wt_result = await git_ops.create_worktree(
-                            task_node.id,
-                            _slug,
+                        _wt_bundle = await _create_and_sync_worktree(
+                            git_ops,
+                            task_id=task_node.id,
+                            slug=_slug,
                             prefix=git_branch_prefix,
-                            base_branch=_default_branch,
+                            target=_default_branch,
                         )
-                        if _wt_result:
-                            _, _worktree_path = _wt_result
+                        if _wt_bundle:
+                            _worktree_path = Path(_wt_bundle["worktree_path"])
                             _active_worktrees[task_node.id] = _worktree_path
+                            _sync = _wt_bundle["sync"]
+                            if not _sync.get("synced"):
+                                # Pre-dispatch sync hit a conflict (or dirty
+                                # worktree).  The agent must NOT run on stale
+                                # state — surface the conflict as a task
+                                # failure with the file list, preserve the
+                                # worktree so the user can resolve manually,
+                                # release file claims, and skip agent
+                                # execution for this dispatch cycle.
+                                _conflict_files = _sync.get("conflicts", [])
+                                _dirty = _sync.get("dirty_worktree", False)
+                                if _dirty:
+                                    _msg = (
+                                        "resume_conflict: worktree has "
+                                        "uncommitted changes; resolve in "
+                                        f"{_worktree_path} (commit or "
+                                        "discard) before retrying."
+                                    )
+                                else:
+                                    _msg = (
+                                        "resume_conflict: catch-up merge of "
+                                        f"{_default_branch} into branch "
+                                        "failed on "
+                                        f"{len(_conflict_files)} file(s): "
+                                        f"{', '.join(_conflict_files)}. "
+                                        "Resolve manually in "
+                                        f"{_worktree_path} (run `git merge "
+                                        f"{_default_branch}`, fix conflicts, "
+                                        "commit) and requeue the task."
+                                    )
+                                await _patch_task(
+                                    http, task_node.id,
+                                    status="failed",
+                                    error_message=_msg,
+                                )
+                                _logging.getLogger(__name__).warning(
+                                    "Task %s: %s", task_node.id, _msg,
+                                )
+                                with suppress(Exception):
+                                    await http.delete(
+                                        f"{_state_base}/sessions/"
+                                        f"{session_id}/file-claims/"
+                                        f"{task_node.id}",
+                                        timeout=5,
+                                    )
+                                _active_worktrees.pop(task_node.id, None)
+                                _resume_conflict = True
                     except Exception as _git_wt_err:
                         _logging.getLogger(__name__).warning(
                             "Git worktree creation failed for task %s (continuing): %s",
                             task_node.id, _git_wt_err,
                         )
+
+                if _resume_conflict:
+                    return {"success": False, "output": "resume_conflict"}
 
                 # ── Periodic auto-checkpoint background task ──────────────
                 _checkpoint_task: asyncio.Task[None] | None = None

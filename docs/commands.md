@@ -481,6 +481,33 @@ Progress: 12/59 passing · 3 in-flight · $0.61 spent
 - Use `--yolo` only when you trust your spec is precise. Human-input gates exist for a reason.
 - Open `claw-forge ui` in a separate terminal while `run` is active to watch the Kanban board.
 
+#### Failure modes — `resume_conflict`
+
+When a previously-interrupted task is resumed, the dispatcher attempts a catch-up merge of the target branch into the feature branch *before* the agent runs (via `sync_worktree_with_target` in `claw_forge/git/merge.py`). This eliminates the prior failure pattern where the catch-up only happened at squash time, after the agent had already wasted a turn on stale state.
+
+If the catch-up hits real content conflicts — both `target_branch` and the resumed feature branch modified the same lines of the same file since they diverged — the task is marked `failed` immediately with an `error_message` of the form:
+
+```
+resume_conflict: catch-up merge of main into branch failed on N file(s):
+foo.py, bar.py. Resolve manually in <worktree-path> (run `git merge main`,
+fix conflicts, commit) and requeue the task.
+```
+
+The worktree is preserved on disk so you can resolve manually:
+
+```bash
+cd .claw-forge/worktrees/<slug>
+git merge <target>           # produces conflict markers
+# resolve in your editor
+git add -A && git commit --no-verify
+```
+
+Then requeue the task — Reset All on the Failed column in the Kanban UI, or `claw-forge fix`. The next dispatch syncs cleanly because the resolution commit is now on the feature branch.
+
+If the partial work is throwaway, use `claw-forge worktrees prune --discard` to drop the branch and worktree; the task's next retry will recreate them from current `target_branch`.
+
+A second `resume_conflict` shape — `dirty_worktree: True` — appears when the worktree has uncommitted edits left over from an interrupted run. The dispatcher refuses to merge over uncommitted state to avoid silently overwriting the user's edits; commit or discard them inside the worktree, then requeue.
+
 #### Related commands
 - **Before:** `claw-forge plan`, `claw-forge state`
 - **During:** `claw-forge status`, `claw-forge ui`, `claw-forge pause`
