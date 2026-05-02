@@ -14,7 +14,7 @@ from claw_forge.git.branching import (
     current_branch,
 )
 from claw_forge.git.commits import commit_checkpoint
-from claw_forge.git.merge import squash_merge
+from claw_forge.git.merge import squash_merge, sync_worktree_with_target
 
 
 @pytest.fixture()
@@ -421,3 +421,113 @@ class TestSquashMerge:
             "is unreachable. Recorded invocations:\n  "
             + "\n  ".join(f"{a} (cwd={c})" for (a, c) in invocations)
         )
+
+
+@pytest.fixture()
+def repo_with_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
+    """Build a repo with a feature branch in its own worktree.
+
+    Returns (project_dir, worktree_path, branch_name).
+    The branch is forked from main but does NOT yet have any unique commits.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=project, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"],
+        cwd=project, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "T"],
+        cwd=project, check=True, capture_output=True,
+    )
+    (project / "a.py").write_text("v0\n")
+    subprocess.run(
+        ["git", "add", "."],
+        cwd=project, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=project, check=True, capture_output=True,
+    )
+
+    wt = tmp_path / "worktrees" / "feat-x"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feat/x", str(wt)],
+        cwd=project, check=True, capture_output=True,
+    )
+    return project, wt, "feat/x"
+
+
+def _commit_in(repo: Path, name: str, content: str, msg: str) -> None:
+    (repo / name).write_text(content)
+    subprocess.run(
+        ["git", "add", name], cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", msg],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+
+class TestSyncWorktreeWithTarget:
+    def test_no_op_when_already_up_to_date(
+        self, repo_with_worktree: tuple[Path, Path, str],
+    ) -> None:
+        project, wt, _branch = repo_with_worktree
+        result = sync_worktree_with_target(project, wt, target="main")
+        assert result == {"synced": True, "no_op": True, "merged_count": 0}
+
+    def test_clean_merge_pulls_target_commits(
+        self, repo_with_worktree: tuple[Path, Path, str],
+    ) -> None:
+        project, wt, _branch = repo_with_worktree
+        # Branch edits a different file than main will edit.
+        _commit_in(wt, "branch_only.py", "x\n", "branch work")
+        # Main moves on a different file — no overlap.
+        _commit_in(project, "main_only.py", "y\n", "main work")
+        result = sync_worktree_with_target(project, wt, target="main")
+        assert result["synced"] is True
+        assert result.get("no_op") is not True
+        assert result["merged_count"] == 1
+        # Target's file should now exist in the worktree.
+        assert (wt / "main_only.py").exists()
+
+    def test_conflict_returns_files_and_aborts(
+        self, repo_with_worktree: tuple[Path, Path, str],
+    ) -> None:
+        project, wt, _branch = repo_with_worktree
+        # Both sides change a.py incompatibly.
+        _commit_in(wt, "a.py", "branch-version\n", "branch edits a")
+        _commit_in(project, "a.py", "main-version\n", "main edits a")
+        result = sync_worktree_with_target(project, wt, target="main")
+        assert result["synced"] is False
+        assert result["conflicts"] == ["a.py"]
+        # Worktree must be clean after abort — not in a half-merged state.
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=wt, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert status == ""
+        # And the branch tip should still be the agent's commit, not a half-merge.
+        head_subject = subprocess.run(
+            ["git", "log", "-1", "--pretty=%s"],
+            cwd=wt, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert head_subject == "branch edits a"
+
+    def test_refuses_when_worktree_has_uncommitted_changes(
+        self, repo_with_worktree: tuple[Path, Path, str],
+    ) -> None:
+        project, wt, _branch = repo_with_worktree
+        (wt / "uncommitted.py").write_text("dirty\n")
+        # Force a target commit so a real merge would otherwise be needed.
+        _commit_in(project, "main_only.py", "y\n", "main work")
+        result = sync_worktree_with_target(project, wt, target="main")
+        assert result["synced"] is False
+        assert result.get("dirty_worktree") is True
+        # The dirty file is preserved.
+        assert (wt / "uncommitted.py").read_text() == "dirty\n"

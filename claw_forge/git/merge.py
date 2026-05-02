@@ -84,6 +84,79 @@ def _sideline_orphans(project_dir: Path, files: list[str]) -> Path | None:
     return archive_dir if moved > 0 else None
 
 
+def sync_worktree_with_target(
+    project_dir: Path,
+    worktree_path: Path,
+    target: str = "main",
+) -> dict[str, Any]:
+    """Bring the branch checked out in *worktree_path* up to date with *target*.
+
+    Runs ``git merge --no-verify --no-edit <target>`` inside the worktree.
+    Three outcomes are possible:
+
+    - **No-op**: ``target`` is already an ancestor of the branch.  Return
+      ``{"synced": True, "no_op": True, "merged_count": 0}``.
+    - **Clean merge**: ``target`` had unseen commits and they merged
+      without conflict.  Return ``{"synced": True, "merged_count": N}``.
+    - **Conflict**: overlapping changes on one or more files.  The merge
+      is aborted (``git merge --abort``) so the worktree is left in the
+      same state it had before the call.  Return
+      ``{"synced": False, "conflicts": [...]}``.
+
+    A precondition: the worktree must have no uncommitted changes.  If
+    it does, return ``{"synced": False, "dirty_worktree": True}`` and do
+    nothing — merging on top of dirty state risks losing the user's edits.
+    Callers that want to dispatch an agent into this worktree should treat
+    that as a hard failure, same as a conflict.
+    """
+    # Refuse on dirty worktree — never overwrite uncommitted edits.
+    status = _run_git(
+        ["status", "--porcelain"], worktree_path,
+    ).stdout.strip()
+    if status:
+        return {"synced": False, "dirty_worktree": True}
+
+    # Count how many target commits are unseen by the branch.  If zero,
+    # the merge will be a no-op.
+    behind_count = 0
+    try:
+        behind_count = int(
+            _run_git(
+                ["rev-list", "--count", f"HEAD..{target}"], worktree_path,
+            ).stdout.strip()
+        )
+    except Exception:
+        # If we can't measure, fall through to attempting the merge anyway.
+        behind_count = 0
+
+    if behind_count == 0:
+        return {"synced": True, "no_op": True, "merged_count": 0}
+
+    try:
+        _run_git(
+            ["merge", "--no-verify", "--no-edit", target], worktree_path,
+        )
+        return {"synced": True, "merged_count": behind_count}
+    except subprocess.CalledProcessError:
+        # Conflict — collect the conflicted paths from the index, then abort.
+        conflicts: list[str] = []
+        try:
+            conflicts = sorted(
+                set(
+                    _run_git(
+                        ["diff", "--name-only", "--diff-filter=U"], worktree_path,
+                    ).stdout.splitlines()
+                )
+            )
+        except Exception:
+            conflicts = []
+        with suppress(Exception):
+            _run_git(["merge", "--abort"], worktree_path)
+        with suppress(Exception):
+            _run_git(["reset", "--hard", "HEAD"], worktree_path)
+        return {"synced": False, "conflicts": conflicts}
+
+
 def _build_merge_message(
     branch: str,
     *,
