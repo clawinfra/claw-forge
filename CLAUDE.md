@@ -36,6 +36,7 @@ claw-forge is a **multi-provider autonomous coding agent harness**. It reads an 
 CLI (Typer)  ──────────────────────────────────────────
   claw_forge/cli.py — 18+ commands (plan, run, add, fix, ui, status, export …)
   claw_forge/boundaries/cli.py — Typer subapp: boundaries audit | apply | status
+  claw_forge/git/cli.py — Typer subapp: worktrees list | prune (cleans up .claw-forge/worktrees/)
 
 State Service (FastAPI + SQLite via aiosqlite)  ────────
   claw_forge/state/service.py  — REST API + WebSocket /ws + SSE /events
@@ -188,6 +189,7 @@ Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees
 - **Pre-create guard** (`create_worktree()`): if the target path already exists, it is force-removed before creating the new worktree
 - **Failure preservation**: on task failure, the worktree is preserved if the branch has checkpoint commits so the retry can resume from partial work
 - **Orphan scan** (`scan_orphaned_branches()`): when `merge_strategy: manual`, lists orphaned branches with committed work and shows copy-pasteable git commands for manual resolution
+- **Manual cleanup** (`claw-forge worktrees [list|prune]`, `claw_forge/git/cli.py`): inspect or clean up residual worktrees outside the `claw-forge run` flow — useful for terminally-failed tasks (no further retry will land) and for completed tasks whose squash-merge itself failed, neither of which trigger the startup salvage path. `prune` salvage-merges then removes; `prune --discard` force-removes everything without salvage.
 
 ### Periodic Auto-Checkpoint (`cli.py` task_handler)
 

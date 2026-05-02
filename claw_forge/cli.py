@@ -31,8 +31,10 @@ console = Console()
 
 # Register subapps
 from claw_forge.boundaries.cli import boundaries_app  # noqa: E402
+from claw_forge.git.cli import worktrees_app  # noqa: E402
 
 app.add_typer(boundaries_app, name="boundaries")
+app.add_typer(worktrees_app, name="worktrees")
 
 # Maps plugin name → complexity tier for model-tier routing.
 _PLUGIN_COMPLEXITY: dict[str, str] = {

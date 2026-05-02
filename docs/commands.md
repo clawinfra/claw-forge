@@ -1462,6 +1462,96 @@ Reads `boundaries_report.md` and prints the hotspot list with paths, scores, and
 
 ---
 
+### `claw-forge worktrees`
+
+#### Purpose
+Inspect and clean up the per-task feature-branch worktrees claw-forge creates under
+`.claw-forge/worktrees/`. Worktrees from terminally-failed tasks (no further retry will
+land) and from completed tasks whose squash-merge itself failed are **not** auto-salvaged
+at startup — `claw-forge run`'s salvage hook only fires when a prior run was *interrupted*
+(`orphans_reset > 0`). This subcommand fills that gap so you can act on the residue
+without resorting to manual `git worktree remove` loops.
+
+#### Subcommands
+- **`list`** — show every worktree directory with branch + commit count
+- **`prune`** — squash-merge branches with commits to *target*, then remove the dirs
+- **`prune --discard`** — force-remove every directory + branch without salvage
+
+---
+
+#### `claw-forge worktrees list`
+
+##### Usage
+```bash
+# From the project directory
+claw-forge worktrees list
+
+# Different project / target / prefix
+claw-forge worktrees list --project /path/to/repo --target develop --prefix feature
+```
+
+##### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--project`, `-p` | path | CWD | Project root containing `.claw-forge/worktrees/` |
+| `--target` | str | auto-detected via `git symbolic-ref refs/remotes/origin/HEAD` | Branch to count commits ahead of |
+| `--prefix` | str | `feat` | Feature-branch prefix used by `create_worktree` |
+
+##### Output
+For each directory under `.claw-forge/worktrees/`:
+- Bold branch name + commit count when the branch has commits ahead of target
+- Up to 5 commit subjects (the rest summarised as `… N more`)
+- Dim `empty` row when the branch is missing or has no commits
+
+Trailing summary line: `<N> worktree(s) total — <K> salvageable, <N-K> empty.`
+
+---
+
+#### `claw-forge worktrees prune`
+
+##### Usage
+```bash
+# Salvage anything with commits, then drop empty dirs
+claw-forge worktrees prune
+
+# Force-remove everything; discard committed agent work
+claw-forge worktrees prune --discard
+
+# Custom project / target
+claw-forge worktrees prune --project /path/to/repo --target develop
+```
+
+##### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--project`, `-p` | path | CWD | Project root |
+| `--target` | str | auto-detected | Squash-merge target branch |
+| `--prefix` | str | `feat` | Feature-branch prefix |
+| `--discard` | flag | off | Skip salvage; force-remove every dir + branch |
+
+##### What it does internally
+
+**Default (no flag):**
+1. Call `merge_orphaned_worktrees(project, prefix=prefix, target=target)` — for each branch with commits ahead of target, run the same `squash_merge` flow `claw-forge run` uses (auto-rebase on conflict, no-op detection on empty squash, orphan-untracked-file sidelining).
+2. Call `prune_worktrees(project)` — `git worktree remove --force` every remaining directory and run `git worktree prune` to clean git's bookkeeping.
+
+**`--discard`:**
+1. For each directory: `git worktree remove --force <dir>` → `shutil.rmtree` fallback if needed → `git branch -D feat/<slug>`.
+2. `git worktree prune` to clean residual entries in `.git/worktrees/`.
+
+##### When to use
+- After upgrading past a merge-handler bug that left tasks stuck in `failed` with committed work on `feat/...` branches.
+- Before re-running a session you don't intend to resume — strips stale worktrees so the next dispatch starts from a clean state.
+- For triage when `claw-forge status` shows many `failed` tasks and you want to inspect (or drop) the work the agents had committed.
+
+##### Safety notes
+- Default mode (no `--discard`) is non-destructive of *work*: if a branch has commits, they land on `target` before the directory is removed. The branches themselves disappear only after a successful salvage merge; merge-failed branches are preserved for manual resolution.
+- `--discard` deletes *both* the worktree and the branch. Committed work on a discarded branch is gone unless you've already merged or backed it up. Use this only when you're sure the agent's output is throwaway.
+
+---
+
 ## Claude Slash Commands
 
 These commands live in `.claude/commands/` and are used **inside Claude Code** (the editor),
