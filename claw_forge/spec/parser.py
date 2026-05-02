@@ -32,7 +32,6 @@ def _derive_touches_files(
     Returns an empty list rather than ``None`` so dispatcher code can do
     ``if feat.touches_files:`` without a ``None`` guard.
     """
-    explicit = (explicit or "").strip()
     if explicit:
         parts = [p.strip() for p in explicit.split(",")]
         return [p for p in parts if p]
@@ -255,7 +254,7 @@ class ProjectSpec:
                     )
                     plugin_attr = feat_el.get("plugin", "").strip()
                     feat_plugin: str | None = plugin_attr if plugin_attr else None
-                    explicit_touches = feat_el.get("touches_files", "")
+                    explicit_touches = feat_el.get("touches_files", "").strip()
                     feat_touches = _derive_touches_files(
                         explicit_touches, feat_shape, feat_plugin,
                     )
