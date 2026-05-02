@@ -38,10 +38,10 @@ worktrees_app = typer.Typer(
 console = Console()
 
 
-def _resolve_project_and_target(project: Path, target: str | None) -> tuple[Path, str]:
-    project = project.resolve()
-    target_branch: str = target if target else detect_default_branch(project)
-    return project, target_branch
+def _resolve_project_and_target(project: str, target: str | None) -> tuple[Path, str]:
+    project_path = Path(project).resolve()
+    target_branch: str = target if target else detect_default_branch(project_path)
+    return project_path, target_branch
 
 
 def _list_all_worktree_dirs(
@@ -86,9 +86,7 @@ def _list_all_worktree_dirs(
 
 @worktrees_app.command("list")
 def list_cmd(
-    project: Path = typer.Option(
-        Path("."), "--project", "-p", help="Project root directory.",
-    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project root directory."),
     target: str = typer.Option(
         "", "--target", help="Target branch (default: auto-detect).",
     ),
@@ -136,9 +134,7 @@ def list_cmd(
 
 @worktrees_app.command("prune")
 def prune_cmd(
-    project: Path = typer.Option(
-        Path("."), "--project", "-p", help="Project root directory.",
-    ),
+    project: str = typer.Option(".", "--project", "-p", help="Project root directory."),
     target: str = typer.Option(
         "", "--target", help="Target branch (default: auto-detect).",
     ),
