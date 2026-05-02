@@ -359,3 +359,65 @@ class TestSquashMerge:
             "Recovery path tried to `git checkout` a worktree-held branch "
             f"from project_dir — error: {err!r}"
         )
+
+    def test_squash_merge_invokes_catchup_rebase_on_conflict(
+        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression for the exception-handler ordering bug: when
+        ``git merge --squash`` raises ``CalledProcessError``, the catch-up
+        rebase (``b0d0908`` + ``75baa2a``) MUST be attempted inside the
+        worktree.  The orphan-sideline fix (``84d6b72``) used a sibling
+        ``except subprocess.CalledProcessError`` clause, and because that's a
+        subclass of ``Exception``, the first-match-wins rule made the
+        catch-up clause unreachable for any non-orphan failure — so every
+        post-merge-divergence squash returned a phantom 'Merge failed'
+        instead of recovering.
+
+        This test patches ``_run_git`` to record every git invocation, then
+        triggers a real conflict.  The recovery sequence — ``reset --hard
+        HEAD`` in project_dir, ``merge --no-verify --no-edit <target>``
+        inside the worktree, and a retry ``merge --squash`` — must all show
+        up.  An assertion on the orphan path alone (or on the absence of a
+        bogus ``checkout``) would let the regression slip through again.
+        """
+        from claw_forge.git import merge as merge_module
+
+        branch, wt_path = create_worktree(git_repo, "t-cu", "catchup")
+        (wt_path / "README.md").write_text("# from feature branch\n")
+        commit_checkpoint(
+            wt_path, message="readme on feature",
+            task_id="t-cu", plugin="coding", phase="coding", session_id="s1",
+        )
+        (git_repo / "README.md").write_text("# from main\n")
+        subprocess.run(
+            ["git", "add", "."], cwd=git_repo, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "main change"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+
+        invocations: list[tuple[tuple[str, ...], Path]] = []
+        real_run_git = merge_module._run_git
+
+        def tracking_run_git(args: list[str], cwd: Path):  # type: ignore[no-untyped-def]
+            invocations.append((tuple(args), cwd))
+            return real_run_git(args, cwd)
+
+        monkeypatch.setattr(merge_module, "_run_git", tracking_run_git)
+
+        squash_merge(git_repo, branch, worktree_path=wt_path)
+
+        catchup_in_worktree = [
+            (args, cwd) for (args, cwd) in invocations
+            if cwd == wt_path
+            and args[:1] == ("merge",)
+            and "--no-edit" in args
+            and "--squash" not in args
+        ]
+        assert catchup_in_worktree, (
+            "catch-up rebase (`git merge --no-verify --no-edit <target>` "
+            "inside the worktree) was never invoked — the catch-up handler "
+            "is unreachable. Recorded invocations:\n  "
+            + "\n  ".join(f"{a} (cwd={c})" for (a, c) in invocations)
+        )

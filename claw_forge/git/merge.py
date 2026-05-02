@@ -142,51 +142,52 @@ def squash_merge(
         try:
             _run_git(["merge", "--squash", branch], project_dir)
         except subprocess.CalledProcessError as exc:
-            # Specific case: untracked debris in project_dir's working tree
-            # (left over from earlier failed runs) collides with files the
-            # squash would create.  Git aborts before staging anything; the
-            # existing catch-up-merge recovery doesn't help (the issue is
-            # debris in *target*, not branch divergence).  Sideline the
-            # offending files and retry the squash directly.
+            # Two recovery paths share this handler.  They must be a single
+            # ``except`` (not two siblings): ``CalledProcessError`` is a
+            # subclass of ``Exception`` so two clauses would never fall
+            # through — the first match wins and a ``raise`` from inside it
+            # skips the second handler entirely.
             stderr = exc.stderr or ""
+            recovered = False
+
+            # 1. Orphan-debris case: project_dir's working tree contains
+            # untracked files at paths the squash would overwrite.  Sideline
+            # them and retry the squash directly.  On success, recovery is
+            # done; on failure, fall through to the catch-up rebase.
             if _ORPHAN_OVERWRITE_MARKER in stderr:
                 orphan_files = _extract_orphan_files(stderr)
                 _sideline_orphans(project_dir, orphan_files)
-                _run_git(["merge", "--squash", branch], project_dir)
-            else:
-                raise
-        except Exception:
-            # Squash merge failed — likely conflicts because other branches
-            # merged to target since this branch was created.  Reset, catch
-            # the feature branch up to target, then retry.
-            #
-            # The catch-up merge MUST run inside the worktree when one is
-            # passed: the feature branch is already checked out there, so
-            # ``git checkout <branch>`` from project_dir would fail with
-            # "fatal: '<branch>' is already used by worktree at ..." (exit
-            # 128).  Without a worktree (e.g. legacy callers/tests), fall
-            # back to toggling HEAD in project_dir.
-            with suppress(Exception):
-                _run_git(["reset", "--hard", "HEAD"], project_dir)
-            if worktree_path is not None:
                 try:
-                    _run_git(
-                        ["merge", "--no-verify", "--no-edit", target],
-                        worktree_path,
-                    )
-                except Exception:
-                    # Catch-up merge had a true conflict — clean the worktree
-                    # so a later retry doesn't inherit conflict markers.
-                    with suppress(Exception):
-                        _run_git(["merge", "--abort"], worktree_path)
-                    with suppress(Exception):
-                        _run_git(["reset", "--hard", "HEAD"], worktree_path)
-                    raise
-            else:
-                switch_branch(project_dir, branch)
-                _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
-                switch_branch(project_dir, target)
-            _run_git(["merge", "--squash", branch], project_dir)
+                    _run_git(["merge", "--squash", branch], project_dir)
+                    recovered = True
+                except subprocess.CalledProcessError:
+                    recovered = False
+
+            # 2. Catch-up rebase: squash failed because target moved since
+            # the feature branch was created.  Reset, merge target into the
+            # feature branch (inside the worktree — the branch is checked
+            # out there, so ``git checkout <branch>`` from project_dir would
+            # fail with "already used by worktree" exit 128), then retry.
+            if not recovered:
+                with suppress(Exception):
+                    _run_git(["reset", "--hard", "HEAD"], project_dir)
+                if worktree_path is not None:
+                    try:
+                        _run_git(
+                            ["merge", "--no-verify", "--no-edit", target],
+                            worktree_path,
+                        )
+                    except Exception:
+                        with suppress(Exception):
+                            _run_git(["merge", "--abort"], worktree_path)
+                        with suppress(Exception):
+                            _run_git(["reset", "--hard", "HEAD"], worktree_path)
+                        raise
+                else:
+                    switch_branch(project_dir, branch)
+                    _run_git(["merge", "--no-verify", "--no-edit", target], project_dir)
+                    switch_branch(project_dir, target)
+                _run_git(["merge", "--squash", branch], project_dir)
         # If the squash produced no staged changes, the branch's content is
         # already reachable from target (e.g. another concurrent task squashed
         # identical content first, or the agent's commits were no-ops).  The
