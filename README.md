@@ -639,6 +639,9 @@ claw-forge status → /pool-status → /check-code
 | Batch features | `--batch-size 3` |
 | Specific features | `--batch-features 1,2,3` |
 | Pool health | `claw-forge pool-status` |
+| Parallel-safe agents (file-claim locks) | `touches_files: [...]` on task creation payload |
+| Reset failed/blocked tasks in bulk | "Reset All" button on Failed / Blocked column headers (Kanban UI) |
+| Resume-conflict surfacing | automatic — failed task lists conflicting files; recover with `cd .claw-forge/worktrees/<slug>` + `git merge <target>` |
 
 ---
 

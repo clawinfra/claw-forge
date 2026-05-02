@@ -53,7 +53,7 @@
         "Lint passes (uv run ruff check claw_forge/ tests/) — unchanged"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Target file: README.md only. The table starts at line 628. Cross-reference: docs/commands.md should already have these features covered after US-001 and US-002."
     }
   ]

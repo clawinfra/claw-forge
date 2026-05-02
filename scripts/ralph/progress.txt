@@ -44,3 +44,17 @@ Started: Sat May  2 20:36:20 AEST 2026
     `prefer_resumable`/`resume_stale_threshold`, `llm_conflict_proposals`) now sit as `####`
     peers in adjacency. Discoverability win for users tuning resume behaviour holistically.
 ---
+
+## 2026-05-02 - US-003
+- Added 3 rows to README.md "Workflow Features" table covering recent v0.5.x capabilities.
+- Files changed: README.md (3 rows appended to existing table; no restructuring).
+- **Learnings:**
+  - PRD said "3 columns: Feature / Command / Flag" but the actual table is 2 columns
+    ("| Feature | Command / Flag |"). Matched the actual table format — one of the
+    acceptance criteria explicitly required preserving existing structure, which trumps
+    the PRD's possibly-stale description.
+  - New rows: Parallel-safe agents (touches_files), Reset failed/blocked in bulk
+    (Kanban UI button), Resume-conflict surfacing (auto-detected, recovery path documented).
+  - Cross-references all three to user-facing detail in docs/commands.md (added by US-001
+    and US-002, plus the existing resume_conflict failure-modes section).
+---
