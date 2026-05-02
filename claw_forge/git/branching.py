@@ -56,6 +56,42 @@ def branch_age_in_commits(
         return 0
 
 
+def branch_overlap_files(
+    project_dir: Path, branch: str, base: str = "main",
+) -> list[str]:
+    """Return files modified on both *branch* and *base* since their merge-base.
+
+    Used as a diagnostic signal for "this resume is going to conflict": if the
+    list is non-empty, ``git merge-base`` from inside *branch* is at risk of
+    failing on overlapping changes.  Pure read; nothing is mutated.
+
+    Returns ``[]`` when the branch does not exist, when there is no merge-base,
+    or when neither side has touched any common file.  Result is sorted.
+    """
+    try:
+        merge_base = _run_git(
+            ["merge-base", base, branch], project_dir,
+        ).stdout.strip()
+    except Exception:
+        return []
+    if not merge_base:
+        return []
+    try:
+        target_changed = set(
+            _run_git(
+                ["diff", "--name-only", merge_base, base], project_dir,
+            ).stdout.splitlines()
+        )
+        branch_changed = set(
+            _run_git(
+                ["diff", "--name-only", merge_base, branch], project_dir,
+            ).stdout.splitlines()
+        )
+    except Exception:
+        return []
+    return sorted(target_changed & branch_changed)
+
+
 def create_feature_branch(
     project_dir: Path,
     task_id: str,

@@ -571,6 +571,8 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge worktrees list` | Inspect feature-branch worktrees under `.claw-forge/worktrees/` (branches + commit counts) | `--project`, `--target`, `--prefix` |
 | `claw-forge worktrees prune` | Squash-merge worktree branches with commits to target then remove the dirs; `--discard` skips salvage and force-removes | `--project`, `--target`, `--prefix`, `--discard` |
 
+The same cleanup machinery can run automatically at `claw-forge run` startup via `git.cleanup_orphan_worktrees: smart` in `claw-forge.yaml` — task-state-aware preserve/salvage/remove decisions per-worktree. Optional LLM advisor (`git.llm_conflict_proposals: true`) drafts a `CONFLICT_PROPOSAL.md` when salvage hits a conflict the user must resolve. See `docs/commands.md` for the decision matrix.
+
 ### Slash Commands (Claude Code)
 
 | Command | When to use | What it produces |

@@ -37,6 +37,8 @@ CLI (Typer)  ──────────────────────�
   claw_forge/cli.py — 18+ commands (plan, run, add, fix, ui, status, export …)
   claw_forge/boundaries/cli.py — Typer subapp: boundaries audit | apply | status
   claw_forge/git/cli.py — Typer subapp: worktrees list | prune (cleans up .claw-forge/worktrees/)
+  claw_forge/git/cleanup.py — smart-mode startup cleanup (preserve/salvage/remove per task state)
+  claw_forge/git/conflict_advisor.py — opt-in LLM advisor that drafts CONFLICT_PROPOSAL.md on salvage conflict
 
 State Service (FastAPI + SQLite via aiosqlite)  ────────
   claw_forge/state/service.py  — REST API + WebSocket /ws + SSE /events
@@ -52,7 +54,7 @@ Git Workspace Tracking  ──────────────────�
   claw_forge/git/slug.py     — centralized slug generation (make_slug, make_branch_name)
   claw_forge/git/branching.py — feature branch create/switch/delete
   claw_forge/git/commits.py  — checkpoint commits with structured trailers
-  claw_forge/git/merge.py    — squash-merge feature branches to main
+  claw_forge/git/merge.py    — squash-merge feature branches to main; sync_worktree_with_target catches up resumed branches before dispatch
 
 Spec & Export  ──────────────────────────────────────────
   claw_forge/spec/parser.py  — XML/plain-text spec → ProjectSpec; honours <feature index, depends_on>
@@ -190,6 +192,22 @@ Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees
 - **Failure preservation**: on task failure, the worktree is preserved if the branch has checkpoint commits so the retry can resume from partial work
 - **Orphan scan** (`scan_orphaned_branches()`): when `merge_strategy: manual`, lists orphaned branches with committed work and shows copy-pasteable git commands for manual resolution
 - **Manual cleanup** (`claw-forge worktrees [list|prune]`, `claw_forge/git/cli.py`): inspect or clean up residual worktrees outside the `claw-forge run` flow — useful for terminally-failed tasks (no further retry will land) and for completed tasks whose squash-merge itself failed, neither of which trigger the startup salvage path. `prune` salvage-merges then removes; `prune --discard` force-removes everything without salvage.
+- **Smart-mode startup cleanup** (`claw_forge/git/cleanup.py`, opt-in via `git.cleanup_orphan_worktrees: smart`): walks every worktree directory at `claw-forge run` startup and dispatches preserve / salvage / remove per-slug based on the corresponding task's status in the DB. Replaces both the legacy `orphans_reset > 0` gate AND the unconditional `prune_worktrees` sweep — smart mode owns the cleanup so the unconditional sweep would otherwise nuke the worktrees it deliberately preserved. Decision matrix: `pending` + has commits → preserve (resume substrate for `prefer_resumable`); `failed` or `completed` + has commits → salvage (terminal or v0.5.35 bug class); no matching task + has commits → salvage (orphan); empty → remove. Conflicts on salvage preserve the worktree and are reported to the user.
+- **LLM conflict advisor** (`claw_forge/git/conflict_advisor.py`, opt-in via `git.llm_conflict_proposals: true`): when smart-mode salvage hits a real merge conflict, drafts a `CONFLICT_PROPOSAL.md` inside the preserved worktree using `claude_agent_sdk`. Advisory only — never lands on `main`. The user reads, edits, and applies it manually. Off by default; the asymmetric cost of a wrong silent resolution outweighs the convenience.
+
+### Pre-Dispatch Worktree Sync (`cli.py` task_handler + `git/merge.py:sync_worktree_with_target`)
+
+When the dispatcher hands a task to an agent, the worktree is now **synchronised with `target_branch` before agent execution**, not after. The flow:
+
+1. `_create_and_sync_worktree()` (`cli.py`) calls `git_ops.create_worktree(...)` to create or resume the worktree, then immediately `git_ops.sync_worktree(...)` to run `git merge --no-verify --no-edit <target>` *inside* the worktree.
+2. Three outcomes possible:
+   - **No-op** (`{synced: True, no_op: True, merged_count: 0}`) — branch already at target HEAD; agent runs normally.
+   - **Clean merge** (`{synced: True, merged_count: N}`) — N target commits merged without conflict; agent runs on a synchronised worktree.
+   - **Conflict** (`{synced: False, conflicts: [...]}`) or dirty worktree (`{synced: False, dirty_worktree: True}`) — agent does NOT run. The task is PATCHed to `failed` with a structured `error_message` (`resume_conflict: ...` listing the offending files), file claims are released, and the worktree is preserved on disk so the operator can `cd` in, resolve manually, and requeue.
+
+This eliminates the failure mode where a resumed branch only sees `target`'s newer commits at squash-merge time — by then the agent has already wasted its turn on stale state. The catch-up rebase inside `squash_merge` stays as a second-line defence for multi-agent runs where `target` moves *during* execution.
+
+`branch_overlap_files()` (`branching.py`) is the read-only diagnostic counterpart — returns the files modified on both branch and target since their merge-base, used in error messages and tests.
 
 ### Periodic Auto-Checkpoint (`cli.py` task_handler)
 

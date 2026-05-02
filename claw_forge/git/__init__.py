@@ -18,6 +18,7 @@ from claw_forge.git.branching import (
     branch_age_in_commits,
     branch_exists,
     branch_has_commits_ahead,
+    branch_overlap_files,
     create_feature_branch,
     create_worktree,
     current_branch,
@@ -27,7 +28,7 @@ from claw_forge.git.branching import (
     switch_branch,
 )
 from claw_forge.git.commits import branch_commit_subjects, commit_checkpoint, task_history
-from claw_forge.git.merge import squash_merge
+from claw_forge.git.merge import squash_merge, sync_worktree_with_target
 from claw_forge.git.repo import detect_default_branch, ensure_gitignore, init_or_detect
 from claw_forge.git.slug import make_branch_name, make_slug
 
@@ -37,6 +38,7 @@ __all__ = [
     "branch_commit_subjects",
     "branch_exists",
     "branch_has_commits_ahead",
+    "branch_overlap_files",
     "commit_checkpoint",
     "create_feature_branch",
     "create_worktree",
@@ -51,6 +53,7 @@ __all__ = [
     "remove_worktree",
     "squash_merge",
     "switch_branch",
+    "sync_worktree_with_target",
     "task_history",
 ]
 
@@ -114,6 +117,25 @@ class GitOps:
         if not self.enabled:
             return
         await asyncio.to_thread(remove_worktree, self.project_dir, worktree_path)
+
+    async def sync_worktree(
+        self,
+        worktree_path: Path,
+        *,
+        target: str = "main",
+    ) -> dict[str, Any] | None:
+        """Bring the branch in *worktree_path* up to date with *target*.
+
+        Lock-free: the merge mutates only the worktree's own HEAD and index,
+        not project_dir's working tree.  Returns ``None`` when git is
+        disabled, otherwise the structured dict from
+        :func:`sync_worktree_with_target`.
+        """
+        if not self.enabled:
+            return None
+        return await asyncio.to_thread(
+            sync_worktree_with_target, worktree_path, target,
+        )
 
     async def checkpoint(
         self,

@@ -503,3 +503,139 @@ class TestGitOpsIntegration:
         # Verify semantic message content
         latest = history[0]
         assert latest["message"] == "Implement payment processing"
+
+
+# ── _create_and_sync_worktree integration tests ──────────────────────────
+
+
+@pytest.fixture()
+def conflicted_resume_repo(tmp_path: Path) -> tuple[Path, str]:
+    """Repo with feat/x carrying committed work that conflicts with main.
+
+    Returns (project_dir, slug).  The slug is what the dispatcher would
+    pass to create_worktree.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.email", "t@t.com"],
+        ["git", "config", "user.name", "T"],
+    ):
+        subprocess.run(cmd, cwd=project, check=True, capture_output=True)
+    (project / "shared.py").write_text("v0\n")
+    subprocess.run(["git", "add", "."], cwd=project, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=project, check=True, capture_output=True,
+    )
+
+    # Feature branch + worktree at seed commit; branch commits its
+    # conflicting version.
+    wt = project / ".claw-forge" / "worktrees" / "x"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feat/x", str(wt)],
+        cwd=project, check=True, capture_output=True,
+    )
+    (wt / "shared.py").write_text("branch-version\n")
+    subprocess.run(
+        ["git", "add", "shared.py"],
+        cwd=wt, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "branch edits shared"],
+        cwd=wt, check=True, capture_output=True,
+    )
+    # Main commits its incompatible version.
+    (project / "shared.py").write_text("main-version\n")
+    subprocess.run(
+        ["git", "add", "shared.py"],
+        cwd=project, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "main edits shared"],
+        cwd=project, check=True, capture_output=True,
+    )
+    return project, "x"
+
+
+@pytest.mark.asyncio
+async def test_create_and_sync_surfaces_resume_conflict(
+    conflicted_resume_repo: tuple[Path, str],
+) -> None:
+    """Resumed branch + main both touched the same file → sync surfaces
+    the conflict and reports the file list before the agent ever runs.
+    """
+    from claw_forge.cli import _create_and_sync_worktree
+
+    project, slug = conflicted_resume_repo
+    ops = GitOps(project_dir=project, enabled=True)
+    result = await _create_and_sync_worktree(
+        ops, task_id="t1", slug=slug, prefix="feat", target="main",
+    )
+    assert result is not None
+    assert result["worktree_path"] == project / ".claw-forge" / "worktrees" / "x"
+    assert result["sync"]["synced"] is False
+    assert result["sync"]["conflicts"] == ["shared.py"]
+
+
+@pytest.mark.asyncio
+async def test_create_and_sync_clean_resume(tmp_path: Path) -> None:
+    """Resume with disjoint changes: sync is a clean merge."""
+    from claw_forge.cli import _create_and_sync_worktree
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.email", "t@t.com"],
+        ["git", "config", "user.name", "T"],
+    ):
+        subprocess.run(cmd, cwd=project, check=True, capture_output=True)
+    (project / "a.py").write_text("v0\n")
+    subprocess.run(["git", "add", "."], cwd=project, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=project, check=True, capture_output=True,
+    )
+
+    wt = project / ".claw-forge" / "worktrees" / "y"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feat/y", str(wt)],
+        cwd=project, check=True, capture_output=True,
+    )
+    (wt / "branch_only.py").write_text("b\n")
+    subprocess.run(["git", "add", "."], cwd=wt, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "branch work"],
+        cwd=wt, check=True, capture_output=True,
+    )
+    (project / "main_only.py").write_text("m\n")
+    subprocess.run(["git", "add", "."], cwd=project, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "main work"],
+        cwd=project, check=True, capture_output=True,
+    )
+
+    ops = GitOps(project_dir=project, enabled=True)
+    result = await _create_and_sync_worktree(
+        ops, task_id="t1", slug="y", prefix="feat", target="main",
+    )
+    assert result is not None
+    assert result["sync"]["synced"] is True
+    assert result["sync"].get("merged_count", 0) >= 1
+    assert (wt / "main_only.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_create_and_sync_disabled_returns_none(tmp_path: Path) -> None:
+    """When git is disabled, the helper returns None rather than fabricating
+    a worktree path the dispatcher can't use.
+    """
+    from claw_forge.cli import _create_and_sync_worktree
+
+    ops = GitOps(project_dir=tmp_path, enabled=False)
+    result = await _create_and_sync_worktree(
+        ops, task_id="t1", slug="x", prefix="feat", target="main",
+    )
+    assert result is None
