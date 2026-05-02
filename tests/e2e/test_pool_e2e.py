@@ -1,16 +1,20 @@
 """End-to-end tests for the ProviderPoolManager.
 
-When PROXY_1_* env vars are set, tests hit the real proxy endpoint.
-Otherwise, tests use a mock provider so they never skip.
+Real-API tests target a local Ollama instance (``OLLAMA_BASE_URL`` /
+``OLLAMA_MODEL`` in ``.env``).  When Ollama is unreachable — typical on CI,
+where ``.env`` isn't checked out and no Ollama daemon is running — tests
+fall back to a mocked provider so they never skip.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import socket
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -23,12 +27,14 @@ from claw_forge.pool.providers.base import (
 )
 
 # ---------------------------------------------------------------------------
-# Load .env from project root (proxy-6 credentials)
+# Load .env from project root (Ollama backend)
 # ---------------------------------------------------------------------------
+
+_REAL_ENV_KEYS = ("OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_API_KEY")
 
 
 def _load_env() -> dict[str, str]:
-    """Read .env file and return PROXY_1_* vars without polluting os.environ."""
+    """Read .env and return Ollama vars without polluting os.environ."""
     result: dict[str, str] = {}
     env_file = Path(__file__).parent.parent.parent / ".env"
     if env_file.exists():
@@ -37,33 +43,61 @@ def _load_env() -> dict[str, str]:
             if line and not line.startswith("#") and "=" in line:
                 key, _, val = line.partition("=")
                 key = key.strip()
-                if key.startswith("PROXY_1_"):
+                if key in _REAL_ENV_KEYS:
                     result[key] = val.strip()
     return result
 
 
 _env_vars = _load_env()
 
-PROXY_API_KEY = _env_vars.get("PROXY_1_API_KEY", "") or os.environ.get("PROXY_1_API_KEY", "")
-_raw_base = _env_vars.get("PROXY_1_BASE_URL", "") or os.environ.get("PROXY_1_BASE_URL", "")
-# The AnthropicCompatProvider posts to /v1/messages, so strip trailing /v1
-# to avoid double-pathing (e.g. .../v1/v1/messages).
-PROXY_BASE_URL = _raw_base.rstrip("/").removesuffix("/v1") if _raw_base else ""
-PROXY_MODEL = _env_vars.get("PROXY_1_MODEL", "") or os.environ.get("PROXY_1_MODEL", "glm-4.5-air")
 
-HAS_PROXY = bool(PROXY_API_KEY and PROXY_BASE_URL)
+def _env(name: str, default: str = "") -> str:
+    return _env_vars.get(name, "") or os.environ.get(name, default)
+
+
+def _ollama_reachable(base_url: str, timeout: float = 0.5) -> bool:
+    """Quick TCP probe of the Ollama host:port to gate the real-API path.
+
+    Module-level reachability check is brief on purpose: we'd rather mock and
+    move on than block test collection on a hung connection.  Connection
+    refused / timeout / DNS failure all return False.
+    """
+    if not base_url:
+        return False
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+# Ollama (local OpenAI-compat endpoint).  Default port 11434; .env supplies
+# OLLAMA_BASE_URL and OLLAMA_MODEL.
+OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = _env("OLLAMA_MODEL", "llama3.2")
+OLLAMA_API_KEY = _env("OLLAMA_API_KEY")  # usually empty for local setups
+
+HAS_PROXY = _ollama_reachable(OLLAMA_BASE_URL)
+PROXY_MODEL = OLLAMA_MODEL
 
 
 def _proxy6_config(name: str = "proxy6", priority: int = 1) -> ProviderConfig:
-    """Build ProviderConfig for the z.ai proxy-6 endpoint."""
+    """Build the real-provider ProviderConfig pointing at local Ollama.
+
+    The config name stays ``"proxy6"`` for assertion-compatibility with the
+    rest of this file; only the underlying provider type and base URL change.
+    """
     return ProviderConfig(
         name=name,
-        provider_type=ProviderType.ANTHROPIC_COMPAT,
-        api_key=PROXY_API_KEY or "fake-key-for-construction",
-        base_url=PROXY_BASE_URL or "http://localhost:19998",
+        provider_type=ProviderType.OLLAMA,
+        api_key=OLLAMA_API_KEY or "ollama",  # Ollama ignores the key locally
+        base_url=OLLAMA_BASE_URL,
         priority=priority,
-        cost_per_mtok_input=0.5,
-        cost_per_mtok_output=1.5,
+        cost_per_mtok_input=0.0,
+        cost_per_mtok_output=0.0,
     )
 
 
