@@ -172,16 +172,37 @@ def _build_prompt(
 
 
 async def _run_advisor_agent(prompt: str, *, model: str | None = None) -> str:
-    """Wrapper around ``collect_result`` so the advisor doesn't share the
-    full feature-task tooling stack — no MCP servers, no security hooks,
-    just a plain text completion.
-    """
-    from claw_forge.agent.runner import collect_result
+    """Call ``claude_agent_sdk.query()`` directly with bare-minimum options.
 
-    kwargs: dict[str, Any] = {"max_turns": 10}
+    Deliberately bypasses ``claw_forge.agent.runner.run_agent`` because that
+    wrapper auto-attaches a ``can_use_tool`` callback (security hook for
+    bash commands), MCP servers, and CLAUDE.md/skill resolution.  Two
+    problems for the advisor:
+
+    1. ``can_use_tool`` flips the SDK into streaming mode, which requires
+       an ``AsyncIterable`` prompt rather than a string.  Passing a string
+       (which is all the advisor needs) raises ``ValueError: can_use_tool
+       callback requires streaming mode``.
+    2. The advisor doesn't *want* the agent to use any tools — the output
+       is a markdown proposal text, not a code-edit operation.  Wiring up
+       tools, MCP, skills, etc. is wasted setup and adds attack surface
+       to a feature that doesn't need it.
+
+    Minimal options + plain string prompt → SDK stays in non-streaming
+    mode and returns ``ResultMessage`` containing the agent's text.
+    """
+    import claude_agent_sdk
+
+    options_kwargs: dict[str, Any] = {"max_turns": 10}
     if model:
-        kwargs["model"] = model
-    return await collect_result(prompt, **kwargs)
+        options_kwargs["model"] = model
+    options = claude_agent_sdk.ClaudeAgentOptions(**options_kwargs)
+
+    result_text = ""
+    async for message in claude_agent_sdk.query(prompt=prompt, options=options):
+        if message.__class__.__name__ == "ResultMessage":
+            result_text = getattr(message, "result", "") or ""
+    return result_text
 
 
 def _run_advisor_agent_blocking(
