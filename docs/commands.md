@@ -1552,6 +1552,58 @@ claw-forge worktrees prune --project /path/to/repo --target develop
 
 ---
 
+#### Smart-mode startup cleanup (`git.cleanup_orphan_worktrees: smart`)
+
+The CLI command above is the *manual* cleanup surface. The same machinery is available as an *automatic* startup hook, opt-in via `claw-forge.yaml`:
+
+```yaml
+git:
+  merge_strategy: auto                   # required for smart cleanup to act
+  cleanup_orphan_worktrees: smart        # default: manual
+  llm_conflict_proposals: false          # opt-in advisor (see below)
+  llm_conflict_advisor_model: ""         # optional model override; blank = SDK default
+```
+
+In `manual` (default), `claw-forge run` startup only fires the salvage path when `orphans_reset > 0` — i.e. when the previous run was *interrupted* and tasks got reset. Worktrees from terminally-failed tasks and from `completed` tasks whose squash-merge itself failed accumulate forever.
+
+In `smart`, startup walks every directory under `.claw-forge/worktrees/`, looks the corresponding task up by slug in the DB, and dispatches per the table:
+
+| `task.status` | branch has commits | action | rationale |
+|---|---|---|---|
+| `pending` | yes | **preserve** | resume substrate for `git.prefer_resumable` |
+| `pending` | no | **remove** | empty branch, nothing to keep |
+| `running` | any | **preserve** | the legacy `orphans_reset` path will reset & own this |
+| `failed` | yes | **salvage** | terminal — no auto-retry across runs in claw-forge |
+| `failed` | no | **remove** | empty branch |
+| `completed` | yes | **salvage** | the v0.5.35 bug class: squash failed previously |
+| `completed` | no | **remove** | bookkeeping cleanup |
+| no matching task | yes | **salvage** | orphan from prior session |
+| no matching task | no | **remove** | no value, no owner |
+
+Salvage uses the same `squash_merge` plumbing as a normal task completion (catch-up rebase on stale-target divergence, no-op detection, orphan-untracked-file sidelining). On real content conflict, the worktree + branch are preserved and reported to the user — smart mode never silently writes a half-resolved merge.
+
+When `git.llm_conflict_proposals: true`, the advisor (see below) drafts a `CONFLICT_PROPOSAL.md` inside the preserved worktree on conflict.
+
+##### When NOT to use `smart`
+
+- You rely on per-branch state for retry-resume beyond what survives a squash-merge to `main` (custom checkpoint files outside the worktree, agent state caches, etc.). Salvage moves the work to `main` and removes the branch; the next attempt creates a fresh worktree from `main`.
+- Your `merge_strategy` is `manual`. Smart mode is a no-op in that case (it never auto-merges) — set `cleanup_orphan_worktrees: manual` to keep the existing scan-and-report behaviour.
+
+#### LLM conflict advisor (`git.llm_conflict_proposals: true`)
+
+When smart-mode salvage hits a content conflict, the advisor:
+
+1. Finds the files modified on both sides since the merge-base.
+2. Reads the ancestor, target, and branch versions of each.
+3. Sends them to `claude_agent_sdk` (one short conversation, no tools, no MCP) with the task description and a structured-output prompt.
+4. Writes the agent's draft to `<worktree>/CONFLICT_PROPOSAL.md`.
+
+The proposal contains a per-file resolution + reasoning + a `bash` block the user can adapt to apply it. Nothing the advisor produces lands on `main` automatically — the user reviews, edits, and applies. The asymmetric cost of a silently-wrong auto-merge (regression on `main` you find out about hours later) is why this is advisory rather than authoritative.
+
+Off by default. Costs one agent call per conflicted worktree; budget accordingly on large multi-feature sessions.
+
+---
+
 ## Claude Slash Commands
 
 These commands live in `.claude/commands/` and are used **inside Claude Code** (the editor),

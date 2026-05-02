@@ -155,6 +155,15 @@ git:
   branch_prefix: feat
   target_branch: main
   commit_on_plugin_boundary: true
+  # Smart-mode startup cleanup: walk .claw-forge/worktrees/ at startup and
+  # preserve/salvage/remove per task state in the DB.  See docs/commands.md
+  # for the full decision matrix.  ``manual`` (default) keeps the legacy
+  # ``orphans_reset > 0`` gate — only fires after an interrupted run.
+  cleanup_orphan_worktrees: manual    # manual | smart
+  # Opt-in LLM advisor: drafts CONFLICT_PROPOSAL.md inside a preserved
+  # worktree when smart-mode salvage hits a real merge conflict.  Advisory
+  # only — never lands on main.  Off by default.
+  llm_conflict_proposals: false
 """
 
 _DEFAULT_ENV_EXAMPLE = """\
@@ -773,6 +782,15 @@ def run(
     git_resume_stale_threshold: int = int(
         git_cfg.get("resume_stale_threshold", 50)
     )
+    # Smart-mode worktree cleanup: see docs/commands.md → ``claw-forge worktrees``.
+    # ``manual`` (default) preserves the legacy ``orphans_reset > 0`` gate;
+    # ``smart`` walks every worktree dir at startup and decides preserve /
+    # salvage / remove per-task using the DB state.  ``llm_conflict_proposals``
+    # turns on the advisor that drafts ``CONFLICT_PROPOSAL.md`` when a
+    # smart-mode salvage hits an unresolvable conflict.
+    git_cleanup_mode: str = git_cfg.get("cleanup_orphan_worktrees", "manual")
+    git_llm_proposals: bool = bool(git_cfg.get("llm_conflict_proposals", False))
+    git_advisor_model: str | None = git_cfg.get("llm_conflict_advisor_model")
     git_ops = GitOps(project_dir=project_path, enabled=git_enabled)
 
     agent_cfg = cfg.get("agent", {})
@@ -820,11 +838,86 @@ def run(
                 "from previous interrupted run[/yellow]"
             )
 
-        # Salvage any commits left on orphaned worktree branches from a
-        # killed/timed-out run.  Auto mode merges them; manual mode reports
-        # them so the user knows they exist and can act on them.
-        if git_enabled and init_data.get("orphans_reset", 0):
-            _target_branch = _default_branch
+        # Salvage / cleanup orphan worktrees.  Three exclusive paths:
+        #
+        # 1. ``smart`` mode + ``merge_strategy: auto``: walk every worktree
+        #    dir, look the corresponding task up by slug, and per-row
+        #    preserve / salvage / remove based on task status.  Replaces
+        #    both the orphans_reset gate AND the legacy prune_worktrees
+        #    sweep — smart mode owns its own cleanup so we skip the
+        #    unconditional sweep below.
+        # 2. ``manual`` mode (default) + ``merge_strategy: auto``: legacy
+        #    behaviour, only fires when orphans_reset > 0 (interrupted-run
+        #    recovery).  Followed by the prune_worktrees sweep.
+        # 3. ``merge_strategy: manual``: scan + report only, never auto-merge.
+        _target_branch = _default_branch
+        if (
+            git_enabled
+            and git_cleanup_mode == "smart"
+            and git_merge_strategy == "auto"
+        ):
+            from claw_forge.git.cleanup import (
+                ConflictAdvisor,
+                smart_cleanup_worktrees,
+            )
+
+            advisor: ConflictAdvisor | None = None
+            if git_llm_proposals:
+                from claw_forge.git.conflict_advisor import (
+                    draft_conflict_proposal,
+                )
+
+                _model = git_advisor_model
+
+                def _advisor_impl(
+                    project_dir: Path,
+                    worktree_path: Path,
+                    branch: str,
+                    target: str,
+                    task: dict[str, Any] | None,
+                ) -> Path | None:
+                    return draft_conflict_proposal(
+                        project_dir, worktree_path, branch, target, task,
+                        model=_model,
+                    )
+
+                advisor = _advisor_impl
+
+            _outcomes = smart_cleanup_worktrees(
+                project_path,
+                init_data.get("tasks", []),
+                prefix=git_branch_prefix,
+                target=_target_branch,
+                advisor=advisor,
+            )
+            _salvaged = [o for o in _outcomes if o.action == "salvage" and o.success]
+            _removed = [o for o in _outcomes if o.action == "remove" and o.success]
+            _conflicts = [o for o in _outcomes if o.action == "salvage" and not o.success]
+            if _salvaged:
+                console.print(
+                    f"[green]Salvage-merged {len(_salvaged)} worktree branch(es) "
+                    f"→ {_target_branch}:[/green]"
+                )
+                for o in _salvaged:
+                    console.print(f"  • {o.branch} → {o.commit_hash or 'merged'}")
+            if _removed:
+                console.print(
+                    f"[dim]Removed {len(_removed)} empty worktree dir(s).[/dim]"
+                )
+            if _conflicts:
+                console.print(
+                    f"\n[yellow]Preserved {len(_conflicts)} worktree(s) "
+                    f"with merge conflicts (manual resolution required):[/yellow]"
+                )
+                for o in _conflicts:
+                    console.print(f"  [bold]{o.branch}[/bold]")
+                    if o.proposal_path:
+                        console.print(
+                            f"    [cyan]Proposed resolution:[/cyan] {o.proposal_path}"
+                        )
+                console.print()
+        elif git_enabled and init_data.get("orphans_reset", 0):
+            # Legacy paths (manual cleanup_mode or merge_strategy=manual).
             if git_merge_strategy == "auto":
                 from claw_forge.git.branching import merge_orphaned_worktrees
 
@@ -873,7 +966,10 @@ def run(
         # either pre-existing crash debris or failed-salvage residue and is
         # safe to drop (the underlying feature branches survive in git
         # refs and will be re-linked on demand by ``create_worktree``).
-        if git_enabled:
+        # Skipped in smart mode: ``smart_cleanup_worktrees`` already owns
+        # the cleanup decision per slug, and an unconditional sweep here
+        # would nuke the worktrees smart mode deliberately preserved.
+        if git_enabled and git_cleanup_mode != "smart":
             from claw_forge.git.branching import (
                 prune_worktrees as _prune_worktrees,
             )

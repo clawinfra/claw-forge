@@ -37,6 +37,8 @@ CLI (Typer)  ──────────────────────�
   claw_forge/cli.py — 18+ commands (plan, run, add, fix, ui, status, export …)
   claw_forge/boundaries/cli.py — Typer subapp: boundaries audit | apply | status
   claw_forge/git/cli.py — Typer subapp: worktrees list | prune (cleans up .claw-forge/worktrees/)
+  claw_forge/git/cleanup.py — smart-mode startup cleanup (preserve/salvage/remove per task state)
+  claw_forge/git/conflict_advisor.py — opt-in LLM advisor that drafts CONFLICT_PROPOSAL.md on salvage conflict
 
 State Service (FastAPI + SQLite via aiosqlite)  ────────
   claw_forge/state/service.py  — REST API + WebSocket /ws + SSE /events
@@ -190,6 +192,8 @@ Each concurrent agent gets an isolated git worktree under `.claw-forge/worktrees
 - **Failure preservation**: on task failure, the worktree is preserved if the branch has checkpoint commits so the retry can resume from partial work
 - **Orphan scan** (`scan_orphaned_branches()`): when `merge_strategy: manual`, lists orphaned branches with committed work and shows copy-pasteable git commands for manual resolution
 - **Manual cleanup** (`claw-forge worktrees [list|prune]`, `claw_forge/git/cli.py`): inspect or clean up residual worktrees outside the `claw-forge run` flow — useful for terminally-failed tasks (no further retry will land) and for completed tasks whose squash-merge itself failed, neither of which trigger the startup salvage path. `prune` salvage-merges then removes; `prune --discard` force-removes everything without salvage.
+- **Smart-mode startup cleanup** (`claw_forge/git/cleanup.py`, opt-in via `git.cleanup_orphan_worktrees: smart`): walks every worktree directory at `claw-forge run` startup and dispatches preserve / salvage / remove per-slug based on the corresponding task's status in the DB. Replaces both the legacy `orphans_reset > 0` gate AND the unconditional `prune_worktrees` sweep — smart mode owns the cleanup so the unconditional sweep would otherwise nuke the worktrees it deliberately preserved. Decision matrix: `pending` + has commits → preserve (resume substrate for `prefer_resumable`); `failed` or `completed` + has commits → salvage (terminal or v0.5.35 bug class); no matching task + has commits → salvage (orphan); empty → remove. Conflicts on salvage preserve the worktree and are reported to the user.
+- **LLM conflict advisor** (`claw_forge/git/conflict_advisor.py`, opt-in via `git.llm_conflict_proposals: true`): when smart-mode salvage hits a real merge conflict, drafts a `CONFLICT_PROPOSAL.md` inside the preserved worktree using `claude_agent_sdk`. Advisory only — never lands on `main`. The user reads, edits, and applies it manually. Off by default; the asymmetric cost of a wrong silent resolution outweighs the convenience.
 
 ### Periodic Auto-Checkpoint (`cli.py` task_handler)
 
