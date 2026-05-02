@@ -194,3 +194,52 @@ class TestGitOpsWorktree:
         history = asyncio.run(ops.history(cwd=wt_path))
         assert len(history) >= 1
         assert any("history checkpoint" in c["message"] for c in history)
+
+
+class TestGitOpsSyncWorktree:
+    def test_disabled_returns_none(self, git_repo: Path) -> None:
+        ops = GitOps(project_dir=git_repo, enabled=False)
+        result = asyncio.run(ops.sync_worktree(git_repo, target="main"))
+        assert result is None
+
+    def test_enabled_no_op_when_branch_at_target(
+        self, git_repo: Path, tmp_path: Path,
+    ) -> None:
+        wt = tmp_path / "wt"
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "feat/x", str(wt)],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        ops = GitOps(project_dir=git_repo, enabled=True)
+        result = asyncio.run(ops.sync_worktree(wt, target="main"))
+        assert result == {"synced": True, "no_op": True, "merged_count": 0}
+
+    def test_enabled_clean_merge_pulls_target(
+        self, git_repo: Path, tmp_path: Path,
+    ) -> None:
+        wt = tmp_path / "wt"
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "feat/y", str(wt)],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        # Branch commit on a unique file.
+        (wt / "branch_only.py").write_text("b\n")
+        subprocess.run(["git", "add", "."], cwd=wt, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "branch work"],
+            cwd=wt, check=True, capture_output=True,
+        )
+        # Main moves on a different file.
+        (git_repo / "main_only.py").write_text("m\n")
+        subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main work"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+
+        ops = GitOps(project_dir=git_repo, enabled=True)
+        result = asyncio.run(ops.sync_worktree(wt, target="main"))
+        assert result is not None
+        assert result["synced"] is True
+        assert result["merged_count"] == 1
+        assert (wt / "main_only.py").exists()

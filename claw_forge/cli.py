@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from claw_forge.git import GitOps
     from claw_forge.state.scheduler import TaskNode
 
 import httpx
@@ -338,6 +339,40 @@ def _decorate_resumable(
         if branch_age_in_commits(project_dir, branch, target_branch) > stale_threshold:
             continue
         node.resumable = True
+
+
+async def _create_and_sync_worktree(
+    git_ops: GitOps,
+    *,
+    task_id: str,
+    slug: str,
+    prefix: str,
+    target: str,
+) -> dict[str, Any] | None:
+    """Create (or resume) a worktree, then synchronise its branch with *target*.
+
+    Returns ``None`` when git is disabled or worktree creation failed.
+    Otherwise returns ``{"branch": str, "worktree_path": Path, "sync": dict}``
+    where ``sync`` is the structured outcome from
+    :meth:`GitOps.sync_worktree` — callers MUST inspect ``sync["synced"]``
+    before dispatching an agent into the worktree.  When sync fails (real
+    conflict or dirty worktree), the caller should mark the task ``failed``
+    with the file list and skip the agent dispatch; the existing
+    failure-preservation rule keeps the worktree on disk so the operator
+    can resolve manually.
+    """
+    wt_result = await git_ops.create_worktree(
+        task_id, slug, prefix=prefix, base_branch=target,
+    )
+    if not wt_result:
+        return None
+    branch_name, worktree_path = wt_result
+    sync_result = await git_ops.sync_worktree(worktree_path, target=target)
+    return {
+        "branch": branch_name,
+        "worktree_path": worktree_path,
+        "sync": sync_result or {"synced": True, "no_op": True, "merged_count": 0},
+    }
 
 
 def _http_get(url: str) -> dict[str, Any] | list[Any]:
