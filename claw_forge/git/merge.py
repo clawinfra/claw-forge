@@ -85,7 +85,6 @@ def _sideline_orphans(project_dir: Path, files: list[str]) -> Path | None:
 
 
 def sync_worktree_with_target(
-    project_dir: Path,
     worktree_path: Path,
     target: str = "main",
 ) -> dict[str, Any]:

@@ -477,19 +477,19 @@ class TestSyncWorktreeWithTarget:
     def test_no_op_when_already_up_to_date(
         self, repo_with_worktree: tuple[Path, Path, str],
     ) -> None:
-        project, wt, _branch = repo_with_worktree
-        result = sync_worktree_with_target(project, wt, target="main")
+        _project, wt, _branch = repo_with_worktree
+        result = sync_worktree_with_target(wt, target="main")
         assert result == {"synced": True, "no_op": True, "merged_count": 0}
 
     def test_clean_merge_pulls_target_commits(
         self, repo_with_worktree: tuple[Path, Path, str],
     ) -> None:
-        project, wt, _branch = repo_with_worktree
+        _project, wt, _branch = repo_with_worktree
         # Branch edits a different file than main will edit.
         _commit_in(wt, "branch_only.py", "x\n", "branch work")
         # Main moves on a different file — no overlap.
-        _commit_in(project, "main_only.py", "y\n", "main work")
-        result = sync_worktree_with_target(project, wt, target="main")
+        _commit_in(_project, "main_only.py", "y\n", "main work")
+        result = sync_worktree_with_target(wt, target="main")
         assert result["synced"] is True
         assert result.get("no_op") is not True
         assert result["merged_count"] == 1
@@ -499,11 +499,11 @@ class TestSyncWorktreeWithTarget:
     def test_conflict_returns_files_and_aborts(
         self, repo_with_worktree: tuple[Path, Path, str],
     ) -> None:
-        project, wt, _branch = repo_with_worktree
+        _project, wt, _branch = repo_with_worktree
         # Both sides change a.py incompatibly.
         _commit_in(wt, "a.py", "branch-version\n", "branch edits a")
-        _commit_in(project, "a.py", "main-version\n", "main edits a")
-        result = sync_worktree_with_target(project, wt, target="main")
+        _commit_in(_project, "a.py", "main-version\n", "main edits a")
+        result = sync_worktree_with_target(wt, target="main")
         assert result["synced"] is False
         assert result["conflicts"] == ["a.py"]
         # Worktree must be clean after abort — not in a half-merged state.
@@ -522,11 +522,11 @@ class TestSyncWorktreeWithTarget:
     def test_refuses_when_worktree_has_uncommitted_changes(
         self, repo_with_worktree: tuple[Path, Path, str],
     ) -> None:
-        project, wt, _branch = repo_with_worktree
+        _project, wt, _branch = repo_with_worktree
         (wt / "uncommitted.py").write_text("dirty\n")
         # Force a target commit so a real merge would otherwise be needed.
-        _commit_in(project, "main_only.py", "y\n", "main work")
-        result = sync_worktree_with_target(project, wt, target="main")
+        _commit_in(_project, "main_only.py", "y\n", "main work")
+        result = sync_worktree_with_target(wt, target="main")
         assert result["synced"] is False
         assert result.get("dirty_worktree") is True
         # The dirty file is preserved.
