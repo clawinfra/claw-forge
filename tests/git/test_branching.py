@@ -9,6 +9,7 @@ import pytest
 
 from claw_forge.git.branching import (
     branch_exists,
+    branch_overlap_files,
     create_feature_branch,
     current_branch,
     delete_branch,
@@ -79,3 +80,55 @@ class TestDeleteBranch:
 
     def test_delete_nonexistent_is_noop(self, git_repo: Path) -> None:
         delete_branch(git_repo, "nonexistent")  # should not raise
+
+
+def _commit_file(repo: Path, name: str, content: str, msg: str) -> None:
+    (repo / name).write_text(content)
+    subprocess.run(["git", "add", name], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", msg],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+
+class TestBranchOverlapFiles:
+    def test_returns_empty_when_branch_at_target(self, git_repo: Path) -> None:
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/x"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        assert branch_overlap_files(git_repo, "feat/x", "main") == []
+
+    def test_returns_empty_when_no_file_overlap(self, git_repo: Path) -> None:
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/x"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        _commit_file(git_repo, "branch_only.txt", "branch", "branch change")
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        _commit_file(git_repo, "main_only.txt", "main", "main change")
+        assert branch_overlap_files(git_repo, "feat/x", "main") == []
+
+    def test_returns_overlapping_files_sorted(self, git_repo: Path) -> None:
+        _commit_file(git_repo, "a.py", "v0", "seed a")
+        _commit_file(git_repo, "b.py", "v0", "seed b")
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/x"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        _commit_file(git_repo, "b.py", "branch", "branch edits b")
+        _commit_file(git_repo, "a.py", "branch", "branch edits a")
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=git_repo, check=True, capture_output=True,
+        )
+        _commit_file(git_repo, "a.py", "main", "main edits a")
+        _commit_file(git_repo, "b.py", "main", "main edits b")
+        # Both sides touched a.py and b.py since the merge-base
+        assert branch_overlap_files(git_repo, "feat/x", "main") == ["a.py", "b.py"]
+
+    def test_returns_empty_for_unknown_branch(self, git_repo: Path) -> None:
+        assert branch_overlap_files(git_repo, "feat/missing", "main") == []
