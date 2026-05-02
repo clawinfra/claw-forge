@@ -155,6 +155,8 @@ class InitializerPlugin(BasePlugin):
                     "description": feat.description,
                     "steps": feat.steps,
                     "depends_on_indices": feat.depends_on_indices,
+                    "shape": feat.shape,
+                    "plugin": feat.plugin,
                 }
             )
 

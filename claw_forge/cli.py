@@ -2361,6 +2361,8 @@ async def _write_plan_to_db(
                 status="pending",
                 priority=feat.get("index", 0),
                 depends_on=cross_deps,
+                shape=feat.get("shape"),
+                plugin=feat.get("plugin"),
             ))
 
         await db.commit()
