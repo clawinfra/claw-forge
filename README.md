@@ -568,6 +568,8 @@ Agent lock file (`.claw-forge.lock`) prevents two agents running on the same pro
 | `claw-forge boundaries audit` | Read-only: score files on dispatch density, churn, and centrality → `boundaries_report.md` | `--project`, `--min-score`, `--out` |
 | `claw-forge boundaries apply` | Per-hotspot subagent refactor on a feature branch, gated by tests; squash-merges on green | `--project`, `--test-command`, `--hotspot`, `--auto` |
 | `claw-forge boundaries status` | Show the most recent audit's hotspot list | `--project` |
+| `claw-forge worktrees list` | Inspect feature-branch worktrees under `.claw-forge/worktrees/` (branches + commit counts) | `--project`, `--target`, `--prefix` |
+| `claw-forge worktrees prune` | Squash-merge worktree branches with commits to target then remove the dirs; `--discard` skips salvage and force-removes | `--project`, `--target`, `--prefix`, `--discard` |
 
 ### Slash Commands (Claude Code)
 
