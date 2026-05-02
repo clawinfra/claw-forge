@@ -1017,3 +1017,93 @@ class TestFeatureShapeAndPluginAttrs:
         for feat in spec.features:
             assert feat.shape is None
             assert feat.plugin is None
+
+    def test_plugin_shape_auto_derives_touches_files(self) -> None:
+        """``shape="plugin"`` + ``plugin="auth"`` auto-fills touches_files
+        with the canonical plugin directory glob.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="1" shape="plugin" plugin="auth">
+                <description>User can register</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        feat = spec.features[0]
+        assert feat.touches_files == ["src/plugins/auth/**"]
+
+    def test_core_shape_uses_explicit_touches_files(self) -> None:
+        """``shape="core"`` requires an explicit touches_files attribute —
+        cross-cutting features can't be auto-derived from a directory.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Middleware">
+              <feature index="1" shape="core"
+                       touches_files="src/core/middleware/auth.py">
+                <description>JWT middleware</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == ["src/core/middleware/auth.py"]
+
+    def test_explicit_touches_files_overrides_plugin_default(self) -> None:
+        """When both ``plugin=`` and an explicit ``touches_files=`` are set,
+        the explicit value wins — escape hatch for plugins that legitimately
+        edit shared infrastructure.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="1" shape="plugin" plugin="auth"
+                       touches_files="src/plugins/auth/,src/core/db/migrations/0042_users.sql">
+                <description>User can register (extends DB schema)</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == [
+            "src/plugins/auth/",
+            "src/core/db/migrations/0042_users.sql",
+        ]
+
+    def test_legacy_feature_has_empty_touches_files(self) -> None:
+        """No shape, no plugin → no auto-derivation.  Existing specs are
+        unaffected; the dispatcher's file-claim layer treats this as
+        opt-out (no claims attempted).
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Misc">
+              <feature index="1"><description>Legacy</description></feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == []

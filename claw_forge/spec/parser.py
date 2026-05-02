@@ -8,6 +8,38 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Default plugin-directory glob used when ``shape="plugin"`` and no
+# explicit ``touches_files`` attribute is provided.  Matches the layout
+# the boundaries-harness ``split`` and ``registry`` patterns produce.
+DEFAULT_PLUGIN_ROOT = "src/plugins"
+
+
+def _derive_touches_files(
+    explicit: str,
+    shape: str | None,
+    plugin: str | None,
+) -> list[str]:
+    """Resolve the ``touches_files`` list for a single ``<feature>``.
+
+    Precedence (highest to lowest):
+
+    1. Explicit ``touches_files="a,b,c"`` attribute.  Comma-separated
+       (whitespace-tolerant); each non-empty entry kept verbatim.
+    2. Plugin auto-derivation: ``shape="plugin"`` + ``plugin="X"`` →
+       ``[f"{DEFAULT_PLUGIN_ROOT}/X/**"]``.
+    3. Empty list — feature opts out of file-claim locking.
+
+    Returns an empty list rather than ``None`` so dispatcher code can do
+    ``if feat.touches_files:`` without a ``None`` guard.
+    """
+    explicit = (explicit or "").strip()
+    if explicit:
+        parts = [p.strip() for p in explicit.split(",")]
+        return [p for p in parts if p]
+    if shape == "plugin" and plugin:
+        return [f"{DEFAULT_PLUGIN_ROOT}/{plugin}/**"]
+    return []
+
 
 @dataclass
 class FeatureItem:
@@ -30,6 +62,13 @@ class FeatureItem:
     # via the project's plugin-root convention (default ``src/plugins/<name>/``).
     # ``None`` when ``shape != "plugin"``.
     plugin: str | None = None
+    # Files this feature is allowed to edit during dispatch.  Auto-derived
+    # from ``plugin=`` when ``shape="plugin"`` (becomes
+    # ``["src/plugins/<plugin>/**"]``) unless an explicit ``touches_files``
+    # attribute overrides.  Required (must be non-empty) for ``shape="core"``.
+    # Empty list for legacy bullets — the dispatcher's file-claim layer
+    # treats empty as opt-out (no locking attempted).
+    touches_files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -216,6 +255,10 @@ class ProjectSpec:
                     )
                     plugin_attr = feat_el.get("plugin", "").strip()
                     feat_plugin: str | None = plugin_attr if plugin_attr else None
+                    explicit_touches = feat_el.get("touches_files", "")
+                    feat_touches = _derive_touches_files(
+                        explicit_touches, feat_shape, feat_plugin,
+                    )
                     features.append(
                         FeatureItem(
                             category=category,
@@ -226,6 +269,7 @@ class ProjectSpec:
                             depends_on_indices=explicit_deps,
                             shape=feat_shape,
                             plugin=feat_plugin,
+                            touches_files=feat_touches,
                         )
                     )
                 # Legacy bullet format: text bullets directly in category element text.
