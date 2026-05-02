@@ -942,3 +942,78 @@ def test_explicit_depends_on_preserved_over_phase_inference() -> None:
     assert spec.features[1].depends_on_indices == [0]
     # A is the first feature; no inferred deps (no earlier phase).
     assert spec.features[0].depends_on_indices == []
+
+
+# ── <feature shape> and <feature plugin> attributes ───────────────────────────
+
+
+class TestFeatureShapeAndPluginAttrs:
+    def test_feature_shape_plugin_is_parsed(self) -> None:
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Auth">
+                  <feature index="1" shape="plugin" plugin="auth">
+                    <description>User can register with email and password</description>
+                  </feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 1
+        feat = spec.features[0]
+        assert feat.shape == "plugin"
+        assert feat.plugin == "auth"
+
+    def test_feature_shape_core_is_parsed(self) -> None:
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Middleware">
+                  <feature index="1" shape="core">
+                    <description>All endpoints validate JWT on incoming requests</description>
+                  </feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].shape == "core"
+        assert spec.features[0].plugin is None
+
+    def test_feature_without_shape_defaults_none(self) -> None:
+        """Backward-compat: features without shape attr have shape=None."""
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Misc">
+                  <feature index="1"><description>Legacy feature</description></feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].shape is None
+        assert spec.features[0].plugin is None
+
+    def test_legacy_bullet_features_have_shape_none(self) -> None:
+        """Bullet-form features pre-date shape; they parse to shape=None."""
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Bullets">
+                  - User can do something
+                  - System returns response
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        for feat in spec.features:
+            assert feat.shape is None
+            assert feat.plugin is None

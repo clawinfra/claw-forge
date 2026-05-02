@@ -19,6 +19,17 @@ class FeatureItem:
     # 1-based feature number when declared via <feature index="N">.
     # None for legacy bullets and <feature> elements without an explicit index.
     index: int | None = None
+    # Architectural shape of this feature.  ``"plugin"`` = vertical, lives in
+    # its own directory under the project's plugin root and never edits files
+    # outside it.  ``"core"`` = cross-cutting (middleware, errors, db setup)
+    # that legitimately touches files used by every plugin.  ``None`` =
+    # unclassified (legacy bullets, pre-Phase-3.25 specs).  The dispatcher
+    # uses shape to decide parallel-vs-serial dispatch.
+    shape: str | None = None
+    # Plugin name when ``shape="plugin"``.  Used to derive ``touches_files``
+    # via the project's plugin-root convention (default ``src/plugins/<name>/``).
+    # ``None`` when ``shape != "plugin"``.
+    plugin: str | None = None
 
 
 @dataclass
@@ -198,6 +209,13 @@ class ProjectSpec:
                             token = part.strip()
                             if token.isdigit():
                                 explicit_deps.append(int(token))
+                    # Architectural shape.  Empty / unrecognized → None.
+                    shape_attr = feat_el.get("shape", "").strip().lower()
+                    feat_shape: str | None = (
+                        shape_attr if shape_attr in {"plugin", "core"} else None
+                    )
+                    plugin_attr = feat_el.get("plugin", "").strip()
+                    feat_plugin: str | None = plugin_attr if plugin_attr else None
                     features.append(
                         FeatureItem(
                             category=category,
@@ -206,6 +224,8 @@ class ProjectSpec:
                             steps=feat_steps,
                             index=feat_index,
                             depends_on_indices=explicit_deps,
+                            shape=feat_shape,
+                            plugin=feat_plugin,
                         )
                     )
                 # Legacy bullet format: text bullets directly in category element text.
