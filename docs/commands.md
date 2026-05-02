@@ -1662,6 +1662,21 @@ When `git.llm_conflict_proposals: true`, the advisor (see below) drafts a `CONFL
 - You rely on per-branch state for retry-resume beyond what survives a squash-merge to `main` (custom checkpoint files outside the worktree, agent state caches, etc.). Salvage moves the work to `main` and removes the branch; the next attempt creates a fresh worktree from `main`.
 - Your `merge_strategy` is `manual`. Smart mode is a no-op in that case (it never auto-merges) — set `cleanup_orphan_worktrees: manual` to keep the existing scan-and-report behaviour.
 
+#### Resume preference (`git.prefer_resumable` / `git.resume_stale_threshold`)
+
+When the dispatcher picks the next task to start, two `pending` tasks at the same priority are not equivalent: one might have a feature branch with committed work from a prior interrupted run, and the other might be a fresh task with no branch yet. Resuming the first lets the agent pick up where the previous attempt left off; starting the second discards no work but redoes nothing either. The scheduler defaults to preferring the resumable one — these two knobs control that behaviour.
+
+```yaml
+git:
+  prefer_resumable: true        # default true — resume work-in-progress before starting fresh
+  resume_stale_threshold: 50    # default 50 — skip the preference when target has moved > N commits ahead
+```
+
+- **`prefer_resumable: true`** *(default)* — at equal priority, a task whose feature branch already has commits is dispatched before a task without commits. Higher priority still dominates: a P0 fresh task always beats a P1 resumable task. Set to `false` to force every task to start from a clean worktree off `target_branch`, regardless of any committed work from prior runs.
+- **`resume_stale_threshold: 50`** *(default `50`)* — a guardrail on the preference above. When `target_branch` has moved more than N commits ahead of a candidate feature branch, the scheduler treats that branch as "too stale to resume cheaply" and falls back to no-preference behaviour. The reasoning: catching up that many commits is likely to hit conflicts, and a fresh start may be faster than fighting through a multi-file resolve. Lower the threshold for tighter codebases where 20 commits is already a lot of churn; raise it for slow-moving projects where resuming is almost always worthwhile.
+
+These knobs influence *which* `pending` task gets picked. Once a task is dispatched, the worktree is unconditionally synced to `target_branch` via `sync_worktree_with_target` *before* the agent runs — even with `prefer_resumable: false`. That sync is independent of the preference and acts as a final guardrail: a stale resumed worktree, or one whose `target_branch` has advanced during the dispatch tick, is brought up to date before the agent sees it. If that pre-dispatch merge hits content conflicts, the task fails immediately with a `resume_conflict:` error (see the *Failure modes* section under `claw-forge run`) — no agent turn is wasted on stale state.
+
 #### LLM conflict advisor (`git.llm_conflict_proposals: true`)
 
 When smart-mode salvage hits a content conflict, the advisor:

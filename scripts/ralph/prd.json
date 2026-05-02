@@ -38,7 +38,7 @@
         "Markdown lint clean"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Source material in CLAUDE.md 'Resume preference' Key Conventions bullet. The knobs are read in cli.py:781-783. Target file: docs/commands.md only."
     },
     {

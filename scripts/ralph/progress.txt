@@ -27,3 +27,20 @@ Started: Sat May  2 20:36:20 AEST 2026
     `#### Related commands`. The new section slotted between Pro tips and Failure modes —
     feature explanation before edge-case explanation.
 ---
+
+## 2026-05-02 - US-002
+- Documented `git.prefer_resumable` + `git.resume_stale_threshold` in docs/commands.md.
+- Files changed: docs/commands.md (added `#### Resume preference` subsection between
+  `##### When NOT to use smart` and `#### LLM conflict advisor`).
+- **Learnings:**
+  - Confirmed defaults from `claw_forge/cli.py:816-818`: `prefer_resumable=True`,
+    `resume_stale_threshold=50`. PRD's line refs (781-783) had drifted; verify in code, not in
+    PRD notes.
+  - Cross-referenced the new `resume_conflict` failure-mode section (US-001 area):
+    `prefer_resumable=false` does NOT disable the pre-dispatch sync. The sync runs
+    unconditionally as a guardrail — important to surface so users don't think disabling
+    the preference also disables the safety net.
+  - Placement convention: three resume-flow knobs (`cleanup_orphan_worktrees`,
+    `prefer_resumable`/`resume_stale_threshold`, `llm_conflict_proposals`) now sit as `####`
+    peers in adjacency. Discoverability win for users tuning resume behaviour holistically.
+---
