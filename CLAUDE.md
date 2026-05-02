@@ -161,6 +161,43 @@ The XML schema accepts two forms within a `<category>`:
   ```
   Both forms coexist within the same `<category>`. The parser resolves `depends_on` (1-based feature numbers) into 0-based positional indices that match the convention used by `_assign_dependencies` and `_write_plan_to_db`. `/create-spec` Phase 3.5 (overlap analysis) emits the `<feature>` form when the user serializes a flagged pair.
 
+The XML schema also accepts three architectural-shape attributes on `<feature>`:
+
+- **`shape="plugin" | "core"`** — declares whether the feature is vertical
+  (lives in its own directory under the project's plugin root) or
+  cross-cutting.  Plugin-shape features auto-derive `touches_files`;
+  core-shape features must declare `touches_files` explicitly or the
+  parser raises `ValueError` at parse time.
+- **`plugin="<name>"`** — directory ownership for plugin-shape features.
+  When `shape="plugin"` and `plugin="auth"`, `touches_files` defaults to
+  `["src/plugins/auth/**"]` (override via the explicit `touches_files`
+  attribute).  Used by the dispatcher's file-claim locks for parallel
+  conflict prevention.
+- **`touches_files="path1,path2,..."`** — explicit comma-separated list
+  of file globs.  Required when `shape="core"`; optional override when
+  `shape="plugin"` (e.g. for plugins that legitimately edit shared
+  infrastructure like a DB migration).
+
+```xml
+<feature index="14" shape="plugin" plugin="auth">
+  <description>User can register with email and password</description>
+</feature>
+<feature index="20" shape="core"
+         touches_files="src/core/middleware/auth.py">
+  <description>All endpoints validate JWT</description>
+</feature>
+```
+
+`shape="core"` without an explicit `touches_files` attribute raises a
+parse error (cross-cutting features can't be auto-derived from a
+directory).  Specs without `shape` attributes parse identically to
+before — pure backward compatibility.
+
+Both `shape` and `plugin` are persisted as columns on the `Task` ORM
+and are exposed via the state-service API (`POST /sessions/{id}/tasks`,
+`GET /sessions/{id}/tasks`) so the dispatcher and scheduler can read
+them at runtime.
+
 ### Export (`claw_forge/exporter.py`)
 
 `claw-forge export` reads `.claw-forge/state.db` directly via `sqlite3` (no state-service dependency, safe to run while a session is active) and emits CSV (flat or per-table), SQL dump (sqlite-importable), or JSON. Supports `--scope session|all`, `--csv-mode flat|split`, and explicit `--session UUID`. Used for stakeholder reports, spreadsheet analysis, and DB migration round-trips.

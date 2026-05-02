@@ -160,6 +160,26 @@ claw-forge plan app_spec.txt --fresh
 - **Plan reconciliation** is the default behavior when re-running `plan` on an existing project. Completed tasks stay as-is, failed/pending tasks are retained, and only features missing from the DB are added as new pending tasks. Use `--fresh` to wipe and recreate all tasks from scratch.
 - `app_spec.example.xml` (created by `claw-forge init`) shows the full XML schema.
 
+#### Architectural shape attributes
+
+The parser accepts three attributes on `<feature>` that affect dispatcher
+behaviour:
+
+| Attribute | Values | Effect |
+|---|---|---|
+| `shape` | `plugin` / `core` | Plugin = lives in its own directory; core = cross-cutting |
+| `plugin` | string | Directory name (under `src/plugins/<name>/`) when `shape="plugin"` |
+| `touches_files` | comma-separated paths | Explicit file globs (overrides plugin auto-derivation; required for `shape="core"`) |
+
+When `shape="plugin"` and a `plugin=` attribute is set, `touches_files`
+defaults to `["src/plugins/<plugin>/**"]`, giving the dispatcher's
+file-claim locks an unambiguous file set per feature.  See
+[CLAUDE.md → spec/parser.py](../CLAUDE.md) for detailed semantics.
+
+`shape="core"` without an explicit `touches_files` attribute fails the
+parse with a clear error — cross-cutting features can't be auto-derived
+from a directory.
+
 #### Related commands
 - **Before:** `claw-forge init` → `/create-spec`
 - **After:** `claw-forge run`

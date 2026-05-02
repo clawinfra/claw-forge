@@ -329,6 +329,26 @@ section-by-section review before writing the file.
 - **Be specific about libraries.** "Use python-jose for JWT" beats "implement JWT".
 - **Include test count targets.** "15 unit tests" gives the agent a concrete goal.
 
+### Architectural shape (parallel-safety hint)
+
+Add a `shape` attribute to each `<feature>` so the dispatcher knows
+how to schedule it for parallel-safe execution:
+
+```xml
+<feature index="14" shape="plugin" plugin="auth">
+  <description>User can register with email and password</description>
+</feature>
+<feature index="20" shape="core"
+         touches_files="src/core/middleware/auth.py">
+  <description>All endpoints validate JWT</description>
+</feature>
+```
+
+Plugin-shape features can run in parallel (their files don't overlap by
+construction).  Core-shape features serialize via the dispatcher's
+single-flight rule for cross-cutting changes.  See
+[`docs/commands.md` → claw-forge plan](docs/commands.md) for details.
+
 ### Adding features to a running project
 
 `claw-forge plan` **reconciles by default** — it matches spec features against existing tasks by description, keeps completed/pending/failed tasks untouched, and only inserts new features as pending tasks. Dependencies are wired correctly across old and new tasks.
