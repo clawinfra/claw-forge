@@ -270,3 +270,63 @@ class TestDraftConflictProposalNestedLoop:
         )
         assert path.exists()
         assert "running loop" in path.read_text()
+
+
+class TestRunAdvisorAgentBypassesRunAgent:
+    """Regression for the v0.5.38 ``ValueError: can_use_tool callback
+    requires streaming mode`` failure.
+
+    The advisor must NOT route through ``claw_forge.agent.runner.run_agent``
+    because that wrapper auto-attaches a ``can_use_tool`` callback (security
+    hook for bash commands), which forces the SDK into streaming mode and
+    rejects string prompts.  Test by monkey-patching the SDK's ``query``
+    function and asserting on what it actually receives.
+    """
+
+    @pytest.mark.asyncio
+    async def test_query_receives_string_prompt_and_no_can_use_tool(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import claude_agent_sdk
+
+        from claw_forge.git.conflict_advisor import _run_advisor_agent
+
+        captured: dict[str, object] = {}
+
+        class _FakeResultMessage:
+            def __init__(self, result: str) -> None:
+                self.result = result
+
+        # Rename the class to mimic the SDK's ResultMessage check.
+        _FakeResultMessage.__name__ = "ResultMessage"
+
+        async def fake_query(*, prompt: object, options: object):
+            captured["prompt"] = prompt
+            captured["prompt_type"] = type(prompt).__name__
+            captured["can_use_tool"] = getattr(options, "can_use_tool", "MISSING")
+            captured["mcp_servers"] = getattr(options, "mcp_servers", None)
+            captured["max_turns"] = getattr(options, "max_turns", None)
+            yield _FakeResultMessage("# fake proposal text")
+
+        monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
+
+        text = await _run_advisor_agent("hello world prompt")
+
+        assert text == "# fake proposal text"
+        # The bug: prompt was a string but can_use_tool was set, so the SDK
+        # raised ValueError.  Verify both properties are correct after the fix.
+        assert captured["prompt_type"] == "str", (
+            "prompt should be a plain str, not an AsyncIterable wrapper "
+            f"(got {captured['prompt_type']})"
+        )
+        assert captured["can_use_tool"] is None, (
+            "can_use_tool must be None on the advisor's options — otherwise "
+            "the SDK requires streaming mode and rejects string prompts"
+        )
+        # The advisor doesn't need MCP servers either.  The default factory
+        # returns an empty dict, not the project's configured servers.
+        assert captured["mcp_servers"] == {} or captured["mcp_servers"] is None, (
+            "advisor options must not inherit project MCP servers — "
+            f"got {captured['mcp_servers']!r}"
+        )
+        assert captured["max_turns"] == 10
