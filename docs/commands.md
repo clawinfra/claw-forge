@@ -481,6 +481,52 @@ Progress: 12/59 passing · 3 in-flight · $0.61 spent
 - Use `--yolo` only when you trust your spec is precise. Human-input gates exist for a reason.
 - Open `claw-forge ui` in a separate terminal while `run` is active to watch the Kanban board.
 
+#### Parallel-safe agents via file-claim locks
+
+When `--concurrency` is greater than 1, two agents working in parallel can collide on the same file — one re-edits a section the other just rewrote, or both append slightly-different stanzas that fight at squash time. File-claim locks prevent that *spatially*: a task declares the files it intends to touch, and the dispatcher refuses to start a second task that wants any of the same files until the first releases.
+
+##### Opt in by declaring `touches_files`
+
+Tasks declare intent on creation. Pass `touches_files` (a list of repo-relative paths) to `POST /sessions/{session_id}/tasks`:
+
+```bash
+curl -X POST http://localhost:8420/sessions/$SESSION_ID/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Add JWT refresh endpoint",
+    "description": "...",
+    "agent_type": "coding",
+    "touches_files": ["claw_forge/auth/jwt.py", "tests/test_jwt.py"]
+  }'
+```
+
+Before dispatch, the dispatcher POSTs an atomic claim for the listed paths. If any path is already claimed by a *running* task, the dispatcher defers this task to the next dispatch cycle (it stays `pending` and is reconsidered each tick). Tasks **without** a `touches_files` field participate in no locking — they neither acquire claims nor block on existing ones, preserving full backward compatibility for callers and plugins that don't declare intent.
+
+##### Auto-release on terminal status
+
+Claims are scoped to the task and released automatically when the task transitions to `completed`, `failed`, or `paused`. There is no manual unlock step and no way for a forgotten release to deadlock other tasks — once a claiming task leaves the `running` state for any reason (success, error, dispatcher pause), its files become available on the next dispatch cycle.
+
+##### Spatial vs temporal: how this complements merge-gating
+
+File claims and merge-gating (`merged_to_target_branch`) handle two different conflict shapes. They are independent and run concurrently:
+
+- **File claims (spatial)** — "task A and task B want to edit the same file *right now*". Resolved by serialising the two: A holds the claim, B defers.
+- **Merge-gating (temporal)** — "task B depends on task A; B should not start until A's squash-merge has landed on `target_branch`". Resolved by holding B in `blocked` until A is `completed AND merged_to_target_branch=True` (see *Merge-gating* in the architecture notes).
+
+A task can be subject to both. A child task that declares `touches_files` for files its parent also touches will (a) wait for its parent to merge before it leaves `blocked` (temporal), and (b) once unblocked, wait for any sibling running task that holds those file claims to release them (spatial).
+
+##### Inspecting claims directly
+
+Three REST endpoints expose the claim state for callers driving the state service directly:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /sessions/{session_id}/file-claims` | Atomic claim acquire for a task. Returns `200` on success, `409` with the conflicting task ID on collision. The dispatcher calls this internally — manual callers rarely need it. |
+| `DELETE /sessions/{session_id}/file-claims/{task_id}` | Release every claim held by a task. Auto-fires on terminal status; manual call is for diagnostics or tests. |
+| `GET /sessions/{session_id}/file-claims` | List current claims (path, holder task ID, acquired-at timestamp). Useful when investigating why a `pending` task is being deferred — the dispatcher logs `deferred: file_claim_conflict`, and this endpoint shows you the holder. |
+
+If a task is repeatedly deferred for many cycles, inspect `GET /file-claims` to see which path is contended; usually it indicates two features were planned to touch the same module and one of them is the obvious owner.
+
 #### Failure modes — `resume_conflict`
 
 When a previously-interrupted task is resumed, the dispatcher attempts a catch-up merge of the target branch into the feature branch *before* the agent runs (via `sync_worktree_with_target` in `claw_forge/git/merge.py`). This eliminates the prior failure pattern where the catch-up only happened at squash time, after the agent had already wasted a turn on stale state.
@@ -1615,6 +1661,21 @@ When `git.llm_conflict_proposals: true`, the advisor (see below) drafts a `CONFL
 
 - You rely on per-branch state for retry-resume beyond what survives a squash-merge to `main` (custom checkpoint files outside the worktree, agent state caches, etc.). Salvage moves the work to `main` and removes the branch; the next attempt creates a fresh worktree from `main`.
 - Your `merge_strategy` is `manual`. Smart mode is a no-op in that case (it never auto-merges) — set `cleanup_orphan_worktrees: manual` to keep the existing scan-and-report behaviour.
+
+#### Resume preference (`git.prefer_resumable` / `git.resume_stale_threshold`)
+
+When the dispatcher picks the next task to start, two `pending` tasks at the same priority are not equivalent: one might have a feature branch with committed work from a prior interrupted run, and the other might be a fresh task with no branch yet. Resuming the first lets the agent pick up where the previous attempt left off; starting the second discards no work but redoes nothing either. The scheduler defaults to preferring the resumable one — these two knobs control that behaviour.
+
+```yaml
+git:
+  prefer_resumable: true        # default true — resume work-in-progress before starting fresh
+  resume_stale_threshold: 50    # default 50 — skip the preference when target has moved > N commits ahead
+```
+
+- **`prefer_resumable: true`** *(default)* — at equal priority, a task whose feature branch already has commits is dispatched before a task without commits. Higher priority still dominates: a P0 fresh task always beats a P1 resumable task. Set to `false` to force every task to start from a clean worktree off `target_branch`, regardless of any committed work from prior runs.
+- **`resume_stale_threshold: 50`** *(default `50`)* — a guardrail on the preference above. When `target_branch` has moved more than N commits ahead of a candidate feature branch, the scheduler treats that branch as "too stale to resume cheaply" and falls back to no-preference behaviour. The reasoning: catching up that many commits is likely to hit conflicts, and a fresh start may be faster than fighting through a multi-file resolve. Lower the threshold for tighter codebases where 20 commits is already a lot of churn; raise it for slow-moving projects where resuming is almost always worthwhile.
+
+These knobs influence *which* `pending` task gets picked. Once a task is dispatched, the worktree is unconditionally synced to `target_branch` via `sync_worktree_with_target` *before* the agent runs — even with `prefer_resumable: false`. That sync is independent of the preference and acts as a final guardrail: a stale resumed worktree, or one whose `target_branch` has advanced during the dispatch tick, is brought up to date before the agent sees it. If that pre-dispatch merge hits content conflicts, the task fails immediately with a `resume_conflict:` error (see the *Failure modes* section under `claw-forge run`) — no agent turn is wasted on stale state.
 
 #### LLM conflict advisor (`git.llm_conflict_proposals: true`)
 

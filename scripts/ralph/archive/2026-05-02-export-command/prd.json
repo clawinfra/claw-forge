@@ -22,7 +22,7 @@
         "Markdown lint clean (no broken syntax, headings nest correctly)"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Source material in CLAUDE.md sections about file-claim locks, touches_files, and the State Service API endpoint list. Docs/commands.md currently has 0 hits for these terms (verified via grep). Target file: docs/commands.md only."
     },
     {
@@ -38,7 +38,7 @@
         "Markdown lint clean"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "Source material in CLAUDE.md 'Resume preference' Key Conventions bullet. The knobs are read in cli.py:781-783. Target file: docs/commands.md only."
     },
     {
@@ -53,7 +53,7 @@
         "Lint passes (uv run ruff check claw_forge/ tests/) — unchanged"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": "Target file: README.md only. The table starts at line 628. Cross-reference: docs/commands.md should already have these features covered after US-001 and US-002."
     }
   ]
