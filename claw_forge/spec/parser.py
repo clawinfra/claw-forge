@@ -258,6 +258,13 @@ class ProjectSpec:
                     feat_touches = _derive_touches_files(
                         explicit_touches, feat_shape, feat_plugin,
                     )
+                    if feat_shape == "core" and not feat_touches:
+                        raise ValueError(
+                            f"<feature shape='core'> '{short_name}' "
+                            "requires an explicit touches_files attribute "
+                            "(core features are cross-cutting and can't "
+                            "be auto-derived from a directory)."
+                        )
                     features.append(
                         FeatureItem(
                             category=category,

@@ -973,7 +973,8 @@ class TestFeatureShapeAndPluginAttrs:
               <project_name>x</project_name>
               <core_features>
                 <category name="Middleware">
-                  <feature index="1" shape="core">
+                  <feature index="1" shape="core"
+                           touches_files="src/core/middleware/auth.py">
                     <description>All endpoints validate JWT on incoming requests</description>
                   </feature>
                 </category>
@@ -1107,3 +1108,25 @@ class TestFeatureShapeAndPluginAttrs:
         """
         spec = ProjectSpec._parse_xml(xml)
         assert spec.features[0].touches_files == []
+
+    def test_core_shape_without_touches_files_raises(self) -> None:
+        """``shape="core"`` features can't be auto-derived; missing
+        ``touches_files`` is a spec error rather than a silent opt-out.
+        """
+        import pytest as _pytest
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Middleware">
+              <feature index="1" shape="core">
+                <description>JWT middleware</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        with _pytest.raises(ValueError, match="touches_files"):
+            ProjectSpec._parse_xml(xml)
