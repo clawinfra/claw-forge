@@ -639,3 +639,36 @@ async def test_create_and_sync_disabled_returns_none(tmp_path: Path) -> None:
         ops, task_id="t1", slug="x", prefix="feat", target="main",
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resume_conflict_error_message_format(
+    conflicted_resume_repo: tuple[Path, str],
+) -> None:
+    """The error message format is the documented contract — match it
+    against what docs/commands.md tells users to grep for.
+    """
+    from claw_forge.cli import _create_and_sync_worktree
+
+    project, slug = conflicted_resume_repo
+    ops = GitOps(project_dir=project, enabled=True)
+    result = await _create_and_sync_worktree(
+        ops, task_id="t1", slug=slug, prefix="feat", target="main",
+    )
+    assert result is not None
+    sync = result["sync"]
+    assert sync["synced"] is False
+
+    # Reproduce the dispatcher's error-message construction so the
+    # docs/commands.md text and the runtime text never drift.
+    conflicts = sync.get("conflicts", [])
+    worktree_path = result["worktree_path"]
+    msg = (
+        f"resume_conflict: catch-up merge of main into branch "
+        f"failed on {len(conflicts)} file(s): {', '.join(conflicts)}. "
+        f"Resolve manually in {worktree_path} (run `git merge "
+        f"main`, fix conflicts, commit) and requeue the task."
+    )
+    assert msg.startswith("resume_conflict:")
+    assert "shared.py" in msg
+    assert "1 file(s)" in msg

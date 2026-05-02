@@ -1261,7 +1261,7 @@ def run(
                             target=_default_branch,
                         )
                         if _wt_bundle:
-                            _worktree_path = Path(_wt_bundle["worktree_path"])
+                            _worktree_path = _wt_bundle["worktree_path"]
                             _active_worktrees[task_node.id] = _worktree_path
                             _sync = _wt_bundle["sync"]
                             if not _sync.get("synced"):
@@ -1293,6 +1293,7 @@ def run(
                                         f"{_default_branch}`, fix conflicts, "
                                         "commit) and requeue the task."
                                     )
+                                _resume_conflict = True  # set before any await that could raise
                                 await _patch_task(
                                     http, task_node.id,
                                     status="failed",
@@ -1309,7 +1310,6 @@ def run(
                                         timeout=5,
                                     )
                                 _active_worktrees.pop(task_node.id, None)
-                                _resume_conflict = True
                     except Exception as _git_wt_err:
                         _logging.getLogger(__name__).warning(
                             "Git worktree creation failed for task %s (continuing): %s",

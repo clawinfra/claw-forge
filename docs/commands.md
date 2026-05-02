@@ -502,7 +502,7 @@ git merge <target>           # produces conflict markers
 git add -A && git commit --no-verify
 ```
 
-Then requeue the task — Reset All on the Failed column in the Kanban UI, or `claw-forge fix`. The next dispatch syncs cleanly because the resolution commit is now on the feature branch.
+Then requeue the task — click 'Reset All' on the Failed column in the Kanban UI, or POST to the state service: `curl -X POST http://localhost:8420/sessions/$SESSION_ID/tasks/requeue -d '{"statuses":["failed"]}' -H 'Content-Type: application/json'`. The next dispatch syncs cleanly because the resolution commit is now on the feature branch.
 
 If the partial work is throwaway, use `claw-forge worktrees prune --discard` to drop the branch and worktree; the task's next retry will recreate them from current `target_branch`.
 
