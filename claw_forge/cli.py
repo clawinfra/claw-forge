@@ -1262,6 +1262,7 @@ def run(
                         )
                         if _wt_bundle:
                             _worktree_path = _wt_bundle["worktree_path"]
+                            assert isinstance(_worktree_path, Path)
                             _active_worktrees[task_node.id] = _worktree_path
                             _sync = _wt_bundle["sync"]
                             if not _sync.get("synced"):
