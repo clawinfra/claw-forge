@@ -62,7 +62,7 @@ def branch_overlap_files(
     """Return files modified on both *branch* and *base* since their merge-base.
 
     Used as a diagnostic signal for "this resume is going to conflict": if the
-    list is non-empty, ``git merge base`` from inside *branch* is at risk of
+    list is non-empty, ``git merge-base`` from inside *branch* is at risk of
     failing on overlapping changes.  Pure read; nothing is mutated.
 
     Returns ``[]`` when the branch does not exist, when there is no merge-base,
