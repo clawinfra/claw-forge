@@ -228,3 +228,45 @@ class TestDraftConflictProposal:
         )
         assert path is None
         assert not (wt / "CONFLICT_PROPOSAL.md").exists()
+
+
+class TestDraftConflictProposalNestedLoop:
+    """Regression for the v0.5.37 ``RuntimeError: asyncio.run() cannot be
+    called from a running event loop`` bug.
+
+    The smart-mode salvage hook (``smart_cleanup_worktrees`` in
+    ``cli.py``) runs inside the dispatcher's ``async def main()``, which
+    means there's already an active event loop when the advisor is
+    invoked.  ``draft_conflict_proposal`` must therefore not assume
+    sync-only callers — running the agent on a worker thread sidesteps
+    the nested-loop trap.
+    """
+
+    @pytest.mark.asyncio
+    async def test_works_when_called_from_running_event_loop(
+        self,
+        git_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        branch, wt = _conflict_setup(git_repo, "nested")
+
+        async def fake_agent(prompt: str, **kwargs: object) -> str:
+            return "# Proposal from inside a running loop\n"
+
+        monkeypatch.setattr(advisor_mod, "_run_advisor_agent", fake_agent)
+
+        # We are inside a running event loop here (pytest-asyncio).  Before
+        # the fix, draft_conflict_proposal's bare asyncio.run call raised
+        # ``RuntimeError: asyncio.run() cannot be called from a running
+        # event loop`` and the function returned None — the user's v0.5.37
+        # traceback.  The threaded helper makes this work.
+        path = draft_conflict_proposal(
+            git_repo, wt, branch, "main",
+            task={"description": "nested loop test", "status": "failed"},
+        )
+        assert path is not None, (
+            "draft_conflict_proposal returned None inside a running event "
+            "loop — nested-loop fix is missing or regressed"
+        )
+        assert path.exists()
+        assert "running loop" in path.read_text()

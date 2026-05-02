@@ -19,6 +19,7 @@ whole reason the design is advisory rather than auto-merging.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import subprocess
 from pathlib import Path
@@ -183,6 +184,29 @@ async def _run_advisor_agent(prompt: str, *, model: str | None = None) -> str:
     return await collect_result(prompt, **kwargs)
 
 
+def _run_advisor_agent_blocking(
+    prompt: str, *, model: str | None = None,
+) -> str:
+    """Run :func:`_run_advisor_agent` to completion regardless of whether
+    the calling thread already has an active event loop.
+
+    The smart-mode salvage hook in ``cli.py`` runs *inside* ``async def
+    main()``, which means a bare ``asyncio.run(...)`` here would crash
+    with ``RuntimeError: asyncio.run() cannot be called from a running
+    event loop``.  Dispatching to a one-shot worker thread sidesteps the
+    nested-loop issue: the worker thread has no loop of its own, so
+    ``asyncio.run`` inside it works regardless of the caller's context.
+
+    Tests that call :func:`draft_conflict_proposal` from sync test
+    bodies still hit the same path; the threading is invisible to them.
+    """
+    def _target() -> str:
+        return asyncio.run(_run_advisor_agent(prompt, model=model))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_target).result()
+
+
 def draft_conflict_proposal(
     project_dir: Path,
     worktree_path: Path,
@@ -206,7 +230,7 @@ def draft_conflict_proposal(
     prompt = _build_prompt(branch, target, task_desc, blocks)
 
     try:
-        proposal_text = asyncio.run(_run_advisor_agent(prompt, model=model))
+        proposal_text = _run_advisor_agent_blocking(prompt, model=model)
     except Exception:
         logger.exception("Conflict advisor agent call failed for %s", branch)
         return None
