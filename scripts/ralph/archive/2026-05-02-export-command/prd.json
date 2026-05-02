@@ -22,7 +22,7 @@
         "Markdown lint clean (no broken syntax, headings nest correctly)"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Source material in CLAUDE.md sections about file-claim locks, touches_files, and the State Service API endpoint list. Docs/commands.md currently has 0 hits for these terms (verified via grep). Target file: docs/commands.md only."
     },
     {
