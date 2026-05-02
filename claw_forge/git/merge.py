@@ -125,8 +125,11 @@ def sync_worktree_with_target(
             ).stdout.strip()
         )
     except Exception:
-        # If we can't measure, fall through to attempting the merge anyway.
-        behind_count = 0
+        # Cannot measure distance — assume there is work to pull and attempt
+        # the merge.  If the target ref is bogus, the merge call below will
+        # raise CalledProcessError and surface the real error as a conflict
+        # rather than silently reporting no_op.
+        behind_count = 1
 
     if behind_count == 0:
         return {"synced": True, "no_op": True, "merged_count": 0}
@@ -141,11 +144,9 @@ def sync_worktree_with_target(
         conflicts: list[str] = []
         try:
             conflicts = sorted(
-                set(
-                    _run_git(
-                        ["diff", "--name-only", "--diff-filter=U"], worktree_path,
-                    ).stdout.splitlines()
-                )
+                _run_git(
+                    ["diff", "--name-only", "--diff-filter=U"], worktree_path,
+                ).stdout.splitlines()
             )
         except Exception:
             conflicts = []

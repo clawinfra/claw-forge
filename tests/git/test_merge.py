@@ -531,3 +531,17 @@ class TestSyncWorktreeWithTarget:
         assert result.get("dirty_worktree") is True
         # The dirty file is preserved.
         assert (wt / "uncommitted.py").read_text() == "dirty\n"
+
+    def test_unknown_target_surfaces_failure(
+        self, repo_with_worktree: tuple[Path, Path, str],
+    ) -> None:
+        """Pinning the contract: a bogus target ref must NOT report no-op success.
+
+        Earlier versions of this function set behind_count = 0 on rev-list
+        failure, which silently returned {synced: True, no_op: True}.  An
+        unknown target must surface as a non-success result so the caller
+        can react instead of dispatching an agent under a false-positive sync.
+        """
+        _project, wt, _branch = repo_with_worktree
+        result = sync_worktree_with_target(wt, target="definitely-not-a-real-branch")
+        assert result["synced"] is False
