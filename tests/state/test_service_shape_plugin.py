@@ -83,6 +83,39 @@ class TestTaskShapeAndPlugin:
             assert body["plugin"] is None
 
     @pytest.mark.asyncio
+    async def test_create_task_round_trips_touches_files(
+        self, svc: AgentStateService, tmp_path: Path
+    ) -> None:
+        """Verify touches_files survives the round-trip alongside shape/plugin.
+
+        Guards the spec→DB wiring: auto-derived touches_files from parser must
+        not be silently dropped before the Task ORM row is written.
+        """
+        async with AsyncClient(
+            transport=ASGITransport(app=svc.create_app()), base_url="http://test"
+        ) as cl:
+            r = await cl.post("/sessions", json={"project_path": str(tmp_path)})
+            sid = r.json()["id"]
+
+            expected_files = ["src/plugins/auth/**", "core/x.py"]
+            r = await cl.post(
+                f"/sessions/{sid}/tasks",
+                json={
+                    "plugin_name": "coding",
+                    "shape": "plugin",
+                    "plugin": "auth",
+                    "touches_files": expected_files,
+                },
+            )
+            assert r.status_code == 201, r.text
+            tid = r.json()["id"]
+
+            r = await cl.get(f"/tasks/{tid}")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["touches_files"] == expected_files
+
+    @pytest.mark.asyncio
     async def test_create_task_without_shape_defaults_none(
         self, svc: AgentStateService, tmp_path: Path
     ) -> None:

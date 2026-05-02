@@ -2363,6 +2363,7 @@ async def _write_plan_to_db(
                 depends_on=cross_deps,
                 shape=feat.get("shape"),
                 plugin=feat.get("plugin"),
+                touches_files=feat.get("touches_files", []) or [],
             ))
 
         await db.commit()

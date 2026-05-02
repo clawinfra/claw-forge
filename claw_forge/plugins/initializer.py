@@ -157,6 +157,7 @@ class InitializerPlugin(BasePlugin):
                     "depends_on_indices": feat.depends_on_indices,
                     "shape": feat.shape,
                     "plugin": feat.plugin,
+                    "touches_files": feat.touches_files,
                 }
             )
 
