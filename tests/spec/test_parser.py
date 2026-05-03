@@ -1129,3 +1129,39 @@ class TestFeatureShapeAndPluginAttrs:
         """
         with pytest.raises(ValueError, match="touches_files"):
             ProjectSpec._parse_xml(xml)
+
+    def test_phase_325_example_round_trip(self) -> None:
+        """The XML example written into create-spec.md Phase 5 must round-
+        trip cleanly through the parser — guards against doc/code drift.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>round-trip</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="14" shape="plugin" plugin="auth">
+                <description>User can register with email and password</description>
+              </feature>
+              <feature index="18" shape="plugin" plugin="auth" depends_on="14">
+                <description>System sends welcome email after registration</description>
+              </feature>
+            </category>
+            <category name="Middleware">
+              <feature index="20" shape="core"
+                       touches_files="src/core/middleware/auth.py">
+                <description>All endpoints validate JWT on incoming requests</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        plugin_feats = [f for f in spec.features if f.shape == "plugin"]
+        core_feats = [f for f in spec.features if f.shape == "core"]
+        assert len(plugin_feats) == 2
+        assert all(f.plugin == "auth" for f in plugin_feats)
+        assert all(f.touches_files == ["src/plugins/auth/**"] for f in plugin_feats)
+        assert len(core_feats) == 1
+        assert core_feats[0].touches_files == ["src/core/middleware/auth.py"]
