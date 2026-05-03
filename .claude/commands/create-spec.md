@@ -213,6 +213,97 @@ action verb:
 
 ---
 
+### Phase 3.25: Architectural Shape
+
+After confirming the feature list with the user (Phase 3) and before
+overlap analysis (Phase 3.5), classify each feature as either a
+**plugin** (vertical, lives in its own directory) or **core**
+(cross-cutting, edits files used by every plugin).  The classification
+ends up in the emitted XML as `<feature shape>` / `<feature plugin>`
+attributes — the dispatcher reads these for parallel-safe scheduling.
+
+#### Step 1 — Group features by likely shape
+
+Read through the confirmed feature list and silently group:
+
+- **Plugin candidates**: features whose description names a single
+  domain noun ("user", "task", "billing", "notifications") and whose
+  acceptance criteria all read like "user can …" or "system returns …
+  for the X resource".  These typically own their own data model,
+  routes, and tests, and can be added or removed without touching
+  sibling plugins.
+- **Core candidates**: features that say "all endpoints …", "every
+  request …", "uniform error format", "shared logging", "global rate
+  limit", "authentication middleware", "database migrations".  These
+  are cross-cutting — they're touched by every plugin's request path.
+
+A feature can be plugin-shape even if it depends on a core concern.
+"User can register" is plugin-shape (lives in `plugins/auth/`) even
+though it relies on the core `core/db/` connection pool.
+
+#### Step 2 — Confirm with the user
+
+Present the grouping back, naming the plugin directories:
+
+```
+Looking at your features, I'd structure them as:
+
+Plugins (parallel-safe — each in its own directory):
+  • plugins/auth/      — registration, login, password reset (5 features)
+  • plugins/profile/   — view/edit profile, avatar upload (4 features)
+  • plugins/tasks/     — CRUD, search, tag filter, pagination (8 features)
+
+Core (cross-cutting — touch every plugin's request path):
+  • core/middleware/   — JWT validation, request logging (2 features)
+  • core/errors/       — RFC7807 error envelope (1 feature)
+  • core/db/           — connection pool, migrations runner (2 features)
+
+Sound right?  Edits welcome:
+  - Reclassify a feature: "move feature 14 to core"
+  - Rename a plugin:      "rename profile to user-profile"
+  - Add a category:       "add plugins/notifications"
+```
+
+The user can:
+- **Accept** → record the classification.
+- **Edit** by line: "move 14 to core", "rename profile to user-profile",
+  "split tasks into tasks-crud and tasks-search".
+- **Skip** → emit the spec without `shape`/`plugin` attributes (legacy
+  behaviour).  Phase 5 emits unchanged.
+
+#### Step 3 — Persist the classification
+
+Build a per-feature dict in memory:
+
+```
+feature_shape[<index>] = {
+    "shape": "plugin" | "core",
+    "plugin": "<plugin_name>" | None,         # set when shape="plugin"
+    "touches_files": ["..."] | None,           # set when shape="core" only
+}
+```
+
+Phase 5 reads this when emitting `<feature>` elements.  Plugin features
+get `shape="plugin" plugin="X"` and the parser auto-derives `touches_files`.
+Core features get `shape="core" touches_files="..."` (the prose from Step
+2 — typically a single file path the user names — becomes the
+`touches_files` value).
+
+#### Failure modes
+
+- **User skips classification** → emit Phase 5 unchanged; no `shape`
+  attributes.  The legacy parsing path still works; the dispatcher's
+  file-claim layer treats every feature as opt-out (no locking
+  attempted).
+- **A feature can't be classified** (LLM unsure or user says "I don't
+  know") → leave that feature unclassified in `feature_shape`.  Phase 5
+  emits without `shape` for that feature.
+- **User declares a plugin name that conflicts with an existing
+  filesystem path** in brownfield mode → warn but accept (the
+  boundaries-harness can refactor the colliding file later).
+
+---
+
 ### Phase 3.5: Overlap Analysis
 
 After confirming the feature list with the user, audit for **merge-conflict risk** between
@@ -281,6 +372,23 @@ attributes:
 
 Multiple dependencies are comma-separated: `depends_on="14,15,16"`. Features without edges
 may continue using the legacy bullet form; both coexist within the same `<category>`.
+
+When Phase 3.25 classification was accepted, combine `shape`/`plugin` with `index` and
+`depends_on` in the same element:
+
+```xml
+<!-- Phase 3.25 + Phase 3.5 combined: plugin-shape + dependency edge -->
+<feature index="14" shape="plugin" plugin="auth">
+  <description>User can register with email and password</description>
+</feature>
+<feature index="18" shape="plugin" plugin="auth" depends_on="14">
+  <description>System sends welcome email after registration</description>
+</feature>
+<feature index="20" shape="core"
+         touches_files="src/core/middleware/auth.py">
+  <description>All endpoints validate JWT on incoming requests</description>
+</feature>
+```
 
 #### Failure modes
 
@@ -483,4 +591,10 @@ Next steps:
 
 💡 Tip: Each feature bullet = one agent task. More specific bullets = better agent output.
    Aim for 100-300 bullets for a full application.
+
+💡 Tip: Features with `shape="plugin"` in your spec can be dispatched
+   in parallel without merge conflicts (their `touches_files` are
+   disjoint by construction).  Features with `shape="core"` serialize
+   single-flight via the scheduler's cross-cutting rule.  See
+   docs/commands.md → "claw-forge run" for parallelism settings.
 ```
