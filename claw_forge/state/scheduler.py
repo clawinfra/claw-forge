@@ -86,6 +86,17 @@ class Scheduler:
             if not unsatisfied:
                 ready.append(task)
 
+        # Cross-cutting (shape="core") tasks single-flight: drop any
+        # candidate ``core`` task from the ready set if another core task
+        # is already running (regardless of priority — cross-cutting
+        # changes serialize to avoid races on shared infrastructure).
+        any_core_running = any(
+            t.status == "running" and t.shape == "core"
+            for t in self._tasks.values()
+        )
+        if any_core_running:
+            ready = [t for t in ready if t.shape != "core"]
+
         # Sort: priority desc dominates; among same priority, prefer resumable
         # (a task with committed work on a feature branch wins the tie so the
         # agent resumes rather than starts from scratch).

@@ -170,3 +170,63 @@ class TestTaskNodeShape:
         )
         assert node.shape is None
         assert node.plugin is None
+
+
+class TestSchedulerCoreSingleFlight:
+    def test_core_task_excludes_other_core_tasks_from_ready_set(self) -> None:
+        """When a ``shape="core"`` task is in flight (status='running'),
+        no other ``shape="core"`` task is ready, even if its dependencies
+        are satisfied.  Cross-cutting changes serialize.
+        """
+        from claw_forge.state.scheduler import Scheduler, TaskNode
+
+        sched = Scheduler()
+        sched.add_task(TaskNode(
+            id="c1", plugin_name="coding", priority=0, depends_on=[],
+            shape="core", status="running",
+        ))
+        sched.add_task(TaskNode(
+            id="c2", plugin_name="coding", priority=0, depends_on=[],
+            shape="core", status="pending",
+        ))
+        ready = sched.get_ready_tasks()
+        assert "c2" not in {t.id for t in ready}, (
+            "second core task must not be ready while another core task runs"
+        )
+
+    def test_core_task_does_not_block_plugin_tasks(self) -> None:
+        """A running ``shape="core"`` task only excludes other core tasks —
+        plugin tasks are unaffected and still dispatch in parallel.
+        """
+        from claw_forge.state.scheduler import Scheduler, TaskNode
+
+        sched = Scheduler()
+        sched.add_task(TaskNode(
+            id="c1", plugin_name="coding", priority=0, depends_on=[],
+            shape="core", status="running",
+        ))
+        sched.add_task(TaskNode(
+            id="p1", plugin_name="coding", priority=0, depends_on=[],
+            shape="plugin", plugin="auth", status="pending",
+        ))
+        ready_ids = {t.id for t in sched.get_ready_tasks()}
+        assert "p1" in ready_ids
+
+    def test_no_core_in_flight_lets_one_core_through(self) -> None:
+        """When no core task is running, queued core tasks should appear
+        in the ready set (the dispatcher caps to max_concurrency separately).
+        """
+        from claw_forge.state.scheduler import Scheduler, TaskNode
+
+        sched = Scheduler()
+        sched.add_task(TaskNode(
+            id="c1", plugin_name="coding", priority=10, depends_on=[],
+            shape="core",
+        ))
+        sched.add_task(TaskNode(
+            id="c2", plugin_name="coding", priority=5, depends_on=[],
+            shape="core",
+        ))
+        ready_ids = [t.id for t in sched.get_ready_tasks()]
+        # No core in flight — both can be in the candidate set.
+        assert "c1" in ready_ids
