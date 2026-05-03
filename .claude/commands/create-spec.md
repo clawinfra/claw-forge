@@ -26,14 +26,40 @@ test -f brownfield_manifest.json && echo "BROWNFIELD" || echo "GREENFIELD"
 
 > Use when adding features to an existing codebase.
 
-### Step 1: Load manifest
+### Step 1: Load manifest + check for hotspot report
 
 Read `brownfield_manifest.json` and extract:
 - `stack` (language, framework, database)
 - `test_baseline` (N tests, X% coverage)
 - `conventions` (naming style, patterns, etc.)
 
-These will be auto-populated into `<existing_context>`.
+Then check whether `boundaries_report.md` is present in the project root
+(emitted by a prior `claw-forge boundaries audit`).  If it exists and
+contains entries with score >= 5.0, surface them to the user before
+proceeding:
+
+```
+Found a boundaries audit at boundaries_report.md.  These files are
+extension hotspots — adding new features as <feature shape="plugin">
+will collide with them unless they're refactored first:
+
+  cli/main.py        score=8.4  pattern=registry
+  core/router.py     score=6.7  pattern=route_table
+
+Recommended:
+  claw-forge boundaries apply --auto
+
+Refactoring these into plugin-extensible patterns first will let your
+new features land cleanly as plugins.
+
+Proceed anyway?  [y / yes]   Refactor first?  [b / boundaries]
+```
+
+If the user picks `b`, stop the slash command — they'll come back
+after the refactor.  If they pick `y`, record the hotspot list as a
+warning in `<existing_context>` and continue to Step 2.
+
+If `boundaries_report.md` doesn't exist, continue to Step 2 silently.
 
 ### Step 2: Gather addition details
 
@@ -42,9 +68,17 @@ Ask the user (one at a time):
 1. **What are you adding?** Give it a name and one-sentence summary.
    - Example: "Stripe payments — let users subscribe to Pro plan via Stripe Checkout"
 
-2. **Which parts of the existing code does it touch?**
-   - Models, routers, services, background jobs, tests, etc.
-   - Example: "Extends User model, adds /payments router, new StripeService class"
+2. **Where does it live in the codebase?**
+   - **Plugin** (lives in its own directory): "I'll add `plugins/payments/`
+     for the Stripe code."  Used when the addition is vertical and isolated.
+   - **Core** (cross-cutting): "I'll edit `core/middleware/auth.py` and
+     `core/db/models/user.py`."  Used when the addition modifies shared
+     infrastructure.
+
+   For each feature, record either `plugin="<name>"` (plugin shape) or
+   `touches_files="..."` (core shape).  This populates the new
+   `<feature shape>` attributes in Phase 3 of the parser, which lets
+   the dispatcher schedule for parallel safety.
 
 3. **What must NOT change?** List any constraints.
    - Example: "Must not modify auth flow. All 47 existing tests must stay green."
@@ -103,11 +137,18 @@ Next steps:
     <conventions>snake_case, async handlers, pydantic v2 models</conventions>
   </existing_context>
   <features_to_add>
-    - User can add a payment method via Stripe Elements
-    - User can subscribe to Pro plan via Stripe Checkout
-    - System creates Stripe customer on first payment attempt
-    - Webhook handler processes subscription.created events
-    - User can access billing portal to manage subscription
+    <category name="Payments">
+      <feature index="1" shape="plugin" plugin="payments">
+        <description>User can add a payment method via Stripe Elements</description>
+      </feature>
+      <feature index="2" shape="plugin" plugin="payments" depends_on="1">
+        <description>User can subscribe to Pro plan via Stripe Checkout</description>
+      </feature>
+      <feature index="3" shape="core"
+               touches_files="src/core/db/models/user.py">
+        <description>Extends User model with stripe_customer_id field</description>
+      </feature>
+    </category>
   </features_to_add>
   <integration_points>
     Extends User model with stripe_customer_id field
