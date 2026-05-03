@@ -547,6 +547,23 @@ Three REST endpoints expose the claim state for callers driving the state servic
 
 If a task is repeatedly deferred for many cycles, inspect `GET /file-claims` to see which path is contended; usually it indicates two features were planned to touch the same module and one of them is the obvious owner.
 
+#### Parallelism + architectural shape
+
+The dispatcher consults each task's `shape` attribute when selecting the
+next ready task:
+
+| Shape | Dispatch policy |
+|---|---|
+| `plugin` | Up to `--concurrency N` in parallel; `touches_files` auto-derived from plugin directory |
+| `core` | Single-flight (only one core task at a time, regardless of `--concurrency`) |
+| _unset_ | Legacy: concurrency cap + file-claim locks only |
+
+This makes high-concurrency runs structurally safe: plugin-shape tasks
+operate on disjoint files, so the file-claim locks rarely contend; core
+tasks queue serially so cross-cutting middleware/error/DB changes don't
+race.  Spec-time classification is the input — see [`/create-spec` Phase
+3.25](#create-spec) for how to populate it.
+
 #### Failure modes — `resume_conflict`
 
 When a previously-interrupted task is resumed, the dispatcher attempts a catch-up merge of the target branch into the feature branch *before* the agent runs (via `sync_worktree_with_target` in `claw_forge/git/merge.py`). This eliminates the prior failure pattern where the catch-up only happened at squash time, after the agent had already wasted a turn on stale state.
