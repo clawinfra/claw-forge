@@ -22,6 +22,13 @@ class TaskNode:
     # True when a feature branch with committed work already exists for this task,
     # so picking it lets the agent resume rather than start from scratch.
     resumable: bool = False
+    # Architectural shape from the spec — drives parallel-vs-serial dispatch.
+    # ``"plugin"`` features have disjoint ``touches_files`` and dispatch
+    # freely up to ``max_concurrency``.  ``"core"`` features single-flight
+    # (cross-cutting; only one runs at a time).  ``None`` falls back to
+    # legacy behaviour (concurrency-cap + file-claim locks only).
+    shape: str | None = None
+    plugin: str | None = None
 
 
 class CycleDetectedError(Exception):
@@ -78,6 +85,17 @@ class Scheduler:
             }
             if not unsatisfied:
                 ready.append(task)
+
+        # Cross-cutting (shape="core") tasks single-flight: drop any
+        # candidate ``core`` task from the ready set if another core task
+        # is already running (regardless of priority — cross-cutting
+        # changes serialize to avoid races on shared infrastructure).
+        any_core_running = any(
+            t.status == "running" and t.shape == "core"
+            for t in self._tasks.values()
+        )
+        if any_core_running:
+            ready = [t for t in ready if t.shape != "core"]
 
         # Sort: priority desc dominates; among same priority, prefer resumable
         # (a task with committed work on a feature branch wins the tie so the

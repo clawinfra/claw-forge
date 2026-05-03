@@ -160,6 +160,26 @@ claw-forge plan app_spec.txt --fresh
 - **Plan reconciliation** is the default behavior when re-running `plan` on an existing project. Completed tasks stay as-is, failed/pending tasks are retained, and only features missing from the DB are added as new pending tasks. Use `--fresh` to wipe and recreate all tasks from scratch.
 - `app_spec.example.xml` (created by `claw-forge init`) shows the full XML schema.
 
+#### Architectural shape attributes
+
+The parser accepts three attributes on `<feature>` that affect dispatcher
+behaviour:
+
+| Attribute | Values | Effect |
+|---|---|---|
+| `shape` | `plugin` / `core` | Plugin = lives in its own directory; core = cross-cutting |
+| `plugin` | string | Directory name (under `src/plugins/<name>/`) when `shape="plugin"` |
+| `touches_files` | comma-separated paths | Explicit file globs (overrides plugin auto-derivation; required for `shape="core"`) |
+
+When `shape="plugin"` and a `plugin=` attribute is set, `touches_files`
+defaults to `["src/plugins/<plugin>/**"]`, giving the dispatcher's
+file-claim locks an unambiguous file set per feature.  See
+[CLAUDE.md → spec/parser.py](../CLAUDE.md) for detailed semantics.
+
+`shape="core"` without an explicit `touches_files` attribute fails the
+parse with a clear error — cross-cutting features can't be auto-derived
+from a directory.
+
 #### Related commands
 - **Before:** `claw-forge init` → `/create-spec`
 - **After:** `claw-forge run`
@@ -526,6 +546,23 @@ Three REST endpoints expose the claim state for callers driving the state servic
 | `GET /sessions/{session_id}/file-claims` | List current claims (path, holder task ID, acquired-at timestamp). Useful when investigating why a `pending` task is being deferred — the dispatcher logs `deferred: file_claim_conflict`, and this endpoint shows you the holder. |
 
 If a task is repeatedly deferred for many cycles, inspect `GET /file-claims` to see which path is contended; usually it indicates two features were planned to touch the same module and one of them is the obvious owner.
+
+#### Parallelism + architectural shape
+
+The dispatcher consults each task's `shape` attribute when selecting the
+next ready task:
+
+| Shape | Dispatch policy |
+|---|---|
+| `plugin` | Up to `--concurrency N` in parallel; `touches_files` auto-derived from plugin directory |
+| `core` | Single-flight (only one core task at a time, regardless of `--concurrency`) |
+| _unset_ | Legacy: concurrency cap + file-claim locks only |
+
+This makes high-concurrency runs structurally safe: plugin-shape tasks
+operate on disjoint files, so the file-claim locks rarely contend; core
+tasks queue serially so cross-cutting middleware/error/DB changes don't
+race.  Spec-time classification is the input — see [`/create-spec` Phase
+3.25](#create-spec) for how to populate it.
 
 #### Failure modes — `resume_conflict`
 
@@ -1526,6 +1563,35 @@ claw-forge boundaries status --project /path/to/repo
 ```
 
 Reads `boundaries_report.md` and prints the hotspot list with paths, scores, and proposed patterns. Exits 1 if no report is present (with instructions to run `audit`).
+
+---
+
+#### Brownfield workflow
+
+When adding features to an existing codebase, the recommended sequence
+is:
+
+1. **`claw-forge analyze`** — generate `brownfield_manifest.json` with
+   stack/conventions/test-baseline.
+2. **`claw-forge boundaries audit`** — emit `boundaries_report.md`
+   with extension hotspots (files where adding a feature would collide
+   with existing dispatch logic).
+3. **`claw-forge boundaries apply --auto`** — refactor each hotspot
+   into a plugin-extensible pattern (registry / split / route-table /
+   extract-collaborators).  Squash-merges to main on green tests,
+   reverts on red.
+4. **`/create-spec`** in Claude Code — generates `additions_spec.xml`.
+   The slash command reads `boundaries_report.md` and warns about any
+   un-refactored hotspots before proceeding.  Each feature is asked
+   about its `shape` (plugin vs core) so the spec carries the right
+   attributes for parallel-safe scheduling.
+5. **`claw-forge add --spec additions_spec.xml`** — runs the
+   plan-to-DB writer and starts the dispatcher.
+
+Skipping step 3 means new features may collide with the un-refactored
+hotspots; the dispatcher's pre-dispatch sync will surface those as
+`resume_conflict` failures, but the agent will have already wasted time
+on stale state by then.  Refactoring up front is cheaper.
 
 ---
 

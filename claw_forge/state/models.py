@@ -136,6 +136,8 @@ class Task(Base):
     active_subagents: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     bugfix_retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    shape: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    plugin: Mapped[str | None] = mapped_column(String(64), nullable=True)
     touches_files: Mapped[list[str]] = mapped_column(
         SafeJSON(fallback=[]), default=list, server_default="[]", nullable=False,
     )

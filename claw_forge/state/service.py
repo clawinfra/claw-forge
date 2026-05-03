@@ -44,6 +44,8 @@ def _task_summary(task: Task) -> dict[str, Any]:
         "active_subagents": task.active_subagents,
         "merged_to_target_branch": task.merged_to_target_branch,
         "touches_files": task.touches_files or [],
+        "shape": task.shape,
+        "plugin": task.plugin,
     }
 
 logger = logging.getLogger(__name__)
@@ -195,6 +197,8 @@ class CreateTaskRequest(BaseModel):
     parent_task_id: str | None = None
     bugfix_retry_count: int = 0
     touches_files: list[str] = []
+    shape: str | None = None
+    plugin: str | None = None
 
 
 class SessionInitRequest(BaseModel):
@@ -326,6 +330,14 @@ async def _ensure_task_columns(database_url: str) -> None:
                         "ALTER TABLE tasks ADD COLUMN touches_files "
                         "JSON NOT NULL DEFAULT '[]'"
                     )
+                )
+            if "shape" not in existing:
+                await conn.execute(
+                    text("ALTER TABLE tasks ADD COLUMN shape VARCHAR(16)")
+                )
+            if "plugin" not in existing:
+                await conn.execute(
+                    text("ALTER TABLE tasks ADD COLUMN plugin VARCHAR(64)")
                 )
     finally:
         await engine.dispose()
@@ -853,6 +865,8 @@ class AgentStateService:
                     parent_task_id=req.parent_task_id,
                     bugfix_retry_count=req.bugfix_retry_count,
                     touches_files=req.touches_files,
+                    shape=req.shape,
+                    plugin=req.plugin,
                 )
                 db.add(task)
                 await db.commit()

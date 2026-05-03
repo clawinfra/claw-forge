@@ -5,6 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from claw_forge.spec.parser import (
     FeatureItem,
     ProjectSpec,
@@ -942,3 +944,224 @@ def test_explicit_depends_on_preserved_over_phase_inference() -> None:
     assert spec.features[1].depends_on_indices == [0]
     # A is the first feature; no inferred deps (no earlier phase).
     assert spec.features[0].depends_on_indices == []
+
+
+# ── <feature shape> and <feature plugin> attributes ───────────────────────────
+
+
+class TestFeatureShapeAndPluginAttrs:
+    def test_feature_shape_plugin_is_parsed(self) -> None:
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Auth">
+                  <feature index="1" shape="plugin" plugin="auth">
+                    <description>User can register with email and password</description>
+                  </feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert len(spec.features) == 1
+        feat = spec.features[0]
+        assert feat.shape == "plugin"
+        assert feat.plugin == "auth"
+
+    def test_feature_shape_core_is_parsed(self) -> None:
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Middleware">
+                  <feature index="1" shape="core"
+                           touches_files="src/core/middleware/auth.py">
+                    <description>All endpoints validate JWT on incoming requests</description>
+                  </feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].shape == "core"
+        assert spec.features[0].plugin is None
+
+    def test_feature_without_shape_defaults_none(self) -> None:
+        """Backward-compat: features without shape attr have shape=None."""
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Misc">
+                  <feature index="1"><description>Legacy feature</description></feature>
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].shape is None
+        assert spec.features[0].plugin is None
+
+    def test_legacy_bullet_features_have_shape_none(self) -> None:
+        """Bullet-form features pre-date shape; they parse to shape=None."""
+        xml = textwrap.dedent("""
+            <project_specification>
+              <project_name>x</project_name>
+              <core_features>
+                <category name="Bullets">
+                  - User can do something
+                  - System returns response
+                </category>
+              </core_features>
+            </project_specification>
+        """).strip()
+        spec = ProjectSpec._parse_xml(xml)
+        for feat in spec.features:
+            assert feat.shape is None
+            assert feat.plugin is None
+
+    def test_plugin_shape_auto_derives_touches_files(self) -> None:
+        """``shape="plugin"`` + ``plugin="auth"`` auto-fills touches_files
+        with the canonical plugin directory glob.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="1" shape="plugin" plugin="auth">
+                <description>User can register</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        feat = spec.features[0]
+        assert feat.touches_files == ["src/plugins/auth/**"]
+
+    def test_core_shape_uses_explicit_touches_files(self) -> None:
+        """``shape="core"`` requires an explicit touches_files attribute —
+        cross-cutting features can't be auto-derived from a directory.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Middleware">
+              <feature index="1" shape="core"
+                       touches_files="src/core/middleware/auth.py">
+                <description>JWT middleware</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == ["src/core/middleware/auth.py"]
+
+    def test_explicit_touches_files_overrides_plugin_default(self) -> None:
+        """When both ``plugin=`` and an explicit ``touches_files=`` are set,
+        the explicit value wins — escape hatch for plugins that legitimately
+        edit shared infrastructure.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="1" shape="plugin" plugin="auth"
+                       touches_files="src/plugins/auth/,src/core/db/migrations/0042_users.sql">
+                <description>User can register (extends DB schema)</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == [
+            "src/plugins/auth/",
+            "src/core/db/migrations/0042_users.sql",
+        ]
+
+    def test_legacy_feature_has_empty_touches_files(self) -> None:
+        """No shape, no plugin → no auto-derivation.  Existing specs are
+        unaffected; the dispatcher's file-claim layer treats this as
+        opt-out (no claims attempted).
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Misc">
+              <feature index="1"><description>Legacy</description></feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        assert spec.features[0].touches_files == []
+
+    def test_core_shape_without_touches_files_raises(self) -> None:
+        """``shape="core"`` features can't be auto-derived; missing
+        ``touches_files`` is a spec error rather than a silent opt-out.
+        """
+        xml = """
+        <project_specification>
+          <project_name>x</project_name>
+          <core_features>
+            <category name="Middleware">
+              <feature index="1" shape="core">
+                <description>JWT middleware</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        with pytest.raises(ValueError, match="touches_files"):
+            ProjectSpec._parse_xml(xml)
+
+    def test_phase_325_example_round_trip(self) -> None:
+        """The XML example written into create-spec.md Phase 5 must round-
+        trip cleanly through the parser — guards against doc/code drift.
+        """
+        from claw_forge.spec.parser import ProjectSpec
+
+        xml = """
+        <project_specification>
+          <project_name>round-trip</project_name>
+          <core_features>
+            <category name="Auth">
+              <feature index="14" shape="plugin" plugin="auth">
+                <description>User can register with email and password</description>
+              </feature>
+              <feature index="18" shape="plugin" plugin="auth" depends_on="14">
+                <description>System sends welcome email after registration</description>
+              </feature>
+            </category>
+            <category name="Middleware">
+              <feature index="20" shape="core"
+                       touches_files="src/core/middleware/auth.py">
+                <description>All endpoints validate JWT on incoming requests</description>
+              </feature>
+            </category>
+          </core_features>
+        </project_specification>
+        """
+        spec = ProjectSpec._parse_xml(xml)
+        plugin_feats = [f for f in spec.features if f.shape == "plugin"]
+        core_feats = [f for f in spec.features if f.shape == "core"]
+        assert len(plugin_feats) == 2
+        assert all(f.plugin == "auth" for f in plugin_feats)
+        assert all(f.touches_files == ["src/plugins/auth/**"] for f in plugin_feats)
+        assert len(core_feats) == 1
+        assert core_feats[0].touches_files == ["src/core/middleware/auth.py"]
