@@ -212,6 +212,14 @@ them at runtime.
 
 Refactors run **serially** (not parallel): refactor B may depend on refactor A's output, and they share files. Use `apply --hotspot <path>` for one-at-a-time runs and `apply --auto` for fully-autonomous batch refactoring.
 
+The boundaries harness composes with shape-aware specs: refactoring a
+hotspot file into a registry / split / route-table pattern (the four
+canonical patterns the harness emits) means future feature additions
+can land as `<feature shape="plugin">` cleanly — the file ownership is
+unambiguous so the dispatcher's parallel-safety guarantees apply.  See
+`docs/commands.md` → `claw-forge boundaries` → "Brownfield workflow"
+for the recommended sequence.
+
 ### Git Branch Naming (`claw_forge/git/slug.py`)
 
 Feature branches use semantic names derived from the task's category and description:

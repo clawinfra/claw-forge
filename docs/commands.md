@@ -1566,6 +1566,35 @@ Reads `boundaries_report.md` and prints the hotspot list with paths, scores, and
 
 ---
 
+#### Brownfield workflow
+
+When adding features to an existing codebase, the recommended sequence
+is:
+
+1. **`claw-forge analyze`** — generate `brownfield_manifest.json` with
+   stack/conventions/test-baseline.
+2. **`claw-forge boundaries audit`** — emit `boundaries_report.md`
+   with extension hotspots (files where adding a feature would collide
+   with existing dispatch logic).
+3. **`claw-forge boundaries apply --auto`** — refactor each hotspot
+   into a plugin-extensible pattern (registry / split / route-table /
+   extract-collaborators).  Squash-merges to main on green tests,
+   reverts on red.
+4. **`/create-spec`** in Claude Code — generates `additions_spec.xml`.
+   The slash command reads `boundaries_report.md` and warns about any
+   un-refactored hotspots before proceeding.  Each feature is asked
+   about its `shape` (plugin vs core) so the spec carries the right
+   attributes for parallel-safe scheduling.
+5. **`claw-forge add --spec additions_spec.xml`** — runs the
+   plan-to-DB writer and starts the dispatcher.
+
+Skipping step 3 means new features may collide with the un-refactored
+hotspots; the dispatcher's pre-dispatch sync will surface those as
+`resume_conflict` failures, but the agent will have already wasted time
+on stale state by then.  Refactoring up front is cheaper.
+
+---
+
 ### Related commands
 - **Diagnose merge conflicts:** if features keep conflicting, run `claw-forge boundaries audit` to see whether they're all editing the same hotspot file.
 - **Spec-time prevention:** `/create-spec` Phase 3.5 lets you serialize known-overlapping features at spec creation, complementing the structural fix that `boundaries apply` provides.
