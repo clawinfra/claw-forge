@@ -288,6 +288,8 @@ def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
             )
         ),
         touches_files=list(payload.get("touches_files", []) or []),
+        shape=payload.get("shape"),
+        plugin=payload.get("plugin"),
     )
 
 

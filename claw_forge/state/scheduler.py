@@ -22,6 +22,13 @@ class TaskNode:
     # True when a feature branch with committed work already exists for this task,
     # so picking it lets the agent resume rather than start from scratch.
     resumable: bool = False
+    # Architectural shape from the spec — drives parallel-vs-serial dispatch.
+    # ``"plugin"`` features have disjoint ``touches_files`` and dispatch
+    # freely up to ``max_concurrency``.  ``"core"`` features single-flight
+    # (cross-cutting; only one runs at a time).  ``None`` falls back to
+    # legacy behaviour (concurrency-cap + file-claim locks only).
+    shape: str | None = None
+    plugin: str | None = None
 
 
 class CycleDetectedError(Exception):

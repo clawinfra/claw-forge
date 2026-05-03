@@ -149,3 +149,24 @@ class TestScheduler:
         s.add_task(parent)
         s.add_task(child)
         assert [t.id for t in s.get_ready_tasks()] == ["child"]
+
+
+class TestTaskNodeShape:
+    def test_task_node_carries_shape_and_plugin(self) -> None:
+        from claw_forge.state.scheduler import TaskNode
+
+        node = TaskNode(
+            id="t1", plugin_name="coding", priority=0, depends_on=[],
+            shape="plugin", plugin="auth",
+        )
+        assert node.shape == "plugin"
+        assert node.plugin == "auth"
+
+    def test_task_node_shape_defaults_none(self) -> None:
+        from claw_forge.state.scheduler import TaskNode
+
+        node = TaskNode(
+            id="t1", plugin_name="coding", priority=0, depends_on=[],
+        )
+        assert node.shape is None
+        assert node.plugin is None
