@@ -288,6 +288,8 @@ def _task_dict_to_node(payload: dict[str, Any]) -> TaskNode:
             )
         ),
         touches_files=list(payload.get("touches_files", []) or []),
+        shape=payload.get("shape"),
+        plugin=payload.get("plugin"),
     )
 
 
@@ -2361,6 +2363,9 @@ async def _write_plan_to_db(
                 status="pending",
                 priority=feat.get("index", 0),
                 depends_on=cross_deps,
+                shape=feat.get("shape"),
+                plugin=feat.get("plugin"),
+                touches_files=feat.get("touches_files", []) or [],
             ))
 
         await db.commit()

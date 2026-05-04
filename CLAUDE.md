@@ -161,6 +161,43 @@ The XML schema accepts two forms within a `<category>`:
   ```
   Both forms coexist within the same `<category>`. The parser resolves `depends_on` (1-based feature numbers) into 0-based positional indices that match the convention used by `_assign_dependencies` and `_write_plan_to_db`. `/create-spec` Phase 3.5 (overlap analysis) emits the `<feature>` form when the user serializes a flagged pair.
 
+The XML schema also accepts three architectural-shape attributes on `<feature>`:
+
+- **`shape="plugin" | "core"`** — declares whether the feature is vertical
+  (lives in its own directory under the project's plugin root) or
+  cross-cutting.  Plugin-shape features auto-derive `touches_files`;
+  core-shape features must declare `touches_files` explicitly or the
+  parser raises `ValueError` at parse time.
+- **`plugin="<name>"`** — directory ownership for plugin-shape features.
+  When `shape="plugin"` and `plugin="auth"`, `touches_files` defaults to
+  `["src/plugins/auth/**"]` (override via the explicit `touches_files`
+  attribute).  Used by the dispatcher's file-claim locks for parallel
+  conflict prevention.
+- **`touches_files="path1,path2,..."`** — explicit comma-separated list
+  of file globs.  Required when `shape="core"`; optional override when
+  `shape="plugin"` (e.g. for plugins that legitimately edit shared
+  infrastructure like a DB migration).
+
+```xml
+<feature index="14" shape="plugin" plugin="auth">
+  <description>User can register with email and password</description>
+</feature>
+<feature index="20" shape="core"
+         touches_files="src/core/middleware/auth.py">
+  <description>All endpoints validate JWT</description>
+</feature>
+```
+
+`shape="core"` without an explicit `touches_files` attribute raises a
+parse error (cross-cutting features can't be auto-derived from a
+directory).  Specs without `shape` attributes parse identically to
+before — pure backward compatibility.
+
+Both `shape` and `plugin` are persisted as columns on the `Task` ORM
+and are exposed via the state-service API (`POST /sessions/{id}/tasks`,
+`GET /sessions/{id}/tasks`) so the dispatcher and scheduler can read
+them at runtime.
+
 ### Export (`claw_forge/exporter.py`)
 
 `claw-forge export` reads `.claw-forge/state.db` directly via `sqlite3` (no state-service dependency, safe to run while a session is active) and emits CSV (flat or per-table), SQL dump (sqlite-importable), or JSON. Supports `--scope session|all`, `--csv-mode flat|split`, and explicit `--session UUID`. Used for stakeholder reports, spreadsheet analysis, and DB migration round-trips.
@@ -174,6 +211,14 @@ The XML schema accepts two forms within a `<category>`:
 **Apply (modifies repo):** for each confirmed hotspot, spawns a coding subagent on its own feature branch under `.claw-forge/worktrees/`, runs the project's test command inside the worktree, and squash-merges to main on green or reverts on red. Reuses the existing `git/branching.py` + `git/merge.py` plumbing, so it inherits the merge-conflict handling, no-op detection, and worktree cleanup that `claw-forge run` ships.
 
 Refactors run **serially** (not parallel): refactor B may depend on refactor A's output, and they share files. Use `apply --hotspot <path>` for one-at-a-time runs and `apply --auto` for fully-autonomous batch refactoring.
+
+The boundaries harness composes with shape-aware specs: refactoring a
+hotspot file into a registry / split / route-table pattern (the four
+canonical patterns the harness emits) means future feature additions
+can land as `<feature shape="plugin">` cleanly — the file ownership is
+unambiguous so the dispatcher's parallel-safety guarantees apply.  See
+`docs/commands.md` → `claw-forge boundaries` → "Brownfield workflow"
+for the recommended sequence.
 
 ### Git Branch Naming (`claw_forge/git/slug.py`)
 
@@ -254,3 +299,14 @@ The state service uses SQLite WAL mode with multi-layer corruption defense:
 - **Merge-gating** (`merged_to_target_branch` flag on tasks): a dependent task is unblocked only when its parent is `status=completed AND merged_to_target_branch=True`. The dispatcher PATCHes `merged_to_target_branch=False` when starting a task on a feature branch with `merge_strategy: auto`, and back to `True` after a successful squash. If the squash fails, the task stays "completed but not merged" and its descendants stay blocked until a manual merge or retry resolves the conflict — preventing dependents from running against a stale target branch (defaults to `main`, configurable via `git.target_branch`).
 - **File-claim locks** (`touches_files` on tasks): a task may declare a list of files it intends to edit. Before starting an agent, the dispatcher POSTs a claim to `/file-claims`; if any file is held by another running task, the dispatcher defers this task to the next dispatch cycle. Claims auto-release on task transition to `completed`/`failed`/`paused`. Tasks that don't declare `touches_files` participate in no locking — full backward compatibility.
 - **Resume preference** (`git.prefer_resumable: true`, default on): the scheduler prefers pending tasks whose feature branch already has committed work over fresh pending tasks within the same priority tier. Priority still dominates — a higher-priority task always wins — but a tied-priority resumable task is dispatched first so the agent picks up where the previous run left off rather than starting from scratch. A staleness gate (`git.resume_stale_threshold: 50`) skips the preference when `target_branch` has moved more than N commits ahead of the feature branch, on the assumption that catching up that much will likely conflict. Independent of the staleness gate, every dispatched worktree (fresh or resumed) is run through `sync_worktree_with_target` before the agent starts; conflicts there fail the task immediately with a structured `resume_conflict:` error rather than letting the agent run on stale state.
+- **Shape-aware scheduling** (`<feature shape>` from spec → `TaskNode.shape`):
+  the scheduler honours two architectural shapes from the spec.
+  `shape="plugin"` tasks dispatch freely up to `max_concurrency` (their
+  `touches_files` are disjoint by construction since each plugin owns
+  its own directory).  `shape="core"` tasks **single-flight** — at most
+  one cross-cutting task runs at a time, regardless of `max_concurrency`,
+  so middleware/error/database changes don't race each other.  Tasks
+  without `shape` (legacy specs) fall through to the existing
+  concurrency-cap + file-claim-locks behaviour.  Implementation: the
+  filter lives in `Scheduler.get_ready_tasks` and is gated on
+  `any_core_running` so it's a no-op on the common path.
